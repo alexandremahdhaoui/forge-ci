@@ -24,6 +24,7 @@ The question an engine answers. The list is closed.
 | `in` | Repo names the target runs in. Empty means the pipeline root. |
 | `manager` | Alias of an entry in managers. |
 | `managers` | Named manager instances. A manager makes declared resources exist. It knows nothing about CI. |
+| `mint` | Write the revision to state when this stage advances. A revision is a claim that this tuple of commits was proven, so minting it before anything runs hands a broken build a revision that can propagate. Set it on the stage that builds and tests. Left unset on every stage, nothing is ever minted. |
 | `name` | Pipeline identifier. |
 | `params` | User defined keys, templated into the targets as {{.Params.x}}. forge-ci never interprets these names. |
 | `port` | The question an engine answers. |

@@ -6,6 +6,14 @@ What was decided, why, and what it costs. A ↩ marks one that reversed an earli
 
 ## Reversals
 
+### A revision is minted on green, not up front ↩
+
+**Decided.** A stage declares mint true. The revision reaches state when that stage advances, and never before.
+
+**Why.** apply resolved the revision and wrote it to state before the first stage ran, so a build that then failed still handed a revision to whatever reads state next. A revision is a claim that this tuple of commits was proven, and nothing had proven anything yet. The id is still resolved up front because a run record is keyed by it.
+
+**Costs.** A pipeline that declares mint on no stage never records a revision, which reads as nothing happening until you look at the flag.
+
 ### Webhooks, not polling ↩
 
 **Decided.** A push webhook hits an endpoint you own, which dispatches only when there is work.

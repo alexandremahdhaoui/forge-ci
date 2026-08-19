@@ -251,7 +251,13 @@ func pipeline(stages ...config.Stage) config.Pipeline {
 	}
 }
 
+// stage mints, because most tests here assert on the recorded revision. A
+// stage that must not mint is built with mintlessStage.
 func stage(name string, subs ...config.Substage) config.Stage {
+	return config.Stage{Name: name, Mint: true, Promotion: "all-pass", Substages: subs}
+}
+
+func mintlessStage(name string, subs ...config.Substage) config.Stage {
 	return config.Stage{Name: name, Promotion: "all-pass", Substages: subs}
 }
 

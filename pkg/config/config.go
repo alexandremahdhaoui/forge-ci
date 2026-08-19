@@ -74,6 +74,7 @@ type Target struct {
 
 type Stage struct {
 	Name      string     `json:"name"`
+	Mint      bool       `json:"mint,omitempty"`
 	Promotion string     `json:"promotion,omitempty"`
 	Substages []Substage `json:"substages"`
 }

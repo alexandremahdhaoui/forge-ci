@@ -50,6 +50,10 @@ type Report struct {
 	Revision citypes.Revision `json:"revision"`
 	Actions  []string         `json:"actions"`
 	Stages   []StageReport    `json:"stages"`
+
+	// Minted says the revision reached state. A revision nobody minted was
+	// never proven, so nothing downstream may act on it.
+	Minted bool `json:"minted"`
 }
 
 func (r Report) Advanced() bool {
@@ -86,12 +90,12 @@ func (c *Controller) Apply(ctx context.Context, p config.Pipeline, root string) 
 		return Report{}, err
 	}
 
+	// The revision is resolved here because a run record is keyed by it. It is
+	// not written yet. A revision in state is a claim that this tuple of
+	// commits was proven, and minting it before anything runs hands a broken
+	// build a revision that can propagate.
 	revision, err := c.resolveRevision(ctx, p, root)
 	if err != nil {
-		return Report{}, err
-	}
-
-	if err := c.putJSON(ctx, index, KindRevision, revision.ID, toWire(revision)); err != nil {
 		return Report{}, err
 	}
 
@@ -108,9 +112,23 @@ func (c *Controller) Apply(ctx context.Context, p config.Pipeline, root string) 
 		if !stageReport.Advance {
 			break
 		}
+
+		if stage.Mint {
+			if err := c.mint(ctx, index, revision); err != nil {
+				return Report{}, err
+			}
+
+			report.Minted = true
+		}
 	}
 
 	return report, nil
+}
+
+// mint records the revision as proven. Writing it twice is harmless, because
+// the id is derived from the tuple and the record is the same.
+func (c *Controller) mint(ctx context.Context, index engineIndex, revision citypes.Revision) error {
+	return c.putJSON(ctx, index, KindRevision, revision.ID, toWire(revision))
 }
 
 func (c *Controller) applyStage(

@@ -577,3 +577,57 @@ func TestOneFailingSubstageStillReportsTheOthers(t *testing.T) {
 	require.Equal(t, citypes.StatusPassed, report.Stages[0].Runs[0].Status)
 	require.Equal(t, citypes.StatusFailed, report.Stages[0].Runs[1].Status)
 }
+
+// A revision in state is a claim that this tuple of commits was proven. It used
+// to be written before anything ran, so a build that then failed still handed a
+// revision to whatever reads state next.
+func TestAFailedBuildMintsNothing(t *testing.T) {
+	f := newFakeEngines(t)
+	f.runOutputs["build/default"] = citypes.RunOutput{Status: citypes.StatusFailed}
+
+	c := reconcilecontroller.New(f.caller(), gitAt(t, "abc123"), clock())
+
+	report, err := c.Apply(
+		context.Background(),
+		pipeline(stage("build", substage("default", []string{"build"}))),
+		"/work",
+	)
+	require.NoError(t, err)
+
+	require.NotEmpty(t, report.Revision.ID, "the id is still resolved, a run record is keyed by it")
+	require.False(t, report.Minted)
+	require.NotContains(t, f.store, "revision/"+report.Revision.ID,
+		"a broken build must not hand a revision to whatever reads state next")
+}
+
+func TestAStageThatDoesNotDeclareMintWritesNoRevision(t *testing.T) {
+	f := newFakeEngines(t)
+	c := reconcilecontroller.New(f.caller(), gitAt(t, "abc123"), clock())
+
+	report, err := c.Apply(
+		context.Background(),
+		pipeline(mintlessStage("build", substage("default", []string{"build"}))),
+		"/work",
+	)
+	require.NoError(t, err)
+	require.True(t, report.Advanced())
+	require.False(t, report.Minted)
+	require.NotContains(t, f.store, "revision/"+report.Revision.ID)
+}
+
+func TestAStageAfterTheMintingOneStillSeesTheRevision(t *testing.T) {
+	f := newFakeEngines(t)
+	c := reconcilecontroller.New(f.caller(), gitAt(t, "abc123"), clock())
+
+	p := pipeline(
+		stage("build", substage("default", []string{"build"})),
+		mintlessStage("staging", substage("default", []string{"build"})),
+	)
+
+	report, err := c.Apply(context.Background(), p, "/work")
+	require.NoError(t, err)
+	require.True(t, report.Minted)
+	require.Len(t, report.Stages, 2)
+	require.Contains(t, f.store, "revision/"+report.Revision.ID,
+		"the build stage mints and staging runs against what it proved")
+}

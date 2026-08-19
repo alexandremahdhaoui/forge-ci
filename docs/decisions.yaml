@@ -1,6 +1,21 @@
 groups:
   - name: Reversals
     decisions:
+      - title: A revision is minted on green, not up front
+        decided: >-
+          A stage declares mint true. The revision reaches state when that stage
+          advances, and never before.
+        why: >-
+          apply resolved the revision and wrote it to state before the first
+          stage ran, so a build that then failed still handed a revision to
+          whatever reads state next. A revision is a claim that this tuple of
+          commits was proven, and nothing had proven anything yet. The id is
+          still resolved up front because a run record is keyed by it.
+        costs: >-
+          A pipeline that declares mint on no stage never records a revision,
+          which reads as nothing happening until you look at the flag.
+        reversed: true
+
       - title: Webhooks, not polling
         decided: A push webhook hits an endpoint you own, which dispatches only when there is work.
         why: >-
