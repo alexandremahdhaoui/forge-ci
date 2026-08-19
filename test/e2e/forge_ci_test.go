@@ -273,8 +273,29 @@ func TestAFailingStageBlocksAndExitsNonZero(t *testing.T) {
 	require.Error(t, err, out)
 	require.Contains(t, out, "default failed")
 
-	run := readRun(t, statePath, revisionID(t, statePath))
-	require.Equal(t, citypes.StatusFailed, run.Status)
+	// The run is the evidence of what happened and it is kept. The revision is
+	// the claim that this tuple was proven, and nothing proved anything.
+	failed := readRun(t, statePath, revisionFromOutput(t, out))
+	require.Equal(t, citypes.StatusFailed, failed.Status)
+
+	require.Empty(t, revisionIDs(t, statePath),
+		"a build that failed must mint no revision")
+}
+
+// revisionFromOutput reads the id off the report. A failed build records a run
+// and no revision, so the id cannot be found by listing what was minted.
+func revisionFromOutput(t *testing.T, out string) string {
+	t.Helper()
+
+	for _, line := range strings.Split(out, "\n") {
+		if rest, ok := strings.CutPrefix(strings.TrimSpace(line), "revision "); ok {
+			return strings.TrimSpace(rest)
+		}
+	}
+
+	t.Fatalf("no revision line in the report:\n%s", out)
+
+	return ""
 }
 
 func TestPollSeesTheRepoMoveOnce(t *testing.T) {
@@ -403,8 +424,15 @@ func TestAnUncommittedBreakIsCaught(t *testing.T) {
 	require.Contains(t, out, "-dirty")
 	require.Contains(t, out, "default failed")
 
+	// The uncommitted edit is its own revision and the report says so. It is
+	// not minted, because the edit broke the build. An uncommitted break must
+	// never reuse a passing run, and it must not mint one of its own either.
+	dirty := revisionFromOutput(t, out)
+	require.NotEqual(t, clean[0], dirty, "an uncommitted edit must be its own revision")
+	require.True(t, strings.HasSuffix(dirty, "-dirty"))
+
 	after := revisionIDs(t, statePath)
-	require.Len(t, after, 2, "an uncommitted edit must be its own revision")
+	require.Equal(t, clean, after, "a broken build mints nothing, so state did not move")
 }
 
 func revisionIDs(t *testing.T, statePath string) []string {
