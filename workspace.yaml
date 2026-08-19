@@ -1,0 +1,9 @@
+version: "1"
+
+modules:
+  github.com/alexandremahdhaoui/forge-ci-spec:
+    path: ../forge-ci-spec
+    version: v0.1.0
+    specs:
+      - spec/forge-ci.v1.yaml
+      - testdata/cases.json

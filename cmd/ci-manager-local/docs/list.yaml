@@ -1,0 +1,18 @@
+version: "1.0"
+engine: "ci-manager-local"
+baseURL: "https://raw.githubusercontent.com/alexandremahdhaoui/forge-ci/refs/heads/main"
+
+docs:
+  - name: "usage"
+    title: "ci-manager-local usage"
+    description: "Make declared resources exist on this machine, and record what it made."
+    url: "cmd/ci-manager-local/docs/usage.md"
+    tags: ["usage", "manager"]
+    required: true
+
+  - name: "schema"
+    title: "ci-manager-local configuration"
+    description: "The spec block this engine reads."
+    url: "cmd/ci-manager-local/docs/schema.md"
+    tags: ["configuration", "schema", "manager"]
+    required: true

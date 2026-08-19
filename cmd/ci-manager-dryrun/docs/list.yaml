@@ -1,0 +1,18 @@
+version: "1.0"
+engine: "ci-manager-dryrun"
+baseURL: "https://raw.githubusercontent.com/alexandremahdhaoui/forge-ci/refs/heads/main"
+
+docs:
+  - name: "usage"
+    title: "ci-manager-dryrun usage"
+    description: "Report what would be created, and change nothing."
+    url: "cmd/ci-manager-dryrun/docs/usage.md"
+    tags: ["usage", "manager"]
+    required: true
+
+  - name: "schema"
+    title: "ci-manager-dryrun configuration"
+    description: "The spec block this engine reads."
+    url: "cmd/ci-manager-dryrun/docs/schema.md"
+    tags: ["configuration", "schema", "manager"]
+    required: true

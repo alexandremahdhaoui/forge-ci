@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/alexandremahdhaoui/forge/pkg/enginecli"
+	"github.com/alexandremahdhaoui/forge/pkg/enginedocs"
 	"github.com/alexandremahdhaoui/forge/pkg/mcpserver"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -57,12 +58,24 @@ type Engine struct {
 	Tools   []Tool
 }
 
+const docsBaseURL = "https://raw.githubusercontent.com/alexandremahdhaoui/forge-ci/refs/heads/main"
+
+func (e Engine) docsConfig() *enginedocs.Config {
+	return &enginedocs.Config{
+		EngineName:   e.Name,
+		LocalDir:     "cmd/" + e.Name + "/docs",
+		BaseURL:      docsBaseURL,
+		RequiredDocs: []string{"usage", "schema"},
+	}
+}
+
 func (e Engine) Run() {
 	enginecli.Bootstrap(enginecli.Config{
-		Name:    e.Name,
-		Version: e.Version,
-		RunMCP:  e.runMCP,
-		RunCLI:  func() error { return e.RunCLI(os.Args[1:], os.Stdin, os.Stdout) },
+		Name:       e.Name,
+		Version:    e.Version,
+		DocsConfig: e.docsConfig(),
+		RunMCP:     e.runMCP,
+		RunCLI:     func() error { return e.RunCLI(os.Args[1:], os.Stdin, os.Stdout) },
 		FailureHandler: func(err error) {
 			fmt.Fprintf(os.Stderr, "%s: %v\n", e.Name, err)
 		},
@@ -74,6 +87,10 @@ func (e Engine) runMCP() error {
 
 	for _, t := range e.Tools {
 		t.register(server)
+	}
+
+	if err := enginedocs.RegisterDocsTools(server, *e.docsConfig()); err != nil {
+		return fmt.Errorf("registering the docs tools for %s: %w", e.Name, err)
 	}
 
 	return server.RunDefault()

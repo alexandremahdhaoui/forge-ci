@@ -76,6 +76,18 @@ test:
       command: sh
       args: ["hack/no-hardcoding.sh"]
 
+  - name: standalone
+    runner: go://generic-test-runner
+    spec:
+      command: sh
+      args: ["hack/standalone.sh"]
+
+  - name: engine-docs
+    runner: go://generic-test-runner
+    spec:
+      command: sh
+      args: ["hack/engine-docs.sh"]
+
   - name: architecture
     runner: go://generic-test-runner
     spec:

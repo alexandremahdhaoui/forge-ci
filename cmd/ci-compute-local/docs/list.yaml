@@ -1,0 +1,18 @@
+version: "1.0"
+engine: "ci-compute-local"
+baseURL: "https://raw.githubusercontent.com/alexandremahdhaoui/forge-ci/refs/heads/main"
+
+docs:
+  - name: "usage"
+    title: "ci-compute-local usage"
+    description: "Run a substage's targets on this machine and harvest what forge produced."
+    url: "cmd/ci-compute-local/docs/usage.md"
+    tags: ["usage", "compute"]
+    required: true
+
+  - name: "schema"
+    title: "ci-compute-local configuration"
+    description: "The spec block this engine reads."
+    url: "cmd/ci-compute-local/docs/schema.md"
+    tags: ["configuration", "schema", "compute"]
+    required: true

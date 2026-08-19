@@ -1,0 +1,18 @@
+version: "1.0"
+engine: "ci-state-git"
+baseURL: "https://raw.githubusercontent.com/alexandremahdhaoui/forge-ci/refs/heads/main"
+
+docs:
+  - name: "usage"
+    title: "ci-state-git usage"
+    description: "Read and write CI state in a git repo, committing each record."
+    url: "cmd/ci-state-git/docs/usage.md"
+    tags: ["usage", "state"]
+    required: true
+
+  - name: "schema"
+    title: "ci-state-git configuration"
+    description: "The spec block this engine reads."
+    url: "cmd/ci-state-git/docs/schema.md"
+    tags: ["configuration", "schema", "state"]
+    required: true

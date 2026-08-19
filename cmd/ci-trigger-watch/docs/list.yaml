@@ -1,0 +1,18 @@
+version: "1.0"
+engine: "ci-trigger-watch"
+baseURL: "https://raw.githubusercontent.com/alexandremahdhaoui/forge-ci/refs/heads/main"
+
+docs:
+  - name: "usage"
+    title: "ci-trigger-watch usage"
+    description: "Fingerprint the watched repos and say whether they moved."
+    url: "cmd/ci-trigger-watch/docs/usage.md"
+    tags: ["usage", "trigger"]
+    required: true
+
+  - name: "schema"
+    title: "ci-trigger-watch configuration"
+    description: "The spec block this engine reads."
+    url: "cmd/ci-trigger-watch/docs/schema.md"
+    tags: ["configuration", "schema", "trigger"]
+    required: true
