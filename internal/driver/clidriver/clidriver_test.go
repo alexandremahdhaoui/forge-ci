@@ -2,14 +2,23 @@ package clidriver_test
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/alexandremahdhaoui/forge-ci/internal/controller/reconcilecontroller"
 	"github.com/alexandremahdhaoui/forge-ci/internal/driver/clidriver"
+	"github.com/alexandremahdhaoui/forge-ci/internal/mocks/clidrivermock"
+	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
+	"github.com/alexandremahdhaoui/forge/pkg/forge"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
+
+var errBoom = errors.New("boom")
 
 const minimal = `
 name: demo
@@ -47,42 +56,221 @@ func write(t *testing.T, body string) string {
 	return path
 }
 
+func passingReport() reconcilecontroller.Report {
+	return reconcilecontroller.Report{
+		Revision: citypes.Revision{ID: "rev123", Repos: map[string]string{"golden-rust": "abcdef0123456789"}},
+		Actions:  []string{"created directory /tmp/state"},
+		Stages: []reconcilecontroller.StageReport{{
+			Name:    "build",
+			Advance: true,
+			Reason:  "all good",
+			Runs: []citypes.Run{{
+				Substage: "default",
+				Status:   citypes.StatusPassed,
+				Gates:    []citypes.GateResult{{Alias: "approve", Status: citypes.StatusPassed, Message: "approved"}},
+				Forge: &citypes.ForgeResult{TestReports: []forge.TestReport{{
+					Stage: "unit", Status: "passed",
+					TestStats: forge.TestStats{Total: 37},
+					Coverage:  forge.Coverage{Percentage: 96.4},
+				}}},
+			}},
+		}},
+	}
+}
+
+func blockedReport() reconcilecontroller.Report {
+	r := passingReport()
+	r.Stages[0].Advance = false
+	r.Stages[0].Reason = "a gate is not satisfied"
+	r.Stages[0].Runs[0].Status = citypes.StatusFailed
+	r.Stages[0].Runs[0].Message = "two tests failed"
+
+	return r
+}
+
 func TestValidateReportsTheShape(t *testing.T) {
 	var out bytes.Buffer
 
-	err := clidriver.New(&out).Run([]string{"validate", "--config", write(t, minimal)})
+	err := clidriver.New(&out, clidrivermock.NewMockReconciler(t)).
+		Run(context.Background(), []string{"validate", "--config", write(t, minimal)})
 	require.NoError(t, err)
 	require.Contains(t, out.String(), "demo: 0 repos, 2 engines, 1 stages")
 	require.Contains(t, out.String(), "1. build (1 substages)")
 }
 
+func TestApplyRendersTheWholeReport(t *testing.T) {
+	var out bytes.Buffer
+
+	r := clidrivermock.NewMockReconciler(t)
+	r.EXPECT().Apply(mock.Anything, mock.Anything, mock.Anything).Return(passingReport(), nil).Once()
+
+	err := clidriver.New(&out, r).Run(context.Background(), []string{"apply", "--config", write(t, minimal)})
+	require.NoError(t, err)
+
+	text := out.String()
+	require.Contains(t, text, "revision rev123")
+	require.Contains(t, text, "golden-rust abcdef012345")
+	require.Contains(t, text, "created directory /tmp/state")
+	require.Contains(t, text, "stage build: all good")
+	require.Contains(t, text, "default passed")
+	require.Contains(t, text, "gate approve passed approved")
+	require.Contains(t, text, "forge unit passed 37 tests 96.4% coverage")
+}
+
+func TestApplyFailsWhenThePipelineDidNotAdvance(t *testing.T) {
+	var out bytes.Buffer
+
+	r := clidrivermock.NewMockReconciler(t)
+	r.EXPECT().Apply(mock.Anything, mock.Anything, mock.Anything).Return(blockedReport(), nil).Once()
+
+	err := clidriver.New(&out, r).Run(context.Background(), []string{"apply", "--config", write(t, minimal)})
+	require.ErrorIs(t, err, clidriver.ErrBlocked)
+	require.Contains(t, err.Error(), "a gate is not satisfied")
+	require.Contains(t, out.String(), "default failed (two tests failed)")
+}
+
+func TestStatusNeverFailsOnABlockedPipeline(t *testing.T) {
+	var out bytes.Buffer
+
+	r := clidrivermock.NewMockReconciler(t)
+	r.EXPECT().Status(mock.Anything, mock.Anything, mock.Anything).Return(blockedReport(), nil).Once()
+
+	err := clidriver.New(&out, r).Run(context.Background(), []string{"status", "--config", write(t, minimal)})
+	require.NoError(t, err)
+}
+
+func TestBootstrapNeverFailsOnABlockedPipeline(t *testing.T) {
+	var out bytes.Buffer
+
+	r := clidrivermock.NewMockReconciler(t)
+	r.EXPECT().Bootstrap(mock.Anything, mock.Anything, mock.Anything).Return(blockedReport(), nil).Once()
+
+	err := clidriver.New(&out, r).Run(context.Background(), []string{"bootstrap", "--config", write(t, minimal)})
+	require.NoError(t, err)
+}
+
+func TestPollSaysWhenNothingMoved(t *testing.T) {
+	var out bytes.Buffer
+
+	r := clidrivermock.NewMockReconciler(t)
+	r.EXPECT().Poll(mock.Anything, mock.Anything).Return(citypes.TriggerOutput{}, nil).Once()
+
+	err := clidriver.New(&out, r).Run(context.Background(), []string{"poll", "--config", write(t, minimal)})
+	require.NoError(t, err)
+	require.Equal(t, "nothing moved\n", out.String())
+}
+
+func TestPollSaysWhatMoved(t *testing.T) {
+	var out bytes.Buffer
+
+	r := clidrivermock.NewMockReconciler(t)
+	r.EXPECT().Poll(mock.Anything, mock.Anything).
+		Return(citypes.TriggerOutput{Changed: true, Reason: "on-change: the watched repos moved"}, nil).Once()
+
+	err := clidriver.New(&out, r).Run(context.Background(), []string{"poll", "--config", write(t, minimal)})
+	require.NoError(t, err)
+	require.Contains(t, out.String(), "changed: on-change: the watched repos moved")
+}
+
+func TestEveryVerbPropagatesAnError(t *testing.T) {
+	for _, verb := range []string{"bootstrap", "apply", "status", "poll"} {
+		t.Run(verb, func(t *testing.T) {
+			r := clidrivermock.NewMockReconciler(t)
+
+			switch verb {
+			case "bootstrap":
+				r.EXPECT().Bootstrap(mock.Anything, mock.Anything, mock.Anything).
+					Return(reconcilecontroller.Report{}, errBoom).Once()
+			case "apply":
+				r.EXPECT().Apply(mock.Anything, mock.Anything, mock.Anything).
+					Return(reconcilecontroller.Report{}, errBoom).Once()
+			case "status":
+				r.EXPECT().Status(mock.Anything, mock.Anything, mock.Anything).
+					Return(reconcilecontroller.Report{}, errBoom).Once()
+			case "poll":
+				r.EXPECT().Poll(mock.Anything, mock.Anything).
+					Return(citypes.TriggerOutput{}, errBoom).Once()
+			}
+
+			err := clidriver.New(&bytes.Buffer{}, r).
+				Run(context.Background(), []string{verb, "--config", write(t, minimal)})
+			require.ErrorIs(t, err, errBoom)
+		})
+	}
+}
+
+func TestTheRootDefaultsToThePipelineDirectory(t *testing.T) {
+	path := write(t, minimal)
+
+	r := clidrivermock.NewMockReconciler(t)
+	r.EXPECT().Apply(mock.Anything, mock.Anything, filepath.Dir(path)).Return(passingReport(), nil).Once()
+
+	require.NoError(t, clidriver.New(&bytes.Buffer{}, r).
+		Run(context.Background(), []string{"apply", "--config", path}))
+}
+
+func TestAnExplicitRootWins(t *testing.T) {
+	r := clidrivermock.NewMockReconciler(t)
+	r.EXPECT().Apply(mock.Anything, mock.Anything, "/elsewhere").Return(passingReport(), nil).Once()
+
+	require.NoError(t, clidriver.New(&bytes.Buffer{}, r).
+		Run(context.Background(), []string{"apply", "--config", write(t, minimal), "--root", "/elsewhere"}))
+}
+
 func TestValidateNamesTheFileItRejected(t *testing.T) {
 	path := write(t, strings.Replace(minimal, "state: st", "state: here", 1))
 
-	err := clidriver.New(&bytes.Buffer{}).Run([]string{"validate", "--config", path})
+	err := clidriver.New(&bytes.Buffer{}, clidrivermock.NewMockReconciler(t)).
+		Run(context.Background(), []string{"validate", "--config", path})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), path)
 	require.Contains(t, err.Error(), "want state")
 }
 
+func TestDuplicateKeyIsRejected(t *testing.T) {
+	err := clidriver.New(&bytes.Buffer{}, clidrivermock.NewMockReconciler(t)).
+		Run(context.Background(), []string{"validate", "--config", write(t, minimal+"\nstate: here\n")})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), `key "state" already set`)
+}
+
 func TestMissingFileIsNotAValidationError(t *testing.T) {
-	err := clidriver.New(&bytes.Buffer{}).Run([]string{"validate", "--config", "/nope/pipeline.yaml"})
+	err := clidriver.New(&bytes.Buffer{}, clidrivermock.NewMockReconciler(t)).
+		Run(context.Background(), []string{"validate", "--config", "/nope/pipeline.yaml"})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "reading /nope/pipeline.yaml")
 }
 
 func TestNoArgsIsUsage(t *testing.T) {
-	require.ErrorIs(t, clidriver.New(&bytes.Buffer{}).Run(nil), clidriver.ErrUsage)
+	require.ErrorIs(t,
+		clidriver.New(&bytes.Buffer{}, clidrivermock.NewMockReconciler(t)).Run(context.Background(), nil),
+		clidriver.ErrUsage)
 }
 
 func TestUnknownSubcommandIsUsage(t *testing.T) {
-	err := clidriver.New(&bytes.Buffer{}).Run([]string{"deploy"})
+	err := clidriver.New(&bytes.Buffer{}, clidrivermock.NewMockReconciler(t)).
+		Run(context.Background(), []string{"deploy", "--config", write(t, minimal)})
 	require.ErrorIs(t, err, clidriver.ErrUsage)
 	require.Contains(t, err.Error(), "deploy")
 }
 
-func TestDuplicateKeyIsRejected(t *testing.T) {
-	err := clidriver.New(&bytes.Buffer{}).Run([]string{"validate", "--config", write(t, minimal+"\nstate: here\n")})
+func TestABadFlagIsReported(t *testing.T) {
+	err := clidriver.New(&bytes.Buffer{}, clidrivermock.NewMockReconciler(t)).
+		Run(context.Background(), []string{"apply", "--nope"})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), `key "state" already set`)
+	require.Contains(t, err.Error(), "parsing flags")
 }
+
+func TestAFailingWriterIsReported(t *testing.T) {
+	r := clidrivermock.NewMockReconciler(t)
+	r.EXPECT().Apply(mock.Anything, mock.Anything, mock.Anything).Return(passingReport(), nil).Once()
+
+	err := clidriver.New(brokenWriter{}, r).
+		Run(context.Background(), []string{"apply", "--config", write(t, minimal)})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "writing report")
+}
+
+type brokenWriter struct{}
+
+func (brokenWriter) Write([]byte) (int, error) { return 0, errBoom }

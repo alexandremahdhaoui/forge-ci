@@ -1,0 +1,158 @@
+package computecontroller
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"path/filepath"
+	"strings"
+	"text/template"
+
+	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/execadapter"
+	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/forgeadapter"
+	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
+)
+
+var ErrTarget = errors.New("a target needs exactly one of forge or forgeCI")
+
+const (
+	forgeBinary   = "forge"
+	forgeCIBinary = "forge-ci"
+)
+
+type Controller struct {
+	runner    execadapter.Runner
+	harvester forgeadapter.Harvester
+}
+
+func New(runner execadapter.Runner, harvester forgeadapter.Harvester) *Controller {
+	return &Controller{runner: runner, harvester: harvester}
+}
+
+func (c *Controller) Declare(spec map[string]any) (citypes.DeclareOutput, error) {
+	return citypes.DeclareOutput{Resources: []citypes.Resource{}}, nil
+}
+
+func (c *Controller) Run(ctx context.Context, in citypes.RunInput) (citypes.RunOutput, error) {
+	if len(in.Targets) == 0 {
+		return citypes.RunOutput{}, errors.New("running: no targets given")
+	}
+
+	var log strings.Builder
+
+	out := citypes.RunOutput{Status: citypes.StatusPassed}
+
+	for _, target := range in.Targets {
+		binary, raw, err := binaryFor(target)
+		if err != nil {
+			return citypes.RunOutput{}, err
+		}
+
+		expanded, err := expand(raw, in.Params)
+		if err != nil {
+			return citypes.RunOutput{}, fmt.Errorf("expanding target %q: %w", target.Alias, err)
+		}
+
+		for _, dir := range dirsFor(target, in) {
+			res, err := c.runner.Run(ctx, dir, binary, strings.Fields(expanded)...)
+			if err != nil {
+				return citypes.RunOutput{}, fmt.Errorf("running target %q in %s: %w", target.Alias, dir, err)
+			}
+
+			fmt.Fprintf(&log, "$ %s %s (in %s)\n%s%s", binary, expanded, dir, res.Stdout, res.Stderr)
+
+			if res.ExitCode != 0 {
+				out.Status = citypes.StatusFailed
+				out.Message = fmt.Sprintf("target %q exited %d in %s", target.Alias, res.ExitCode, dir)
+			}
+
+			if binary != forgeBinary || c.harvester == nil {
+				continue
+			}
+
+			harvested, err := c.harvester.Harvest(dir)
+			if err != nil {
+				return citypes.RunOutput{}, err
+			}
+
+			out.Forge = merge(out.Forge, harvested)
+		}
+
+		if out.Status == citypes.StatusFailed {
+			break
+		}
+	}
+
+	out.Output = log.String()
+
+	return out, nil
+}
+
+func binaryFor(t citypes.Target) (string, string, error) {
+	switch {
+	case t.Forge != "" && t.ForgeCI == "":
+		return forgeBinary, t.Forge, nil
+	case t.ForgeCI != "" && t.Forge == "":
+		return forgeCIBinary, t.ForgeCI, nil
+	default:
+		return "", "", fmt.Errorf("target %q: %w", t.Alias, ErrTarget)
+	}
+}
+
+func dirsFor(t citypes.Target, in citypes.RunInput) []string {
+	if len(t.In) == 0 {
+		return []string{in.Root}
+	}
+
+	paths := make([]string, 0, len(t.In))
+
+	for _, name := range t.In {
+		resolved := filepath.Join(in.Root, name)
+
+		for _, repo := range in.Repos {
+			if repo.Name == name && repo.Path != "" {
+				resolved = repo.Path
+
+				break
+			}
+		}
+
+		paths = append(paths, resolved)
+	}
+
+	return paths
+}
+
+func expand(raw string, params map[string]string) (string, error) {
+	if !strings.Contains(raw, "{{") {
+		return raw, nil
+	}
+
+	tmpl, err := template.New("target").Option("missingkey=error").Parse(raw)
+	if err != nil {
+		return "", err
+	}
+
+	var b bytes.Buffer
+	if err := tmpl.Execute(&b, struct{ Params map[string]string }{Params: params}); err != nil {
+		return "", err
+	}
+
+	return b.String(), nil
+}
+
+func merge(into, from *citypes.ForgeResult) *citypes.ForgeResult {
+	if from == nil {
+		return into
+	}
+
+	if into == nil {
+		return from
+	}
+
+	into.Artifacts = append(into.Artifacts, from.Artifacts...)
+	into.TestReports = append(into.TestReports, from.TestReports...)
+
+	return into
+}

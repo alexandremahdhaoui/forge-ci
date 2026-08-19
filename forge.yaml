@@ -16,6 +16,12 @@ build:
           sh hack/resolve-spec.sh
           github.com/alexandremahdhaoui/forge-ci-spec testdata/cases.json .forge/spec-cache
 
+  - name: generate-mocks
+    src: .
+    engine: go://generic-builder
+    spec:
+      command: mockery
+
   - name: format-code
     src: .
     engine: go://go-format
@@ -25,9 +31,69 @@ build:
     dest: ./build/bin
     engine: go://go-build
 
+  - name: ci-manager-local
+    src: ./cmd/ci-manager-local
+    dest: ./build/bin
+    engine: go://go-build
+
+  - name: ci-manager-dryrun
+    src: ./cmd/ci-manager-dryrun
+    dest: ./build/bin
+    engine: go://go-build
+
+  - name: ci-compute-local
+    src: ./cmd/ci-compute-local
+    dest: ./build/bin
+    engine: go://go-build
+
+  - name: ci-state-git
+    src: ./cmd/ci-state-git
+    dest: ./build/bin
+    engine: go://go-build
+
+  - name: ci-trigger-watch
+    src: ./cmd/ci-trigger-watch
+    dest: ./build/bin
+    engine: go://go-build
+
+  - name: ci-gate-manual
+    src: ./cmd/ci-gate-manual
+    dest: ./build/bin
+    engine: go://go-build
+
+  - name: ci-promotion-all
+    src: ./cmd/ci-promotion-all
+    dest: ./build/bin
+    engine: go://go-build
+
 test:
   - name: lint
     runner: go://go-lint
 
+  - name: no-hardcoding
+    runner: go://generic-test-runner
+    spec:
+      command: sh
+      args: ["hack/no-hardcoding.sh"]
+
   - name: unit
     runner: go://go-test
+
+  - name: integration
+    runner: go://go-test
+    spec:
+      tags: [integration]
+      packages: [./test/integration/...]
+
+  - name: e2e
+    runner: go://go-test
+    spec:
+      tags: [e2e]
+      packages: [./test/e2e/...]
+      timeout: "15m"
+
+  - name: coverage
+    runner: go://generic-test-runner
+    spec:
+      command: sh
+      args: ["hack/coverage.sh", "90"]

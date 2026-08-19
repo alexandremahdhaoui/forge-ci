@@ -1,0 +1,133 @@
+package gitadapter_test
+
+import (
+	"context"
+	"errors"
+	"testing"
+
+	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/execadapter"
+	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/gitadapter"
+	"github.com/alexandremahdhaoui/forge-ci/internal/mocks/execadaptermock"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+)
+
+var errBoom = errors.New("boom")
+
+func ok(stdout string) execadapter.Result { return execadapter.Result{Stdout: stdout} }
+
+func TestInitCreatesAMainBranch(t *testing.T) {
+	r := execadaptermock.NewMockRunner(t)
+	r.EXPECT().Run(mock.Anything, "/repo", "git", "init", "-b", "main").Return(ok(""), nil).Once()
+
+	require.NoError(t, gitadapter.New(r).Init(context.Background(), "/repo"))
+}
+
+func TestCloneRunsFromNowhereInParticular(t *testing.T) {
+	r := execadaptermock.NewMockRunner(t)
+	r.EXPECT().Run(mock.Anything, "", "git", "clone", "git@x:y.git", "/repo").Return(ok(""), nil).Once()
+
+	require.NoError(t, gitadapter.New(r).Clone(context.Background(), "git@x:y.git", "/repo"))
+}
+
+func TestIsRepoReadsTheExitCode(t *testing.T) {
+	r := execadaptermock.NewMockRunner(t)
+	r.EXPECT().Run(mock.Anything, "/repo", "git", "rev-parse", "--git-dir").Return(ok(".git"), nil).Once()
+
+	yes, err := gitadapter.New(r).IsRepo(context.Background(), "/repo")
+	require.NoError(t, err)
+	require.True(t, yes)
+
+	r2 := execadaptermock.NewMockRunner(t)
+	r2.EXPECT().Run(mock.Anything, "/x", "git", "rev-parse", "--git-dir").
+		Return(execadapter.Result{ExitCode: 128}, nil).Once()
+
+	no, err := gitadapter.New(r2).IsRepo(context.Background(), "/x")
+	require.NoError(t, err)
+	require.False(t, no)
+}
+
+func TestIsRepoReportsABrokenRunner(t *testing.T) {
+	r := execadaptermock.NewMockRunner(t)
+	r.EXPECT().Run(mock.Anything, mock.Anything, "git", "rev-parse", "--git-dir").
+		Return(execadapter.Result{}, errBoom).Once()
+
+	_, err := gitadapter.New(r).IsRepo(context.Background(), "/repo")
+	require.ErrorIs(t, err, errBoom)
+}
+
+func TestHeadSHAIsTrimmed(t *testing.T) {
+	r := execadaptermock.NewMockRunner(t)
+	r.EXPECT().Run(mock.Anything, "/repo", "git", "rev-parse", "HEAD").Return(ok("abc123\n"), nil).Once()
+
+	sha, err := gitadapter.New(r).HeadSHA(context.Background(), "/repo")
+	require.NoError(t, err)
+	require.Equal(t, "abc123", sha)
+}
+
+func TestRemoteSHATakesTheFirstField(t *testing.T) {
+	r := execadaptermock.NewMockRunner(t)
+	r.EXPECT().Run(mock.Anything, "", "git", "ls-remote", "git@x:y.git", "refs/heads/main").
+		Return(ok("abc123\trefs/heads/main\n"), nil).Once()
+
+	sha, err := gitadapter.New(r).RemoteSHA(context.Background(), "git@x:y.git", "")
+	require.NoError(t, err)
+	require.Equal(t, "abc123", sha)
+}
+
+func TestRemoteSHAWithNoSuchRef(t *testing.T) {
+	r := execadaptermock.NewMockRunner(t)
+	r.EXPECT().Run(mock.Anything, "", "git", "ls-remote", "git@x:y.git", "refs/heads/nope").
+		Return(ok(""), nil).Once()
+
+	_, err := gitadapter.New(r).RemoteSHA(context.Background(), "git@x:y.git", "nope")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no such ref")
+}
+
+func TestDirtyIsTrueWhenStatusPrintsAnything(t *testing.T) {
+	r := execadaptermock.NewMockRunner(t)
+	r.EXPECT().Run(mock.Anything, "/repo", "git", "status", "--porcelain").Return(ok(" M f.go\n"), nil).Once()
+
+	dirty, err := gitadapter.New(r).Dirty(context.Background(), "/repo")
+	require.NoError(t, err)
+	require.True(t, dirty)
+
+	r2 := execadaptermock.NewMockRunner(t)
+	r2.EXPECT().Run(mock.Anything, "/repo", "git", "status", "--porcelain").Return(ok("\n"), nil).Once()
+
+	clean, err := gitadapter.New(r2).Dirty(context.Background(), "/repo")
+	require.NoError(t, err)
+	require.False(t, clean)
+}
+
+func TestAddAndCommit(t *testing.T) {
+	r := execadaptermock.NewMockRunner(t)
+	r.EXPECT().Run(mock.Anything, "/repo", "git", "add", ".").Return(ok(""), nil).Once()
+	r.EXPECT().Run(mock.Anything, "/repo", "git", "commit", "-m", "ci: x").Return(ok(""), nil).Once()
+
+	g := gitadapter.New(r)
+	require.NoError(t, g.Add(context.Background(), "/repo", "."))
+	require.NoError(t, g.Commit(context.Background(), "/repo", "ci: x"))
+}
+
+func TestANonZeroGitExitCarriesStderr(t *testing.T) {
+	r := execadaptermock.NewMockRunner(t)
+	r.EXPECT().Run(mock.Anything, "/repo", "git", "rev-parse", "HEAD").
+		Return(execadapter.Result{ExitCode: 128, Stderr: "fatal: no commits yet\n"}, nil).Once()
+
+	_, err := gitadapter.New(r).HeadSHA(context.Background(), "/repo")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "reading HEAD of /repo")
+	require.Contains(t, err.Error(), "fatal: no commits yet")
+}
+
+func TestABrokenRunnerIsWrappedWithWhatWasAttempted(t *testing.T) {
+	r := execadaptermock.NewMockRunner(t)
+	r.EXPECT().Run(mock.Anything, mock.Anything, "git", "init", "-b", "main").
+		Return(execadapter.Result{}, errBoom).Once()
+
+	err := gitadapter.New(r).Init(context.Background(), "/repo")
+	require.ErrorIs(t, err, errBoom)
+	require.Contains(t, err.Error(), "initialising /repo")
+}

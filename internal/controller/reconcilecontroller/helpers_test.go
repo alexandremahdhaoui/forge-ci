@@ -1,0 +1,221 @@
+package reconcilecontroller_test
+
+import (
+	"context"
+	"encoding/json"
+	"testing"
+	"time"
+
+	"github.com/alexandremahdhaoui/forge-ci/internal/mocks/engineadaptermock"
+	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
+	"github.com/alexandremahdhaoui/forge-ci/pkg/config"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+)
+
+const (
+	uriManager   = "go://x/cmd/ci-manager-local@v1"
+	uriCompute   = "go://x/cmd/ci-compute-local@v1"
+	uriState     = "go://x/cmd/ci-state-git@v1"
+	uriGate      = "go://x/cmd/ci-gate-manual@v1"
+	uriPromotion = "go://x/cmd/ci-promotion-all@v1"
+	uriTrigger   = "go://x/cmd/ci-trigger-watch@v1"
+)
+
+type call struct {
+	URI  string
+	Tool string
+}
+
+type fakeEngines struct {
+	t     *testing.T
+	store map[string]string
+	calls []call
+
+	runOutputs map[string]citypes.RunOutput
+	gateStatus citypes.Status
+	promote    *citypes.PromotionOutput
+	failOn     map[call]error
+}
+
+func newFakeEngines(t *testing.T) *fakeEngines {
+	return &fakeEngines{
+		t:          t,
+		store:      map[string]string{},
+		runOutputs: map[string]citypes.RunOutput{},
+		gateStatus: citypes.StatusPassed,
+		failOn:     map[call]error{},
+	}
+}
+
+func (f *fakeEngines) caller() *engineadaptermock.MockCaller {
+	m := engineadaptermock.NewMockCaller(f.t)
+	m.EXPECT().
+		Call(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(f.dispatch).Maybe()
+
+	return m
+}
+
+func (f *fakeEngines) dispatch(_ context.Context, uri, tool string, in, out any) error {
+	f.calls = append(f.calls, call{uri, tool})
+
+	if err, ok := f.failOn[call{uri, tool}]; ok {
+		return err
+	}
+
+	switch {
+	case tool == "declare":
+		return assign(out, citypes.DeclareOutput{Resources: []citypes.Resource{}})
+	case tool == "reconcile":
+		var input citypes.ReconcileInput
+		require.NoError(f.t, remarshal(in, &input))
+
+		owned := make([]citypes.Ownership, 0, len(input.Resources))
+		for _, r := range input.Resources {
+			owned = append(owned, citypes.Ownership{Resource: r.ID(), Manager: input.Manager})
+		}
+
+		return assign(out, citypes.ReconcileOutput{Owned: owned, Actions: []string{"reconciled"}})
+	case uri == uriState && tool == "get":
+		var input citypes.StateGetInput
+		require.NoError(f.t, remarshal(in, &input))
+
+		payload, ok := f.store[input.Kind+"/"+input.Key]
+
+		return assign(out, citypes.StateGetOutput{Found: ok, Payload: payload})
+	case uri == uriState && tool == "put":
+		var input citypes.StatePutInput
+		require.NoError(f.t, remarshal(in, &input))
+
+		f.store[input.Kind+"/"+input.Key] = input.Payload
+
+		return nil
+	case uri == uriCompute && tool == "run":
+		var input citypes.RunInput
+		require.NoError(f.t, remarshal(in, &input))
+
+		result, ok := f.runOutputs[input.Stage+"/"+input.Substage]
+		if !ok {
+			result = citypes.RunOutput{Status: citypes.StatusPassed}
+		}
+
+		return assign(out, result)
+	case uri == uriTrigger && tool == "poll":
+		var input struct {
+			Spec map[string]any `json:"spec"`
+		}
+		require.NoError(f.t, remarshal(in, &input))
+
+		previous, _ := input.Spec["previous"].(string)
+
+		return assign(out, citypes.TriggerOutput{
+			Fingerprint: "fp1",
+			Changed:     previous != "fp1",
+			Reason:      "the watched repos moved",
+		})
+	case uri == uriGate && tool == "evaluate":
+		return assign(out, citypes.GateResult{Status: f.gateStatus})
+	case uri == uriPromotion && tool == "evaluate":
+		if f.promote != nil {
+			return assign(out, *f.promote)
+		}
+
+		var input citypes.PromotionInput
+		require.NoError(f.t, remarshal(in, &input))
+
+		for _, r := range input.Runs {
+			if r.Status != citypes.StatusPassed {
+				return assign(out, citypes.PromotionOutput{Advance: false, Reason: "a substage failed"})
+			}
+
+			for _, g := range r.Gates {
+				if g.Status != citypes.StatusPassed {
+					return assign(out, citypes.PromotionOutput{Advance: false, Reason: "a gate is not satisfied"})
+				}
+			}
+		}
+
+		return assign(out, citypes.PromotionOutput{Advance: true, Reason: "all good"})
+	}
+
+	f.t.Fatalf("the fake engines received an unexpected call: %s %s", uri, tool)
+
+	return nil
+}
+
+func (f *fakeEngines) counted(c call) int {
+	n := 0
+
+	for _, got := range f.calls {
+		if got == c {
+			n++
+		}
+	}
+
+	return n
+}
+
+func assign(out any, value any) error {
+	if out == nil {
+		return nil
+	}
+
+	return remarshal(value, out)
+}
+
+func remarshal(from, into any) error {
+	raw, err := json.Marshal(from)
+	if err != nil {
+		return err
+	}
+
+	return json.Unmarshal(raw, into)
+}
+
+func clock() func() time.Time {
+	n := 0
+
+	return func() time.Time {
+		n++
+
+		return time.Date(2026, 8, 19, 0, 0, n, 0, time.UTC)
+	}
+}
+
+func pipeline(stages ...config.Stage) config.Pipeline {
+	return config.Pipeline{
+		Name:  "demo",
+		Repos: []config.Repo{{Name: "golden-rust", URL: "git@example.com:golden-rust.git"}},
+		Managers: []config.Manager{
+			{Alias: "local", Engine: uriManager, Spec: map[string]any{"statePath": "/tmp/m.json"}},
+		},
+		Engines: []config.Engine{
+			{Alias: "here", Type: config.PortCompute, Engine: uriCompute, Manager: "local"},
+			{
+				Alias: "st", Type: config.PortState, Engine: uriState, Manager: "local",
+				Spec: map[string]any{"path": "/tmp/state"},
+			},
+			{Alias: "approve", Type: config.PortGate, Engine: uriGate, Manager: "local"},
+			{Alias: "all-pass", Type: config.PortPromotion, Engine: uriPromotion, Manager: "local"},
+		},
+		State: "st",
+		Targets: []config.Target{
+			{Alias: "build", Forge: "test-all", In: []string{"golden-rust"}},
+			{Alias: "self", ForgeCI: "apply"},
+		},
+		Stages: stages,
+	}
+}
+
+func stage(name string, subs ...config.Substage) config.Stage {
+	return config.Stage{Name: name, Promotion: "all-pass", Substages: subs}
+}
+
+func substage(name string, targets []string, gates ...string) config.Substage {
+	return config.Substage{
+		Name: name, Engine: "here", Manager: "local", Targets: targets, Gates: gates,
+	}
+}
+
+func mockAny() any { return mock.Anything }
