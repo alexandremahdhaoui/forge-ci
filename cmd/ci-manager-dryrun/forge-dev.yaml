@@ -1,0 +1,14 @@
+name: ci-manager-dryrun
+type: generic
+version: 0.1.5
+description: Report what would be made, and make nothing.
+openapi:
+  specPath: ../../.forge/spec-cache/engines.v1.yaml
+generate:
+  packageName: main
+  docsBaseURL: https://raw.githubusercontent.com/alexandremahdhaoui/forge-ci/refs/heads/main
+  tools:
+    - name: reconcile
+      description: Report what would be made. Nothing is created.
+      input: ReconcileInput
+      output: ReconcileOutput

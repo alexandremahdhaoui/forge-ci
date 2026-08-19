@@ -1,0 +1,18 @@
+name: ci-promotion-all
+type: generic
+version: 0.1.5
+description: Advance a stage when enough of its substages passed.
+openapi:
+  specPath: ../../.forge/spec-cache/engines.v1.yaml
+generate:
+  packageName: main
+  docsBaseURL: https://raw.githubusercontent.com/alexandremahdhaoui/forge-ci/refs/heads/main
+  tools:
+    - name: declare
+      description: Report the resources this promotion needs. It needs none.
+      input: DeclareInput
+      output: DeclareOutput
+    - name: evaluate
+      description: Decide whether the stage advances.
+      input: PromotionInput
+      output: PromotionOutput

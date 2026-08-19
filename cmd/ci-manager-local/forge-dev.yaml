@@ -1,0 +1,14 @@
+name: ci-manager-local
+type: generic
+version: 0.1.5
+description: Create directories and files, and record what it made.
+openapi:
+  specPath: ../../.forge/spec-cache/engines.v1.yaml
+generate:
+  packageName: main
+  docsBaseURL: https://raw.githubusercontent.com/alexandremahdhaoui/forge-ci/refs/heads/main
+  tools:
+    - name: reconcile
+      description: Make the declared resources exist, and record what was made.
+      input: ReconcileInput
+      output: ReconcileOutput

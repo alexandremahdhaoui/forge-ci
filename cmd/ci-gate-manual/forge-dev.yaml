@@ -1,0 +1,18 @@
+name: ci-gate-manual
+type: generic
+version: 0.1.5
+description: Wait for an approval file.
+openapi:
+  specPath: ../../.forge/spec-cache/engines.v1.yaml
+generate:
+  packageName: main
+  docsBaseURL: https://raw.githubusercontent.com/alexandremahdhaoui/forge-ci/refs/heads/main
+  tools:
+    - name: declare
+      description: Report the resources this gate needs.
+      input: DeclareInput
+      output: DeclareOutput
+    - name: evaluate
+      description: Pass when the approval file exists.
+      input: GateInput
+      output: GateResult

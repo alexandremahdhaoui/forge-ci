@@ -14,6 +14,8 @@ build:
           sh hack/resolve-spec.sh
           github.com/alexandremahdhaoui/forge-ci-spec spec/forge-ci.v1.yaml .forge/spec-cache &&
           sh hack/resolve-spec.sh
+          github.com/alexandremahdhaoui/forge-ci-spec spec/engines.v1.yaml .forge/spec-cache &&
+          sh hack/resolve-spec.sh
           github.com/alexandremahdhaoui/forge-ci-spec testdata/cases.json .forge/spec-cache &&
           sh hack/resolve-spec.sh
           github.com/alexandremahdhaoui/forge-revision-spec testdata/cases.json
@@ -22,13 +24,45 @@ build:
           github.com/alexandremahdhaoui/forge-revision-spec spec/revision.v1.yaml
           .forge/spec-cache/revision
 
-  # ci-state-git generates its MCP surface from forge-revision-spec's schema.
-  # The contract two tools read is the same file the engine is built from.
-  # The version is pinned: the short form go://forge-dev resolves against this
-  # repo's own git describe, which is forge-ci's version, not forge's.
+  # Every engine generates its MCP surface. ci-state-git generates from
+  # forge-revision-spec's schema, the same file forge-factory reads, so the
+  # contract two tools share is the one the engine is built from. The rest
+  # generate from forge-ci-spec's engines.v1.yaml.
+  #
+  # No version is pinned here and one would be ignored. forge resolves its own
+  # engines at the version of the forge binary running, deliberately, so the
+  # engines always match the forge that calls them. Needs forge v0.44.2.
   - name: gen-ci-state-git
     src: ./cmd/ci-state-git
-    engine: go://github.com/alexandremahdhaoui/forge/cmd/forge-dev@v0.44.0
+    engine: go://forge-dev
+
+  - name: gen-ci-manager-local
+    src: ./cmd/ci-manager-local
+    engine: go://forge-dev
+
+  - name: gen-ci-manager-dryrun
+    src: ./cmd/ci-manager-dryrun
+    engine: go://forge-dev
+
+  - name: gen-ci-trigger-watch
+    src: ./cmd/ci-trigger-watch
+    engine: go://forge-dev
+
+  - name: gen-ci-gate-manual
+    src: ./cmd/ci-gate-manual
+    engine: go://forge-dev
+
+  - name: gen-ci-promotion-all
+    src: ./cmd/ci-promotion-all
+    engine: go://forge-dev
+
+  - name: gen-ci-compute-local
+    src: ./cmd/ci-compute-local
+    engine: go://forge-dev
+
+  - name: gen-ci-artifact-release
+    src: ./cmd/ci-artifact-release
+    engine: go://forge-dev
 
   - name: generate-mocks
     src: .

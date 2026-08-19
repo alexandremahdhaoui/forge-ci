@@ -1,0 +1,18 @@
+name: ci-compute-local
+type: generic
+version: 0.1.5
+description: Run targets here and harvest forge's artifact store.
+openapi:
+  specPath: ../../.forge/spec-cache/engines.v1.yaml
+generate:
+  packageName: main
+  docsBaseURL: https://raw.githubusercontent.com/alexandremahdhaoui/forge-ci/refs/heads/main
+  tools:
+    - name: declare
+      description: Report the resources this compute needs.
+      input: DeclareInput
+      output: DeclareOutput
+    - name: run
+      description: Run every target and report what happened.
+      input: RunInput
+      output: RunOutput
