@@ -45,6 +45,16 @@ which is why the integration suite exists.
 handed to an engine goes through `orEmpty`. Miss one call site and only that
 engine breaks, at runtime, in the field.
 
+**A go.work hides an incomplete go.sum until CI.** This repo shipped four tags
+that did not build. `go.sum` held 13 of the 36 lines it needed, and the
+workspace let it borrow the rest from sibling modules. A pristine clone failed
+outright.
+
+The `standalone` stage builds with `GOWORK=off` and fails when `go mod tidy`
+would change anything. Never trust a build that ran inside the workspace, and
+never trust one where you passed `-mod=mod`, which silently repairs `go.sum`
+and then looks like proof.
+
 **`go-build` refuses a repo with no commits.** It stamps binaries with a git
 SHA. Commit before the first `forge build`.
 
