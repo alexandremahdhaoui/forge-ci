@@ -20,7 +20,7 @@ func (c *Controller) Bootstrap(ctx context.Context, p config.Pipeline, root stri
 		return Report{}, err
 	}
 
-	if err := c.putJSON(ctx, index, KindRevision, revision.ID, revision); err != nil {
+	if err := c.putJSON(ctx, index, KindRevision, revision.ID, toWire(revision)); err != nil {
 		return Report{}, err
 	}
 
