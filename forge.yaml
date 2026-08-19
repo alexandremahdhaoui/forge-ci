@@ -76,6 +76,12 @@ test:
       command: sh
       args: ["hack/no-hardcoding.sh"]
 
+  - name: architecture
+    runner: go://generic-test-runner
+    spec:
+      command: sh
+      args: ["hack/architecture.sh"]
+
   - name: docs
     runner: go://generic-test-runner
     spec:
