@@ -101,6 +101,12 @@ test:
       command: sh
       args: ["hack/engine-docs.sh"]
 
+  - name: unwired
+    runner: go://generic-test-runner
+    spec:
+      command: sh
+      args: ["hack/unwired.sh"]
+
   - name: architecture
     runner: go://generic-test-runner
     spec:

@@ -15,10 +15,6 @@ const (
 	StatusFailed  Status = "failed"
 )
 
-func (s Status) Terminal() bool {
-	return s == StatusPassed || s == StatusFailed
-}
-
 type Resource struct {
 	Kind string         `json:"kind" jsonschema:"Resource kind, for example directory or table"`
 	Name string         `json:"name" jsonschema:"Unique name within the kind"`
