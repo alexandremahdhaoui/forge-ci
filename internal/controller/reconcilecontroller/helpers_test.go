@@ -3,6 +3,7 @@ package reconcilecontroller_test
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"testing"
 	"time"
 
@@ -29,8 +30,11 @@ type call struct {
 
 type fakeEngines struct {
 	t     *testing.T
+	mu    sync.Mutex
 	store map[string]string
 	calls []call
+	live  int
+	peak  int
 
 	runOutputs map[string]citypes.RunOutput
 	gateStatus citypes.Status
@@ -58,10 +62,18 @@ func (f *fakeEngines) caller() *engineadaptermock.MockCaller {
 }
 
 func (f *fakeEngines) dispatch(_ context.Context, uri, tool string, in, out any) error {
+	f.mu.Lock()
 	f.calls = append(f.calls, call{uri, tool})
+	err, failing := f.failOn[call{uri, tool}]
+	f.mu.Unlock()
 
-	if err, ok := f.failOn[call{uri, tool}]; ok {
+	if failing {
 		return err
+	}
+
+	if uri == uriCompute && tool == "run" {
+		f.enter()
+		defer f.leave()
 	}
 
 	switch {
@@ -81,14 +93,18 @@ func (f *fakeEngines) dispatch(_ context.Context, uri, tool string, in, out any)
 		var input citypes.StateGetInput
 		require.NoError(f.t, remarshal(in, &input))
 
+		f.mu.Lock()
 		payload, ok := f.store[input.Kind+"/"+input.Key]
+		f.mu.Unlock()
 
 		return assign(out, citypes.StateGetOutput{Found: ok, Payload: payload})
 	case uri == uriState && tool == "put":
 		var input citypes.StatePutInput
 		require.NoError(f.t, remarshal(in, &input))
 
+		f.mu.Lock()
 		f.store[input.Kind+"/"+input.Key] = input.Payload
+		f.mu.Unlock()
 
 		return nil
 	case uri == uriCompute && tool == "run":
@@ -144,7 +160,29 @@ func (f *fakeEngines) dispatch(_ context.Context, uri, tool string, in, out any)
 	return nil
 }
 
+func (f *fakeEngines) enter() {
+	f.mu.Lock()
+	f.live++
+
+	if f.live > f.peak {
+		f.peak = f.live
+	}
+
+	f.mu.Unlock()
+
+	time.Sleep(20 * time.Millisecond)
+}
+
+func (f *fakeEngines) leave() {
+	f.mu.Lock()
+	f.live--
+	f.mu.Unlock()
+}
+
 func (f *fakeEngines) counted(c call) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
 	n := 0
 
 	for _, got := range f.calls {
@@ -174,9 +212,14 @@ func remarshal(from, into any) error {
 }
 
 func clock() func() time.Time {
+	var mu sync.Mutex
+
 	n := 0
 
 	return func() time.Time {
+		mu.Lock()
+		defer mu.Unlock()
+
 		n++
 
 		return time.Date(2026, 8, 19, 0, 0, n, 0, time.UTC)

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/engineadapter"
@@ -65,6 +66,8 @@ type Controller struct {
 	caller engineadapter.Caller
 	git    gitadapter.Git
 	now    func() time.Time
+
+	state sync.Mutex
 }
 
 func New(caller engineadapter.Caller, git gitadapter.Git, now func() time.Time) *Controller {
@@ -118,15 +121,30 @@ func (c *Controller) applyStage(
 	revision citypes.Revision,
 	root string,
 ) (StageReport, error) {
-	report := StageReport{Name: stage.Name}
+	report := StageReport{Name: stage.Name, Runs: make([]citypes.Run, len(stage.Substages))}
 
-	for _, sub := range stage.Substages {
-		run, err := c.applySubstage(ctx, p, index, stage, sub, revision, root)
+	failures := make([]error, len(stage.Substages))
+
+	var wg sync.WaitGroup
+
+	for i, sub := range stage.Substages {
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			run, err := c.applySubstage(ctx, p, index, stage, sub, revision, root)
+			report.Runs[i] = run
+			failures[i] = err
+		}()
+	}
+
+	wg.Wait()
+
+	for _, err := range failures {
 		if err != nil {
 			return StageReport{}, err
 		}
-
-		report.Runs = append(report.Runs, run)
 	}
 
 	advance, reason, err := c.promote(ctx, index, stage, report.Runs)
@@ -459,6 +477,9 @@ func (c *Controller) putJSON(ctx context.Context, index engineIndex, kind, key s
 }
 
 func (c *Controller) callState(ctx context.Context, index engineIndex, tool string, in, out any) error {
+	c.state.Lock()
+	defer c.state.Unlock()
+
 	if err := c.caller.Call(ctx, index.stateURI, tool, in, out); err != nil {
 		return fmt.Errorf("state engine %q: %w", index.stateAlias, err)
 	}

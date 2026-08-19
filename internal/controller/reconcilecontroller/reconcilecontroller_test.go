@@ -529,3 +529,51 @@ func TestAWorktreeFailureNamesTheRepo(t *testing.T) {
 	require.ErrorIs(t, err, errBoom)
 	require.Contains(t, err.Error(), "resolving the revision of golden-rust")
 }
+
+func TestSubstagesRunAtTheSameTime(t *testing.T) {
+	f := newFakeEngines(t)
+
+	subs := make([]config.Substage, 0, 4)
+	for _, name := range []string{"rust", "go", "python", "typescript"} {
+		subs = append(subs, substage(name, []string{"build"}))
+	}
+
+	report, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).
+		Apply(context.Background(), pipeline(stage("build", subs...)), "/work")
+	require.NoError(t, err)
+	require.Len(t, report.Stages[0].Runs, 4)
+	require.Equal(t, 4, f.peak,
+		"substages are documented as running at the same time, so all four must be in flight together")
+}
+
+func TestTheReportKeepsSubstageOrderDespiteConcurrency(t *testing.T) {
+	f := newFakeEngines(t)
+
+	report, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).
+		Apply(context.Background(), pipeline(stage("build",
+			substage("first", []string{"build"}),
+			substage("second", []string{"build"}),
+			substage("third", []string{"build"}),
+		)), "/work")
+	require.NoError(t, err)
+	require.Equal(t, []string{"first", "second", "third"}, []string{
+		report.Stages[0].Runs[0].Substage,
+		report.Stages[0].Runs[1].Substage,
+		report.Stages[0].Runs[2].Substage,
+	})
+}
+
+func TestOneFailingSubstageStillReportsTheOthers(t *testing.T) {
+	f := newFakeEngines(t)
+	f.runOutputs["build/go"] = citypes.RunOutput{Status: citypes.StatusFailed, Message: "vet found a bug"}
+
+	report, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).
+		Apply(context.Background(), pipeline(stage("build",
+			substage("rust", []string{"build"}),
+			substage("go", []string{"build"}),
+		)), "/work")
+	require.NoError(t, err)
+	require.False(t, report.Advanced())
+	require.Equal(t, citypes.StatusPassed, report.Stages[0].Runs[0].Status)
+	require.Equal(t, citypes.StatusFailed, report.Stages[0].Runs[1].Status)
+}

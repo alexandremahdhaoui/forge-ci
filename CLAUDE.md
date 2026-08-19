@@ -45,6 +45,13 @@ which is why the integration suite exists.
 handed to an engine goes through `orEmpty`. Miss one call site and only that
 engine breaks, at runtime, in the field.
 
+**Substages run at the same time, so anything they share needs a lock.** They
+were sequential for a while and both the schema and the generated docs claimed
+otherwise, which is the kind of lie that only shows up when someone relies on
+it. State writes are serialized behind one mutex, because the git state engine
+commits and two concurrent commits in one repo race. An injected clock must be
+safe too. Run `go test -race`.
+
 **A revision covers uncommitted work, so a repo must gitignore its own output.**
 The revision id hashes each repo's HEAD plus a hash of its uncommitted changes.
 Without that, an edit that breaks the build is invisible: the trigger fires, the
