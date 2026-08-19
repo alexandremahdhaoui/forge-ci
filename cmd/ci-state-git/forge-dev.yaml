@@ -1,0 +1,26 @@
+name: ci-state-git
+type: generic
+version: 0.1.5
+description: Read and write a state repo, committing each record.
+openapi:
+  specPath: ../../.forge/spec-cache/revision/revision.v1.yaml
+generate:
+  packageName: main
+  docsBaseURL: https://raw.githubusercontent.com/alexandremahdhaoui/forge-ci/refs/heads/main
+  tools:
+    - name: declare
+      description: Report the directories the state repo needs.
+      input: DeclareInput
+      output: DeclareOutput
+    - name: get
+      description: Read one record.
+      input: StateGetInput
+      output: StateGetOutput
+    - name: put
+      description: Write one record and commit it.
+      input: StatePutInput
+      output: StateGetOutput
+    - name: list
+      description: List the keys under one kind.
+      input: StateGetInput
+      output: StateListOutput

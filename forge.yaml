@@ -22,6 +22,14 @@ build:
           github.com/alexandremahdhaoui/forge-revision-spec spec/revision.v1.yaml
           .forge/spec-cache/revision
 
+  # ci-state-git generates its MCP surface from forge-revision-spec's schema.
+  # The contract two tools read is the same file the engine is built from.
+  # The version is pinned: the short form go://forge-dev resolves against this
+  # repo's own git describe, which is forge-ci's version, not forge's.
+  - name: gen-ci-state-git
+    src: ./cmd/ci-state-git
+    engine: go://github.com/alexandremahdhaoui/forge/cmd/forge-dev@v0.44.0
+
   - name: generate-mocks
     src: .
     engine: go://generic-builder
