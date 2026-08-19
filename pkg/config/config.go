@@ -254,12 +254,6 @@ func (p Pipeline) Validate() error {
 
 		if s.Release != "" {
 			requirePort(where+": release", s.Release, PortArtifact)
-
-			// A release publishes under a tag. Without one there is nothing to
-			// call it, and finding that out mid pipeline is too late.
-			if strings.TrimSpace(p.Version) == "" {
-				add("%s: release needs a version on the pipeline", where)
-			}
 		}
 
 		if len(s.Substages) == 0 {

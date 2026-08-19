@@ -94,3 +94,29 @@ func TestEveryPortIsAccepted(t *testing.T) {
 		require.Equal(t, strings.ToLower(string(p)), string(p))
 	}
 }
+
+// A pipeline that names no version asks for the patch after the highest tag
+// the workspace carries. Requiring one here would make that unreachable.
+func TestAReleasingStageNeedsNoVersionOnThePipeline(t *testing.T) {
+	t.Parallel()
+
+	err := config.Pipeline{
+		Name:     "demo",
+		State:    "st",
+		Managers: []config.Manager{{Alias: "local", Engine: "go://m"}},
+		Engines: []config.Engine{
+			{Alias: "st", Type: config.PortState, Engine: "go://x", Manager: "local"},
+			{Alias: "gh", Type: config.PortArtifact, Engine: "go://x", Manager: "local"},
+			{Alias: "here", Type: config.PortCompute, Engine: "go://x", Manager: "local"},
+		},
+		Targets: []config.Target{{Alias: "t", Forge: "test-all"}},
+		Stages: []config.Stage{{
+			Name:    "prod",
+			Release: "gh",
+			Substages: []config.Substage{
+				{Name: "default", Engine: "here", Manager: "local", Targets: []string{"t"}},
+			},
+		}},
+	}.Validate()
+	require.NoError(t, err)
+}

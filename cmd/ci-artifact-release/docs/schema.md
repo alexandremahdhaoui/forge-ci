@@ -6,6 +6,7 @@ The `spec` block on this engine's entry in `forge-ci.yaml`.
 
 | Key | Type | Required | Means |
 |---|---|---|---|
+| `releaseIn` | string | yes | Repo the release is created in. The workspace root is not a repo, so a release of the whole workspace belongs in the repo that holds its files. |
 | `root` | string | no | Directory holding the repos. Defaults to the working directory. |
 
 forge-ci never validates a spec. This engine does, because only it knows what the keys mean.

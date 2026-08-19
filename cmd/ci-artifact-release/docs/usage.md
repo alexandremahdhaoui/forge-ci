@@ -35,6 +35,7 @@ engines:
     engine: "go://github.com/alexandremahdhaoui/forge-ci/cmd/ci-artifact-release@v0.1.0"
     manager: local
     spec:
+      releaseIn: <string>
       root: <string>
 ```
 

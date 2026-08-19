@@ -29,6 +29,10 @@ notes: 'A dirty revision is refused. It was never proven, so releasing it publis
 
   published by whatever built it.'
 spec:
+- key: releaseIn
+  type: string
+  required: true
+  means: Repo the release is created in. The workspace root is not a repo, so a release of the whole workspace belongs in the repo that holds its files.
 - key: root
   type: string
   required: false

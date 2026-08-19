@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/execadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/releaseadapter"
@@ -110,6 +111,15 @@ func publish(
 		root = "."
 	}
 
+	// The release is created in a repo, and the workspace root is not one. It
+	// belongs in the repo that holds the workspace files, because that is what
+	// a release of the whole workspace is a release of.
+	home, _ := in.Spec["releaseIn"].(string)
+	if home == "" {
+		return citypes.ArtifactOutput{Reason: "spec.releaseIn names no repo to create the release in"},
+			fmt.Errorf("releasing %s: spec.releaseIn is required", plan.Version)
+	}
+
 	out := citypes.ArtifactOutput{Tagged: []string{}}
 
 	for _, tag := range plan.Tags {
@@ -122,7 +132,7 @@ func publish(
 		out.Tagged = append(out.Tagged, tag.Repo)
 	}
 
-	url, err := publisher.Release(ctx, root, plan.Version, plan.Uploads)
+	url, err := publisher.Release(ctx, filepath.Join(root, home), plan.Version, plan.Uploads)
 	if err != nil {
 		return out, fmt.Errorf("releasing %s: %w", plan.Version, err)
 	}
