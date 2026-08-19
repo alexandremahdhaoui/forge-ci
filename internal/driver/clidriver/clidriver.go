@@ -17,9 +17,12 @@ import (
 
 const DefaultPath = "pipeline.yaml"
 
+const EnvInApply = "FORGE_CI_IN_APPLY"
+
 var (
 	ErrUsage   = errors.New("usage: forge-ci <bootstrap|apply|status|poll|validate> [--config path] [--root dir]")
 	ErrBlocked = errors.New("the pipeline did not advance")
+	ErrRecurse = errors.New("apply cannot run inside apply")
 )
 
 type Reconciler interface {
@@ -32,10 +35,17 @@ type Reconciler interface {
 type Driver struct {
 	out        io.Writer
 	reconciler Reconciler
+	applying   bool
 }
 
 func New(out io.Writer, reconciler Reconciler) *Driver {
 	return &Driver{out: out, reconciler: reconciler}
+}
+
+func (d *Driver) AlreadyApplying(applying bool) *Driver {
+	d.applying = applying
+
+	return d
 }
 
 func (d *Driver) Run(ctx context.Context, args []string) error {
@@ -58,6 +68,12 @@ func (d *Driver) Run(ctx context.Context, args []string) error {
 			return d.reconciler.Bootstrap(ctx, p, root)
 		}, false)
 	case "apply":
+		if d.applying {
+			return fmt.Errorf(
+				"%w: a stage ran forge-ci apply. use forgeCI: bootstrap for a self stage, "+
+					"which reconciles the pipeline without running it again", ErrRecurse)
+		}
+
 		return d.reportOf(func() (reconcilecontroller.Report, error) {
 			return d.reconciler.Apply(ctx, p, root)
 		}, true)
@@ -174,6 +190,12 @@ func render(report reconcilecontroller.Report) string {
 			}
 
 			fmt.Fprintln(&b)
+
+			if run.Status == citypes.StatusFailed && run.Output != "" {
+				for _, line := range strings.Split(strings.TrimRight(run.Output, "\n"), "\n") {
+					fmt.Fprintf(&b, "    | %s\n", line)
+				}
+			}
 
 			for _, gate := range run.Gates {
 				fmt.Fprintf(&b, "    gate %s %s %s\n", gate.Alias, gate.Status, gate.Message)

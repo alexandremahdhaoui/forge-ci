@@ -314,3 +314,70 @@ func TestSwappingTheManagerIsRefusedEndToEnd(t *testing.T) {
 	require.Contains(t, out, "owned by a different manager")
 	require.Contains(t, out, "import it or destroy it first")
 }
+
+func TestApplyInsideApplyIsRefused(t *testing.T) {
+	root, _ := workspace(t, "true")
+	config := filepath.Join(root, "pipeline.yaml")
+
+	raw, err := os.ReadFile(config)
+	require.NoError(t, err)
+
+	withSelf := strings.Replace(string(raw),
+		`targets:
+  - alias: build-all`,
+		`targets:
+  - alias: self-apply
+    forgeCI: apply
+  - alias: build-all`, 1)
+	withSelf += `  - name: self
+    promotion: all-pass
+    substages:
+      - name: default
+        engine: here
+        manager: local
+        targets: [self-apply]
+`
+	require.NoError(t, os.WriteFile(config, []byte(withSelf), 0o600))
+
+	out, err := run(t, root, "forge-ci", "apply", "--config", config)
+	require.Error(t, err, out)
+	require.Contains(t, out, "apply cannot run inside apply")
+	require.Contains(t, out, "use forgeCI: bootstrap for a self stage")
+	require.Contains(t, out, "| forge-ci:")
+}
+
+func TestASelfStageUsingBootstrapReconcilesWithoutRecursing(t *testing.T) {
+	root, statePath := workspace(t, "true")
+	config := filepath.Join(root, "pipeline.yaml")
+
+	raw, err := os.ReadFile(config)
+	require.NoError(t, err)
+
+	withSelf := strings.Replace(string(raw),
+		`targets:
+  - alias: build-all`,
+		`targets:
+  - alias: self-apply
+    forgeCI: bootstrap
+  - alias: build-all`, 1)
+	withSelf += `  - name: self
+    promotion: all-pass
+    substages:
+      - name: default
+        engine: here
+        manager: local
+        targets: [self-apply]
+`
+	require.NoError(t, os.WriteFile(config, []byte(withSelf), 0o600))
+
+	out := mustRun(t, root, "forge-ci", "apply", "--config", config)
+	require.Contains(t, out, "stage self")
+	require.Contains(t, out, "default passed")
+
+	raw, err = os.ReadFile(filepath.Join(statePath, "runs", revisionID(t, statePath), "self", "default.json"))
+	require.NoError(t, err)
+
+	var selfRun citypes.Run
+	require.NoError(t, json.Unmarshal(raw, &selfRun))
+	require.Equal(t, citypes.StatusPassed, selfRun.Status)
+}

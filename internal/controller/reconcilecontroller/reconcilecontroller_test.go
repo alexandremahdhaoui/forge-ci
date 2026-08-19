@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/reconcilecontroller"
@@ -436,4 +437,33 @@ func TestAPipelineWithNoReposStillResolvesARevision(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, report.Revision.ID)
 	require.Empty(t, report.Revision.Repos)
+}
+
+func TestTheRunOutputIsRecordedSoAFailureCanBeRead(t *testing.T) {
+	f := newFakeEngines(t)
+	f.runOutputs["build/default"] = citypes.RunOutput{
+		Status: citypes.StatusFailed, Message: "exited 1", Output: "two tests failed\n",
+	}
+
+	report, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(),
+		pipeline(stage("build", substage("default", []string{"build"}))), "/work")
+	require.NoError(t, err)
+	require.Equal(t, "two tests failed\n", report.Stages[0].Runs[0].Output)
+}
+
+func TestALongOutputIsTruncatedFromTheFront(t *testing.T) {
+	f := newFakeEngines(t)
+	f.runOutputs["build/default"] = citypes.RunOutput{
+		Status: citypes.StatusFailed,
+		Output: strings.Repeat("x", 20000) + "THE INTERESTING PART",
+	}
+
+	report, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(),
+		pipeline(stage("build", substage("default", []string{"build"}))), "/work")
+	require.NoError(t, err)
+
+	got := report.Stages[0].Runs[0].Output
+	require.Less(t, len(got), 20000)
+	require.Contains(t, got, "THE INTERESTING PART")
+	require.Contains(t, got, "earlier output dropped")
 }

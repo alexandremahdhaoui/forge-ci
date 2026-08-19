@@ -123,6 +123,7 @@ type Run struct {
 	StartedAt time.Time    `json:"startedAt"`
 	Duration  float64      `json:"duration"`
 	Message   string       `json:"message,omitempty"`
+	Output    string       `json:"output,omitempty"`
 	Forge     *ForgeResult `json:"forge,omitempty"`
 	Gates     []GateResult `json:"gates,omitempty"`
 }

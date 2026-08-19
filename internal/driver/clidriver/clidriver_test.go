@@ -274,3 +274,49 @@ func TestAFailingWriterIsReported(t *testing.T) {
 type brokenWriter struct{}
 
 func (brokenWriter) Write([]byte) (int, error) { return 0, errBoom }
+
+func TestApplyRefusesToRunInsideApply(t *testing.T) {
+	err := clidriver.New(&bytes.Buffer{}, clidrivermock.NewMockReconciler(t)).
+		AlreadyApplying(true).
+		Run(context.Background(), []string{"apply", "--config", write(t, minimal)})
+	require.ErrorIs(t, err, clidriver.ErrRecurse)
+	require.Contains(t, err.Error(), "use forgeCI: bootstrap for a self stage")
+}
+
+func TestTheOtherVerbsStillWorkInsideApply(t *testing.T) {
+	r := clidrivermock.NewMockReconciler(t)
+	r.EXPECT().Bootstrap(mock.Anything, mock.Anything, mock.Anything).Return(passingReport(), nil).Once()
+
+	require.NoError(t, clidriver.New(&bytes.Buffer{}, r).
+		AlreadyApplying(true).
+		Run(context.Background(), []string{"bootstrap", "--config", write(t, minimal)}))
+}
+
+func TestAFailingRunPrintsItsOutput(t *testing.T) {
+	var out bytes.Buffer
+
+	report := blockedReport()
+	report.Stages[0].Runs[0].Output = "two tests failed\nsecond line\n"
+
+	r := clidrivermock.NewMockReconciler(t)
+	r.EXPECT().Apply(mock.Anything, mock.Anything, mock.Anything).Return(report, nil).Once()
+
+	err := clidriver.New(&out, r).Run(context.Background(), []string{"apply", "--config", write(t, minimal)})
+	require.ErrorIs(t, err, clidriver.ErrBlocked)
+	require.Contains(t, out.String(), "    | two tests failed")
+	require.Contains(t, out.String(), "    | second line")
+}
+
+func TestAPassingRunDoesNotPrintItsOutput(t *testing.T) {
+	var out bytes.Buffer
+
+	report := passingReport()
+	report.Stages[0].Runs[0].Output = "lots of noise\n"
+
+	r := clidrivermock.NewMockReconciler(t)
+	r.EXPECT().Apply(mock.Anything, mock.Anything, mock.Anything).Return(report, nil).Once()
+
+	require.NoError(t, clidriver.New(&out, r).
+		Run(context.Background(), []string{"apply", "--config", write(t, minimal)}))
+	require.NotContains(t, out.String(), "lots of noise")
+}

@@ -32,6 +32,8 @@ const (
 	KindOwned    = "owned"
 
 	OwnedKey = "resources"
+
+	maxOutput = 16384
 )
 
 var ErrEngine = errors.New("engine is not declared")
@@ -188,6 +190,7 @@ func (c *Controller) applySubstage(
 		StartedAt: started,
 		Duration:  c.now().Sub(started).Seconds(),
 		Message:   out.Message,
+		Output:    tail(out.Output, maxOutput),
 		Forge:     out.Forge,
 	}
 
@@ -450,6 +453,14 @@ func (c *Controller) run(ctx context.Context, engine config.Engine, in citypes.R
 	}
 
 	return out, nil
+}
+
+func tail(s string, limit int) string {
+	if len(s) <= limit {
+		return s
+	}
+
+	return "... earlier output dropped ...\n" + s[len(s)-limit:]
 }
 
 func allGatesPassed(run citypes.Run) bool {

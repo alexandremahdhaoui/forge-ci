@@ -26,7 +26,15 @@ func main() {
 		Name:    "forge-ci",
 		Version: Version,
 		RunCLI: func() error {
-			return clidriver.New(os.Stdout, reconciler).Run(context.Background(), os.Args[1:])
+			applying := os.Getenv(clidriver.EnvInApply) != ""
+
+			if err := os.Setenv(clidriver.EnvInApply, "1"); err != nil {
+				return fmt.Errorf("marking the apply in progress: %w", err)
+			}
+
+			return clidriver.New(os.Stdout, reconciler).
+				AlreadyApplying(applying).
+				Run(context.Background(), os.Args[1:])
 		},
 		FailureHandler: func(err error) {
 			fmt.Fprintf(os.Stderr, "forge-ci: %v\n", err)
