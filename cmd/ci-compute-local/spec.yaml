@@ -1,0 +1,33 @@
+name: ci-compute-local
+port: compute
+version: v0.1.4
+tagline: Run a substage's targets on this machine and harvest what forge produced.
+why: 'This is what makes the tenet true. What runs in CI runs locally, because locally
+
+  is the only place it runs.
+
+
+  After a forge target it reads `.forge/artifact-store.yaml` from the directory
+
+  forge ran in, so every test report and artifact lands in CI state for free.'
+tools:
+- name: declare
+  does: Report the resources this compute target needs. It needs none.
+- name: run
+  does: Run the targets and return the outcome.
+example:
+  tool: run
+  input: '{"revision":"abc","stage":"build","substage":"default","root":"/work","targets":[{"alias":"build-all","forge":"test-all","in":["my-repo"]}]}'
+notes: 'A failing target is **not** an error. It returns `status: failed`. An error means
+
+  the machinery broke, not that the code did.
+
+
+  It harvests only reports that started after the run did. forge''s store keeps
+
+  every past run, so without that filter a run of three stages reports seventy.
+
+
+  `params` are templated in as `{{.Params.name}}`. A missing key is an error,
+
+  never an empty string.'

@@ -320,3 +320,83 @@ func TestAPassingRunDoesNotPrintItsOutput(t *testing.T) {
 		Run(context.Background(), []string{"apply", "--config", write(t, minimal)}))
 	require.NotContains(t, out.String(), "lots of noise")
 }
+
+func TestGraphRendersMermaidFromLiveState(t *testing.T) {
+	var out bytes.Buffer
+
+	r := clidrivermock.NewMockReconciler(t)
+	r.EXPECT().Status(mock.Anything, mock.Anything, mock.Anything).Return(passingReport(), nil).Once()
+
+	err := clidriver.New(&out, r).Run(context.Background(), []string{"graph", "--config", write(t, minimal)})
+	require.NoError(t, err)
+
+	text := out.String()
+	require.True(t, strings.HasPrefix(text, "flowchart LR\n"))
+	require.Contains(t, text, `revision["revision rev123<br/>golden-rust abcdef012345"]`)
+	require.Contains(t, text, `subgraph s0["build"]`)
+	require.Contains(t, text, ":::passed")
+	require.Contains(t, text, `done(["released"])`)
+	require.Contains(t, text, "classDef passed")
+}
+
+func TestGraphShowsAFailureInRed(t *testing.T) {
+	var out bytes.Buffer
+
+	r := clidrivermock.NewMockReconciler(t)
+	r.EXPECT().Status(mock.Anything, mock.Anything, mock.Anything).Return(blockedReport(), nil).Once()
+
+	require.NoError(t, clidriver.New(&out, r).
+		Run(context.Background(), []string{"graph", "--config", write(t, minimal)}))
+	require.Contains(t, out.String(), ":::failed")
+}
+
+func TestGraphMarksUnrunSubstagesPending(t *testing.T) {
+	var out bytes.Buffer
+
+	r := clidrivermock.NewMockReconciler(t)
+	r.EXPECT().Status(mock.Anything, mock.Anything, mock.Anything).
+		Return(reconcilecontroller.Report{}, nil).Once()
+
+	require.NoError(t, clidriver.New(&out, r).
+		Run(context.Background(), []string{"graph", "--config", write(t, minimal)}))
+
+	text := out.String()
+	require.Contains(t, text, ":::pending")
+	require.Contains(t, text, "revision none")
+	require.Contains(t, text, `trigger["manual"]`)
+}
+
+func TestGraphShowsGatesAndEngines(t *testing.T) {
+	var out bytes.Buffer
+
+	withGate := strings.Replace(minimal, `        targets: [build]`,
+		`        targets: [build]
+        gates: [approve]`, 1)
+	withGate = strings.Replace(withGate, `  - alias: st`,
+		`  - alias: approve
+    type: gate
+    engine: "go://x/cmd/g@v0.1.0"
+    manager: local
+  - alias: st`, 1)
+
+	r := clidrivermock.NewMockReconciler(t)
+	r.EXPECT().Status(mock.Anything, mock.Anything, mock.Anything).Return(passingReport(), nil).Once()
+
+	require.NoError(t, clidriver.New(&out, r).
+		Run(context.Background(), []string{"graph", "--config", write(t, withGate)}))
+
+	text := out.String()
+	require.Contains(t, text, "gate approve")
+	require.Contains(t, text, `subgraph engines["engines and managers"]`)
+	require.Contains(t, text, "<i>compute</i>")
+}
+
+func TestGraphPropagatesAnError(t *testing.T) {
+	r := clidrivermock.NewMockReconciler(t)
+	r.EXPECT().Status(mock.Anything, mock.Anything, mock.Anything).
+		Return(reconcilecontroller.Report{}, errBoom).Once()
+
+	err := clidriver.New(&bytes.Buffer{}, r).
+		Run(context.Background(), []string{"graph", "--config", write(t, minimal)})
+	require.ErrorIs(t, err, errBoom)
+}

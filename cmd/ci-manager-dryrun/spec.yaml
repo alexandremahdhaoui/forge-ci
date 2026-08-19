@@ -1,0 +1,16 @@
+name: ci-manager-dryrun
+port: manager
+version: v0.1.4
+tagline: Report what would be created, and change nothing.
+why: 'It exists to prove the manager seam is real. Swap `local` for `dryrun`, apply,
+
+  and the ownership record makes forge-ci refuse. That refusal is the test.'
+tools:
+- name: reconcile
+  does: Report what would be realized. Touch nothing.
+example:
+  tool: reconcile
+  input: '{"manager":"dryrun","resources":[{"kind":"directory","name":"/tmp/state"}]}'
+notes: 'It realizes nothing, so it accepts any kind. It still refuses when a resource is
+
+  owned by a different manager, because that check lives in the controller.'

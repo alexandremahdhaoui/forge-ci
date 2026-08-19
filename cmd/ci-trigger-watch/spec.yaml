@@ -1,0 +1,30 @@
+name: ci-trigger-watch
+port: trigger
+version: v0.1.4
+tagline: Fingerprint the watched repos and say whether they moved.
+why: 'It is stateless. It reports a fingerprint and compares it to the one you hand it,
+
+  so forge-ci keeps the history and the engine keeps none.
+
+
+  An uncommitted edit counts as a move, which is what you want on a laptop.'
+tools:
+- name: declare
+  does: Report the resources this trigger needs. It needs none.
+- name: poll
+  does: Fingerprint the watched repos and compare with spec.previous.
+example:
+  tool: poll
+  input: '{"spec":{"watch":["../my-repo"],"previous":""}}'
+notes: 'The fingerprint covers each repo''s HEAD and whether it is dirty. It is order
+
+  independent, so listing the same repos differently gives the same answer.'
+spec:
+- key: watch
+  type: list of string
+  required: true
+  means: Directories to watch. Each must be a git repo.
+- key: previous
+  type: string
+  required: false
+  means: The last fingerprint. Omit it and the first look counts as changed.

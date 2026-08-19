@@ -20,7 +20,7 @@ const DefaultPath = "pipeline.yaml"
 const EnvInApply = "FORGE_CI_IN_APPLY"
 
 var (
-	ErrUsage   = errors.New("usage: forge-ci <bootstrap|apply|status|poll|validate> [--config path] [--root dir]")
+	ErrUsage   = errors.New("usage: forge-ci <bootstrap|apply|status|poll|graph|validate> [--config path] [--root dir]")
 	ErrBlocked = errors.New("the pipeline did not advance")
 	ErrRecurse = errors.New("apply cannot run inside apply")
 )
@@ -81,6 +81,13 @@ func (d *Driver) Run(ctx context.Context, args []string) error {
 		return d.reportOf(func() (reconcilecontroller.Report, error) {
 			return d.reconciler.Status(ctx, p, root)
 		}, false)
+	case "graph":
+		report, err := d.reconciler.Status(ctx, p, root)
+		if err != nil {
+			return err
+		}
+
+		return d.write(mermaid(p, report))
 	case "poll":
 		out, err := d.reconciler.Poll(ctx, p)
 		if err != nil {

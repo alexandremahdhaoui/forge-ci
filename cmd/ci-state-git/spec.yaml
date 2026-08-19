@@ -1,0 +1,35 @@
+name: ci-state-git
+port: state
+version: v0.1.4
+tagline: Read and write CI state in a git repo, committing each record.
+why: 'Git gives history, atomic writes, auth you already have and an audit trail, for
+
+  nothing. It is a normal repo. Read it with `git log`.'
+tools:
+- name: declare
+  does: Report the directories the state repo needs.
+- name: get
+  does: Read one record.
+- name: put
+  does: Write one record and commit it.
+- name: list
+  does: List the keys under one kind.
+example:
+  tool: get
+  input: '{"kind":"revision","key":"abc123","spec":{"path":"../my-state"}}'
+notes: 'Kinds are `revision`, `run` and `owned`. A run key nests as
+
+  `<revision>/<stage>/<substage>`.
+
+
+  A key cannot escape the state root. `../../escape` lands inside it.
+
+
+  A missing record is `found: false`, never an error. Nothing to commit is not an
+
+  error either.'
+spec:
+- key: path
+  type: string
+  required: true
+  means: The state repo. Created and initialised if it is not a repo yet.

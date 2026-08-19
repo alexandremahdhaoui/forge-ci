@@ -1,0 +1,28 @@
+name: ci-manager-local
+port: manager
+version: v0.1.4
+tagline: Make declared resources exist on this machine, and record what it made.
+why: 'It creates directories and files. Nothing else. That is the point: a manager
+
+  you can run with no cloud and no credential, so the seam between engines and
+
+  managers is testable on a laptop.'
+tools:
+- name: reconcile
+  does: Realize every declared resource and return who owns it.
+example:
+  tool: reconcile
+  input: '{"manager":"local","resources":[{"kind":"directory","name":"/tmp/state"}]}'
+notes: 'It knows `directory` and `file`. An existing file is kept, never overwritten.
+
+  Anything else is refused by name.
+
+
+  It refuses outright when a resource is recorded as owned by a different manager.
+
+  It never creates a second copy beside the first.'
+spec:
+- key: statePath
+  type: string
+  required: false
+  means: Where to record what was created. Omit it and nothing is recorded.

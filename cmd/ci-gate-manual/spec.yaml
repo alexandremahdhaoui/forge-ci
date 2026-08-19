@@ -1,0 +1,26 @@
+name: ci-gate-manual
+port: gate
+version: v0.1.4
+tagline: Pass when an approval file exists, otherwise wait.
+why: 'A gate judges an outcome. It runs after a substage, never before, because a gate
+
+  before a substage produces "why is my CI not progressing".'
+tools:
+- name: declare
+  does: Report the resources this gate needs. It needs none.
+- name: evaluate
+  does: Judge a finished run.
+example:
+  tool: evaluate
+  input: '{"run":{"status":"passed"},"spec":{"approvalPath":"/tmp/approved"}}'
+notes: 'A failed substage returns `failed`, because there is nothing to approve.
+
+
+  No `approvalPath` returns `pending` and says how to set it. A gate that silently
+
+  passes is worse than one that blocks.'
+spec:
+- key: approvalPath
+  type: string
+  required: false
+  means: The file whose existence means approved. Omit it and the gate waits.

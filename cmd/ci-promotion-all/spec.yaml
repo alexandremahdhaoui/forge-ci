@@ -1,0 +1,31 @@
+name: ci-promotion-all
+port: promotion
+version: v0.1.4
+tagline: Advance a stage when enough of its substages passed.
+why: 'A promotion is the decision to move on, taken once per stage over every substage
+
+  outcome. It is a port, so `all`, a threshold, and anything you write yourself are
+
+  all just engines.'
+tools:
+- name: declare
+  does: Report the resources this promotion needs. It needs none.
+- name: evaluate
+  does: Decide whether the stage advances.
+example:
+  tool: evaluate
+  input: '{"stage":"prod","runs":[{"status":"passed"},{"status":"failed"}],"spec":{"threshold":90}}'
+notes: 'A substage counts as passed only when its status is `passed` **and** every gate
+
+  passed. A pending gate blocks the stage.
+
+
+  A stage with no runs never advances.
+
+
+  A threshold outside 0 to 100, or one that is not a number, is an error.'
+spec:
+- key: threshold
+  type: number
+  required: false
+  means: Percentage of substages that must pass. Defaults to 100.

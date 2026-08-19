@@ -1,33 +1,34 @@
 # Architecture
 
-forge-ci has three layers. Read them as want, do, and is.
+The hand written guide. Everything else under `docs/` is generated.
 
-| Layer | Holds | Where it lives |
+## Three layers
+
+| Layer | Holds | Lives in |
 |---|---|---|
 | Definition | what you want | `pipeline.yaml` |
 | Engines | what makes it happen | binaries named by URI |
 | State | what is true now | a state repo |
 
 forge answers what the targets are and how to build them, in one repo, on one
-machine. It does not answer which repos at which commits form a release, what
-runs where, or what gets promoted. forge-ci answers those and calls forge for
-the rest.
+machine. forge-ci answers which repos at which commits form a release, what
+runs where, and what gets promoted. It calls forge for the rest.
 
-## Two verbs
+## Verbs
 
 | Verb | Does |
 |---|---|
-| `forge-ci bootstrap` | Creates the minimum that lets the loop run. Once, by hand. |
-| `forge-ci apply` | Makes everything match the definition. This is the reconcile. |
+| `bootstrap` | Creates the minimum that lets the loop run. Once, by hand. |
+| `apply` | Makes everything match the definition. This is the reconcile. |
+| `status` | Reads without changing. |
+| `graph` | Renders the pipeline and its live state as mermaid. |
+| `poll` | Asks the triggers whether anything moved. |
+| `validate` | Checks the file and stops. |
 
-`apply` is idempotent. Run it twice and the second run does nothing, because
-nothing is outstanding. That is why triggers are dumb. A webhook, a cron and
-your keyboard all call the same thing, and a duplicate call costs nothing.
+`apply` is idempotent, so triggers are dumb. A webhook, a cron and your
+keyboard all call the same thing and a duplicate call costs nothing.
 
-`status` reads without changing anything. `poll` asks the triggers whether
-anything moved. `validate` checks the file and stops.
-
-## The reconcile loop
+## The loop
 
 ```
 read the definition
@@ -44,78 +45,54 @@ for each stage, in order:
     stop if it says no
 ```
 
-A substage that already passed is never run again. A substage that failed is
-retried on the next apply. That is what makes the loop safe to call on a timer.
+A passed substage is never run again. A failed one is retried next apply. That
+is what makes the loop safe on a timer.
 
-## The ports
-
-Everything pluggable is a binary named by a `go://` or `alias://` URI, spoken
-to over MCP. That is forge's own mechanism, so there is no registry, no plugin
-loader and no server to run.
+## Ports
 
 ```
 forge-ci
-   |
-   +-- compute    ci-compute-local      runs forge, harvests the artifact store
-   +-- state      ci-state-git          reads and writes a state repo
-   +-- trigger    ci-trigger-watch      fingerprints the watched repos
-   +-- gate       ci-gate-manual        waits for an approval file
-   +-- promotion  ci-promotion-all      advances on a pass threshold
-   |
-   +-- manager    ci-manager-local      creates directories and files
-                  ci-manager-dryrun     records intent, changes nothing
+   +-- compute    ci-compute-local    runs forge, harvests the artifact store
+   +-- state      ci-state-git        reads and writes a state repo
+   +-- trigger    ci-trigger-watch    fingerprints the watched repos
+   +-- gate       ci-gate-manual      waits for an approval file
+   +-- promotion  ci-promotion-all    advances on a pass threshold
+   +-- manager    ci-manager-local    creates directories and files
+                  ci-manager-dryrun   records intent, changes nothing
 ```
 
-Engines declare, managers realize. An engine says "I need this directory". It
-never says how, and it never names a manager kind. That is what lets you swap
-Terraform for CDK without touching a single engine.
+Engines declare, managers realize. An engine says it needs a directory. It never
+says how, and it never names a manager kind. That is what lets you swap
+Terraform for CDK without touching an engine.
 
-## Ownership, and why apply can refuse
+## Ownership, and why apply refuses
 
-forge-ci records which manager owns which resource. On the next apply it hands
-that record to the manager.
-
-If a resource is recorded as owned by `local` and the pipeline now says
-`dryrun`, the manager refuses and says so. It does not create a second copy
-beside the first.
+forge-ci records which manager owns which resource and hands that record back on
+the next apply. If a resource is owned by `local` and the pipeline now says
+`dryrun`, the manager refuses.
 
 That is the only honest answer. No IaC tool can adopt another one's state, so
-the choice is between stopping loudly and silently paying for two of
-everything.
+the choice is stopping loudly or paying for two of everything.
 
 ## Bootstrap
 
-Something has to run `apply`, and that something cannot create itself. So one
-command is manual, once.
+Something has to run `apply`, and it cannot create itself. So one command is
+manual, once. After that a stage can run `forge-ci bootstrap` to reconcile the
+pipeline from its own definition.
 
-```sh
-forge-ci bootstrap
-```
+That stage must use `bootstrap`, never `apply`. Apply inside apply recurses, and
+forge-ci refuses it by name.
 
-After that the pipeline updates itself, because `apply` is a target like any
-other and a stage can run it.
+Put it after the stage that proves the revision. Then a broken pipeline file
+breaks the next reconcile, not the running one.
 
-```yaml
-targets:
-  - alias: self-apply
-    forgeCI: apply
-
-stages:
-  - name: self
-    substages:
-      - { name: default, engine: here, manager: local, targets: [self-apply] }
-```
-
-Put that stage after the one that proves the revision. Then a broken pipeline
-file breaks the next reconcile, not the running one, and you can still fix it.
-
-**apply must never delete the trigger or the seed.** Everything else it may
-replace. Break that and a bad pipeline file leaves you back at the laptop.
+**apply must never delete the trigger or the seed.** Break that and a bad
+pipeline file leaves you back at the laptop.
 
 ## Layout
 
 ```
-cmd/                       one binary per engine, plus forge-ci
+cmd/                       one binary per engine, plus forge-ci and docgen
 pkg/config                 the pipeline schema and its validation
 pkg/citypes                the types every engine agrees on
 pkg/cienginekit            CLI and MCP from one tool definition
@@ -127,3 +104,7 @@ internal/mocks             generated, never edited
 
 An adapter declares the interface it satisfies. A controller accepts it. A
 driver holds no logic. main wires them and starts a driver.
+
+`pkg/cienginekit` is a known divergence. forge generates this from an OpenAPI
+spec via `go://forge-dev`, and forge-ci hand-rolled it because forge-dev has no
+engine type that fits. See the workspace `FOLLOWUP.md`.

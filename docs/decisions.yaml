@@ -1,0 +1,110 @@
+groups:
+  - name: Reversals
+    decisions:
+      - title: Webhooks, not polling
+        decided: A push webhook hits an endpoint you own, which dispatches only when there is work.
+        why: >-
+          Polling was argued twice for debouncing free. The numbers killed it. GitHub bills each
+          job rounded up to a minute, so a 15 minute poll is 2880 minutes a month against a 2000
+          minute free tier. A webhook is not an Actions job, so idle costs zero. The debounce
+          argument became moot once apply was idempotent.
+        costs: An endpoint to own and a signing secret to hold, which is what polling avoided.
+        reversed: true
+
+      - title: Engines declare, managers realize
+        decided: An engine declares the resources it needs. A manager makes them exist. An engine never names a manager kind.
+        why: >-
+          The argument against a manager layer was that it forces forge-ci to know the word
+          Terraform. That was wrong. ci-compute-lambda needs a Lambda and ci-state-dynamodb
+          needs a table. Both want Terraform and neither is about it. Two engines wanting the
+          same realizer earns a layer.
+        costs: A neutral resource description to design and version. Keep it tiny or you rebuild Crossplane.
+        reversed: true
+
+      - title: Stage and substage
+        decided: A stage holds substages. Exactly one inner level.
+        why: >-
+          First came stage, wave, cell and step, which was too complicated. Then the inner level
+          was deleted entirely, which forces stage names like prod-eu-west-1-cell-a. The lesson
+          is why cell lost as a name: a CI word that also means something at the deployment
+          layer collides one layer apart.
+        costs: Two levels to learn. State and logs are keyed by stage and substage.
+        reversed: true
+
+  - name: The pipeline
+    decisions:
+      - title: An ordered list, not a graph
+        decided: Stages run in the order you wrote them. There is no dependsOn.
+        why: A graph is complexity nobody asked for, and forge has no inter stage dependency either.
+        costs: No fan-in across stages. Anything concurrent is substages inside one stage.
+
+      - title: Gates run after, never before
+        decided: A gate judges an outcome. There is no when field.
+        why: A gate before a substage produces "why is my CI not progressing". The promotion holds the stage anyway.
+        costs: Approval before a risky deploy has to sit one substage earlier, which reads awkwardly.
+
+      - title: Gates and promotion are ports
+        decided: gates is a list on the substage. The stage has one promotion engine.
+        why: Auto and manual is not enough. A gate may check a metric. An aggregate needs a policy, because all-must-pass and nine-in-ten are both reasonable.
+        costs: Two more ports. Built in policies would have been less surface.
+
+      - title: No defaults, no inheritance
+        decided: engine, manager, targets, gates and params all live on the substage.
+        why: Inheritance plus override is two rules where one will do. Repetition is solved by aliases.
+        costs: A uniform stage restates its engine and manager on every substage.
+
+      - title: params uses your key names
+        decided: A substage carries arbitrary user keys, templated into the targets.
+        why: forge-ci never learns the words region, cell or env, so the collision that killed the name cell is structurally impossible.
+        costs: No validation of key names and no cross product expansion.
+
+  - name: The loop
+    decisions:
+      - title: Two verbs, and apply is the reconcile
+        decided: bootstrap and apply. There is no run and no separate reconcile.
+        why: Apply and reconcile are the same act. bootstrap exists only because the loop cannot create itself. Idempotence makes triggers dumb, so debounce and queuing stop being design problems.
+        costs: No way to force one stage for debugging without going through the loop.
+
+      - title: A failing test is not an error
+        decided: A red test is a run with status failed. An error means the machinery broke.
+        why: Get it wrong and a red build looks identical to a broken runner, which is the distinction a CI tool exists to make.
+        costs: Every engine boundary carries two channels, outcome and error.
+
+      - title: A tool is never a member of the repo list it builds
+        decided: repos names the product. forge-ci is not in it, as forge is not a Cargo workspace member.
+        why: It dissolves the circularity worry with no special case and no exclusion list.
+        costs: forge-ci does not dogfood the golden pipeline. It needs its own CI.
+
+  - name: State and history
+    decisions:
+      - title: A separate state repo, not an orphan branch
+        decided: State lives in its own repo.
+        why: An orphan branch is an antipattern. Machine commits must never touch a repo a human reads. At roughly 600 commits a month the cost is signal, not size.
+        costs: One more repo, which is what the orphan branch avoided.
+
+      - title: Commits pin the parts, semver names only the whole
+        decided: A release is a tuple of commit SHAs plus one version on the workspace.
+        why: Semver tells an external consumer whether an upgrade breaks them. A closed workspace has none. A SHA also pins harder than a tag, because a tag can move.
+        costs: Nothing can consume the sub repos as versioned libraries.
+
+      - title: A run embeds forge's own types
+        decided: A run record carries forge.TestReport and forge.Artifact verbatim, in an optional forge section.
+        why: Zero mapping and full fidelity, so coverage and dependency graphs land in CI state for free. The compute engine must carry the report from day one, because retrofitting means changing every engine.
+        costs: The state schema is coupled to forge's. A forge type change ripples into recorded history.
+
+  - name: Shipping
+    decisions:
+      - title: Local first is a tenet, not a shortcut
+        decided: The first version is ci-compute-local, ci-state-git and ci-trigger-watch, all on manager local.
+        why: A CI you can reproduce on your own machine is rare, and an abstraction with one implementation is a guess. A local backend stops the ports being shaped like GitHub Actions.
+        costs: The remote path stays unvalidated. The trigger port is exercised only by a file watcher.
+
+      - title: Engines ship as binaries resolved by URI
+        decided: An engine is a go:// URI installed on demand, not a Go interface compiled in.
+        why: Adding a backend must not mean releasing forge-ci. It reuses the mechanism forge already has, and a third party engine needs no changes to forge.
+        costs: Every engine is a separate binary, separately versioned. Debugging crosses a process boundary.
+
+      - title: The full schema, a partial implementation
+        decided: The spec covers every concept. The implementation covers what the first workspace needs.
+        why: Specifying only what the POC implements lets the first use case set the shape.
+        costs: Slower to a first green build, and specified surface that may age badly.
