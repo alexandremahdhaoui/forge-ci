@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/alexandremahdhaoui/forge-ci/pkg/config"
 )
@@ -51,11 +52,17 @@ func (d *Driver) validate(args []string) error {
 		return err
 	}
 
-	fmt.Fprintf(d.out, "%s: %d repos, %d engines, %d stages\n",
+	var b strings.Builder
+
+	fmt.Fprintf(&b, "%s: %d repos, %d engines, %d stages\n",
 		p.Name, len(p.Repos), len(p.Engines), len(p.Stages))
 
 	for i, s := range p.Stages {
-		fmt.Fprintf(d.out, "  %d. %s (%d substages)\n", i+1, s.Name, len(s.Substages))
+		fmt.Fprintf(&b, "  %d. %s (%d substages)\n", i+1, s.Name, len(s.Substages))
+	}
+
+	if _, err := io.WriteString(d.out, b.String()); err != nil {
+		return fmt.Errorf("writing report: %w", err)
 	}
 
 	return nil
