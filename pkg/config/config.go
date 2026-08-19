@@ -35,6 +35,7 @@ var (
 
 type Pipeline struct {
 	Name              string    `json:"name"`
+	Version           string    `json:"version,omitempty"`
 	ArtifactStorePath string    `json:"artifactStorePath,omitempty"`
 	Repos             []Repo    `json:"repos,omitempty"`
 	Managers          []Manager `json:"managers,omitempty"`
@@ -75,6 +76,7 @@ type Target struct {
 type Stage struct {
 	Name      string     `json:"name"`
 	Mint      bool       `json:"mint,omitempty"`
+	Release   string     `json:"release,omitempty"`
 	Promotion string     `json:"promotion,omitempty"`
 	Substages []Substage `json:"substages"`
 }
@@ -248,6 +250,16 @@ func (p Pipeline) Validate() error {
 
 		if s.Promotion != "" {
 			requirePort(where+": promotion", s.Promotion, PortPromotion)
+		}
+
+		if s.Release != "" {
+			requirePort(where+": release", s.Release, PortArtifact)
+
+			// A release publishes under a tag. Without one there is nothing to
+			// call it, and finding that out mid pipeline is too late.
+			if strings.TrimSpace(p.Version) == "" {
+				add("%s: release needs a version on the pipeline", where)
+			}
 		}
 
 		if len(s.Substages) == 0 {

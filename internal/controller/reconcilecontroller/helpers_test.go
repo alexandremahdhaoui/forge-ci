@@ -21,6 +21,7 @@ const (
 	uriGate      = "go://x/cmd/ci-gate-manual@v1"
 	uriPromotion = "go://x/cmd/ci-promotion-all@v1"
 	uriTrigger   = "go://x/cmd/ci-trigger-watch@v1"
+	uriRelease   = "go://x/cmd/ci-artifact-release@v1"
 )
 
 type call struct {
@@ -36,6 +37,7 @@ type fakeEngines struct {
 	live  int
 	peak  int
 
+	published  []citypes.ArtifactInput
 	runOutputs map[string]citypes.RunOutput
 	gateStatus citypes.Status
 	promote    *citypes.PromotionOutput
@@ -117,6 +119,19 @@ func (f *fakeEngines) dispatch(_ context.Context, uri, tool string, in, out any)
 		}
 
 		return assign(out, result)
+	case uri == uriRelease && tool == "publish":
+		var input citypes.ArtifactInput
+		require.NoError(f.t, remarshal(in, &input))
+
+		f.mu.Lock()
+		f.published = append(f.published, input)
+		f.mu.Unlock()
+
+		return assign(out, citypes.ArtifactOutput{
+			Published: true,
+			URL:       "https://example.com/releases/" + input.Version,
+			Tagged:    []string{"golden-rust"},
+		})
 	case uri == uriTrigger && tool == "poll":
 		var input struct {
 			Spec map[string]any `json:"spec"`
@@ -241,6 +256,7 @@ func pipeline(stages ...config.Stage) config.Pipeline {
 			},
 			{Alias: "approve", Type: config.PortGate, Engine: uriGate, Manager: "local"},
 			{Alias: "all-pass", Type: config.PortPromotion, Engine: uriPromotion, Manager: "local"},
+			{Alias: "gh", Type: config.PortArtifact, Engine: uriRelease, Manager: "local"},
 		},
 		State: "st",
 		Targets: []config.Target{
@@ -259,6 +275,12 @@ func stage(name string, subs ...config.Substage) config.Stage {
 
 func mintlessStage(name string, subs ...config.Substage) config.Stage {
 	return config.Stage{Name: name, Promotion: "all-pass", Substages: subs}
+}
+
+func releasingStage(name string, subs ...config.Substage) config.Stage {
+	return config.Stage{
+		Name: name, Mint: true, Release: "gh", Promotion: "all-pass", Substages: subs,
+	}
 }
 
 func substage(name string, targets []string, gates ...string) config.Substage {

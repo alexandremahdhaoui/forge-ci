@@ -131,6 +131,7 @@ targets:
     in: [demo-repo]
 stages:
   - name: build
+    mint: true
     promotion: all-pass
     substages:
       - name: default

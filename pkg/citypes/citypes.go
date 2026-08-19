@@ -104,6 +104,25 @@ type PromotionOutput struct {
 	Reason  string `json:"reason"`
 }
 
+// ArtifactInput is what a release engine is handed. The revision is what was
+// proven, the version is what to call it, and the artifacts are what forge
+// already built.
+type ArtifactInput struct {
+	Revision  string            `json:"revision" jsonschema:"The revision being released"`
+	Version   string            `json:"version" jsonschema:"The semver tag to publish under"`
+	Repos     map[string]string `json:"repos,omitempty" jsonschema:"Repo name to commit SHA"`
+	Artifacts []forge.Artifact  `json:"artifacts,omitempty" jsonschema:"What forge built"`
+	Spec      map[string]any    `json:"spec,omitempty" jsonschema:"Engine specific configuration"`
+}
+
+// ArtifactOutput says what reached the outside world.
+type ArtifactOutput struct {
+	Published bool     `json:"published" jsonschema:"Whether anything was published"`
+	URL       string   `json:"url,omitempty" jsonschema:"Where it landed"`
+	Reason    string   `json:"reason,omitempty" jsonschema:"Why it did not publish"`
+	Tagged    []string `json:"tagged,omitempty" jsonschema:"Repos that carry the tag now"`
+}
+
 type Revision struct {
 	ID        string            `json:"id"`
 	CreatedAt time.Time         `json:"createdAt"`

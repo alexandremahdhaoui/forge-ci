@@ -30,6 +30,7 @@ The question an engine answers. The list is closed.
 | `port` | The question an engine answers. |
 | `promotion` | Alias of an engine whose type is promotion. It decides whether the stage advances, given every substage outcome. |
 | `ref` | Branch to track. |
+| `release` | Alias of an engine whose type is artifact. It runs after the stage advances, so nothing is published for a build that did not pass. |
 | `repos` | The repos that form a revision. Optional. One repo is valid. A pipeline with no repos still runs, and its revision is the pipeline file itself. |
 | `spec` | Manager specific configuration. Validated by the manager. |
 | `stages` | Ordered phases. A revision moves through them left to right. There is no dependency graph. Order is list order. |
@@ -37,6 +38,7 @@ The question an engine answers. The list is closed.
 | `substages` | Independent units inside a stage. They run at the same time. |
 | `targets` | Named units of work. A target names a forge target or a forge-ci verb. This is the only place a forge target appears. |
 | `triggers` | Aliases of engines whose type is trigger. |
+| `version` | The semver tag a release publishes under. Required by a stage that declares a release, and ignored otherwise. |
 
 See [architecture.md](architecture.md) for how they fit together, and
 [decisions.md](decisions.md) for why.

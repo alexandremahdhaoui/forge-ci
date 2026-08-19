@@ -29,8 +29,10 @@ const (
 	ToolPoll      = "poll"
 
 	KindRevision = "revision"
-	KindRun      = "run"
-	KindOwned    = "owned"
+
+	ToolPublish = "publish"
+	KindRun     = "run"
+	KindOwned   = "owned"
 
 	OwnedKey = "resources"
 
@@ -54,6 +56,9 @@ type Report struct {
 	// Minted says the revision reached state. A revision nobody minted was
 	// never proven, so nothing downstream may act on it.
 	Minted bool `json:"minted"`
+
+	// Released is where each release landed, one per stage that declared one.
+	Released []citypes.ArtifactOutput `json:"released,omitempty"`
 }
 
 func (r Report) Advanced() bool {
@@ -120,9 +125,58 @@ func (c *Controller) Apply(ctx context.Context, p config.Pipeline, root string) 
 
 			report.Minted = true
 		}
+
+		if stage.Release != "" {
+			released, err := c.release(ctx, p, index, stage, revision, root)
+			if err != nil {
+				return Report{}, err
+			}
+
+			report.Released = append(report.Released, released)
+		}
 	}
 
 	return report, nil
+}
+
+// release hands a proven revision to the artifact engine. It runs after the
+// stage advanced, so nothing is published for a build that did not pass.
+func (c *Controller) release(
+	ctx context.Context,
+	p config.Pipeline,
+	index engineIndex,
+	stage config.Stage,
+	revision citypes.Revision,
+	root string,
+) (citypes.ArtifactOutput, error) {
+	engine, err := index.require(stage.Release, config.PortArtifact)
+	if err != nil {
+		return citypes.ArtifactOutput{}, err
+	}
+
+	spec := map[string]any{}
+	for k, v := range engine.Spec {
+		spec[k] = v
+	}
+
+	if _, ok := spec["root"]; !ok {
+		spec["root"] = root
+	}
+
+	in := citypes.ArtifactInput{
+		Revision: revision.ID,
+		Version:  p.Version,
+		Repos:    revision.Repos,
+		Spec:     spec,
+	}
+
+	var out citypes.ArtifactOutput
+
+	if err := c.caller.Call(ctx, engine.Engine, ToolPublish, in, &out); err != nil {
+		return citypes.ArtifactOutput{}, fmt.Errorf("releasing stage %q: %w", stage.Name, err)
+	}
+
+	return out, nil
 }
 
 // mint records the revision as proven. Writing it twice is harmless, because

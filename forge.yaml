@@ -64,6 +64,11 @@ build:
     dest: ./build/bin
     engine: go://go-build
 
+  - name: ci-artifact-release
+    src: ./cmd/ci-artifact-release
+    dest: ./build/bin
+    engine: go://go-build
+
   - name: ci-trigger-watch
     src: ./cmd/ci-trigger-watch
     dest: ./build/bin

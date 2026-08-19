@@ -631,3 +631,55 @@ func TestAStageAfterTheMintingOneStillSeesTheRevision(t *testing.T) {
 	require.Contains(t, f.store, "revision/"+report.Revision.ID,
 		"the build stage mints and staging runs against what it proved")
 }
+
+func TestAStageThatDeclaresAReleasePublishesWhatItProved(t *testing.T) {
+	f := newFakeEngines(t)
+	c := reconcilecontroller.New(f.caller(), gitAt(t, "abc123"), clock())
+
+	p := pipeline(releasingStage("build", substage("default", []string{"build"})))
+	p.Version = "v0.2.0"
+
+	report, err := c.Apply(context.Background(), p, "/work")
+	require.NoError(t, err)
+
+	require.Len(t, report.Released, 1)
+	require.True(t, report.Released[0].Published)
+	require.Equal(t, "https://example.com/releases/v0.2.0", report.Released[0].URL)
+
+	require.Len(t, f.published, 1)
+	require.Equal(t, report.Revision.ID, f.published[0].Revision)
+	require.Equal(t, "v0.2.0", f.published[0].Version)
+	require.Equal(t, "abc123", f.published[0].Repos["golden-rust"])
+	require.Equal(t, "/work", f.published[0].Spec["root"],
+		"the engine is told where the repos are")
+}
+
+func TestAFailedStagePublishesNothing(t *testing.T) {
+	f := newFakeEngines(t)
+	f.runOutputs["build/default"] = citypes.RunOutput{Status: citypes.StatusFailed}
+
+	c := reconcilecontroller.New(f.caller(), gitAt(t, "abc123"), clock())
+
+	p := pipeline(releasingStage("build", substage("default", []string{"build"})))
+	p.Version = "v0.2.0"
+
+	report, err := c.Apply(context.Background(), p, "/work")
+	require.NoError(t, err)
+
+	require.Empty(t, report.Released)
+	require.Empty(t, f.published, "a build that did not pass must publish nothing")
+}
+
+func TestAStageWithNoReleasePublishesNothing(t *testing.T) {
+	f := newFakeEngines(t)
+	c := reconcilecontroller.New(f.caller(), gitAt(t, "abc123"), clock())
+
+	report, err := c.Apply(
+		context.Background(),
+		pipeline(stage("build", substage("default", []string{"build"}))),
+		"/work",
+	)
+	require.NoError(t, err)
+	require.Empty(t, report.Released)
+	require.Empty(t, f.published)
+}

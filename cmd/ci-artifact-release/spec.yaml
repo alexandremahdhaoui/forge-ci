@@ -1,0 +1,35 @@
+name: ci-artifact-release
+port: artifact
+version: v0.1.0
+tagline: Tag every repo of a revision and publish a GitHub release.
+why: 'The artifact port was specified and empty, so a pipeline could prove a revision
+
+  and then publish nothing. This tags each member at the commit the revision names
+
+  and attaches the binaries forge already built.'
+tools:
+- name: declare
+  does: Report the resources this release needs. It needs none.
+- name: publish
+  does: Tag every repo of the revision and create the release.
+example:
+  tool: publish
+  input: '{"revision":"3dd48e96ed7e","version":"v0.2.0","repos":{"golden-rust":"a5b26c6a"},"spec":{"root":".."}}'
+notes: 'A dirty revision is refused. It was never proven, so releasing it publishes
+
+  something nobody can reproduce.
+
+
+  A tag that already exists is refused rather than moved, because a moved tag changes
+
+  what a consumer already pinned.
+
+
+  Only an artifact whose location is a file:// URL is uploaded. A container image is
+
+  published by whatever built it.'
+spec:
+- key: root
+  type: string
+  required: false
+  means: Directory holding the repos. Defaults to the working directory.
