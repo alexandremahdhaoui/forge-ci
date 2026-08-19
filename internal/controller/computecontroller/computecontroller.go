@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"text/template"
+	"time"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/execadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/forgeadapter"
@@ -24,10 +25,15 @@ const (
 type Controller struct {
 	runner    execadapter.Runner
 	harvester forgeadapter.Harvester
+	now       func() time.Time
 }
 
-func New(runner execadapter.Runner, harvester forgeadapter.Harvester) *Controller {
-	return &Controller{runner: runner, harvester: harvester}
+func New(runner execadapter.Runner, harvester forgeadapter.Harvester, now func() time.Time) *Controller {
+	if now == nil {
+		now = time.Now
+	}
+
+	return &Controller{runner: runner, harvester: harvester, now: now}
 }
 
 func (c *Controller) Declare(spec map[string]any) (citypes.DeclareOutput, error) {
@@ -41,6 +47,7 @@ func (c *Controller) Run(ctx context.Context, in citypes.RunInput) (citypes.RunO
 
 	var log strings.Builder
 
+	started := c.now()
 	out := citypes.RunOutput{Status: citypes.StatusPassed}
 
 	for _, target := range in.Targets {
@@ -71,7 +78,7 @@ func (c *Controller) Run(ctx context.Context, in citypes.RunInput) (citypes.RunO
 				continue
 			}
 
-			harvested, err := c.harvester.Harvest(dir)
+			harvested, err := c.harvester.Harvest(dir, started)
 			if err != nil {
 				return citypes.RunOutput{}, err
 			}

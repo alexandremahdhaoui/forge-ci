@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
+	"time"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/fsadapter"
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
@@ -14,7 +15,7 @@ import (
 const DefaultStorePath = ".forge/artifact-store.yaml"
 
 type Harvester interface {
-	Harvest(dir string) (*citypes.ForgeResult, error)
+	Harvest(dir string, since time.Time) (*citypes.ForgeResult, error)
 }
 
 type Store struct {
@@ -27,7 +28,7 @@ func New(fs fsadapter.FS) Store {
 	return Store{fs: fs}
 }
 
-func (s Store) Harvest(dir string) (*citypes.ForgeResult, error) {
+func (s Store) Harvest(dir string, since time.Time) (*citypes.ForgeResult, error) {
 	path := filepath.Join(dir, DefaultStorePath)
 
 	exists, err := s.fs.Exists(path)
@@ -59,9 +60,16 @@ func (s Store) Harvest(dir string) (*citypes.ForgeResult, error) {
 	sort.Strings(names)
 
 	for _, name := range names {
-		if report := store.TestReports[name]; report != nil {
-			result.TestReports = append(result.TestReports, *report)
+		report := store.TestReports[name]
+		if report == nil {
+			continue
 		}
+
+		if report.StartTime.Before(since) {
+			continue
+		}
+
+		result.TestReports = append(result.TestReports, *report)
 	}
 
 	return result, nil

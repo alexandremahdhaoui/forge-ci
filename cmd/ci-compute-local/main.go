@@ -18,7 +18,7 @@ type declareInput struct {
 }
 
 func main() {
-	ctrl := computecontroller.New(execadapter.New(), forgeadapter.New(fsadapter.New()))
+	ctrl := computecontroller.New(execadapter.New(), forgeadapter.New(fsadapter.New()), nil)
 
 	cienginekit.Engine{
 		Name:    "ci-compute-local",

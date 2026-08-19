@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/execadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/computecontroller"
@@ -21,10 +22,12 @@ type stubHarvester struct {
 	result *citypes.ForgeResult
 	err    error
 	dirs   []string
+	since  time.Time
 }
 
-func (s *stubHarvester) Harvest(dir string) (*citypes.ForgeResult, error) {
+func (s *stubHarvester) Harvest(dir string, since time.Time) (*citypes.ForgeResult, error) {
 	s.dirs = append(s.dirs, dir)
+	s.since = since
 
 	return s.result, s.err
 }
@@ -37,7 +40,7 @@ func TestForgeTargetRunsInTheNamedRepo(t *testing.T) {
 		Run(mock.Anything, "/work/golden-rust", "forge", "test-all").
 		Return(passing(), nil).Once()
 
-	out, err := computecontroller.New(runner, nil).Run(context.Background(), citypes.RunInput{
+	out, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
 		Root:    "/work",
 		Targets: []citypes.Target{{Alias: "build", Forge: "test-all", In: []string{"golden-rust"}}},
 	})
@@ -50,7 +53,7 @@ func TestNoRepoMeansTheRoot(t *testing.T) {
 	runner := execadaptermock.NewMockRunner(t)
 	runner.EXPECT().Run(mock.Anything, "/work", "forge-ci", "apply").Return(passing(), nil).Once()
 
-	out, err := computecontroller.New(runner, nil).Run(context.Background(), citypes.RunInput{
+	out, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
 		Root:    "/work",
 		Targets: []citypes.Target{{Alias: "self", ForgeCI: "apply"}},
 	})
@@ -63,7 +66,7 @@ func TestACheckoutPathWins(t *testing.T) {
 	runner.EXPECT().Run(mock.Anything, "/checkouts/abc/golden-rust", "forge", "test-all").
 		Return(passing(), nil).Once()
 
-	_, err := computecontroller.New(runner, nil).Run(context.Background(), citypes.RunInput{
+	_, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
 		Root:    "/work",
 		Repos:   []citypes.RepoCheckout{{Name: "golden-rust", Path: "/checkouts/abc/golden-rust"}},
 		Targets: []citypes.Target{{Alias: "build", Forge: "test-all", In: []string{"golden-rust"}}},
@@ -76,7 +79,7 @@ func TestAFailingTestIsNotAnError(t *testing.T) {
 	runner.EXPECT().Run(mock.Anything, mock.Anything, "forge", "test-all").
 		Return(execadapter.Result{ExitCode: 1, Stderr: "two tests failed\n"}, nil).Once()
 
-	out, err := computecontroller.New(runner, nil).Run(context.Background(), citypes.RunInput{
+	out, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
 		Root:    "/work",
 		Targets: []citypes.Target{{Alias: "build", Forge: "test-all"}},
 	})
@@ -91,7 +94,7 @@ func TestABrokenRunnerIsAnError(t *testing.T) {
 	runner.EXPECT().Run(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 		Return(execadapter.Result{}, errBoom).Once()
 
-	_, err := computecontroller.New(runner, nil).Run(context.Background(), citypes.RunInput{
+	_, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
 		Root:    "/work",
 		Targets: []citypes.Target{{Alias: "build", Forge: "test-all"}},
 	})
@@ -104,7 +107,7 @@ func TestAFailedTargetStopsTheRest(t *testing.T) {
 	runner.EXPECT().Run(mock.Anything, mock.Anything, "forge", "one").
 		Return(execadapter.Result{ExitCode: 2}, nil).Once()
 
-	out, err := computecontroller.New(runner, nil).Run(context.Background(), citypes.RunInput{
+	out, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
 		Root: "/work",
 		Targets: []citypes.Target{
 			{Alias: "first", Forge: "one"},
@@ -121,7 +124,7 @@ func TestParamsAreTemplatedIntoTheTarget(t *testing.T) {
 		Run(mock.Anything, "/work", "forge", "run", "deploy", "--region", "eu-west-1", "--cell", "a").
 		Return(passing(), nil).Once()
 
-	_, err := computecontroller.New(runner, nil).Run(context.Background(), citypes.RunInput{
+	_, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
 		Root:    "/work",
 		Params:  map[string]string{"region": "eu-west-1", "cell": "a"},
 		Targets: []citypes.Target{{Alias: "deploy", Forge: "run deploy --region {{.Params.region}} --cell {{.Params.cell}}"}},
@@ -132,7 +135,7 @@ func TestParamsAreTemplatedIntoTheTarget(t *testing.T) {
 func TestAMissingParamIsAnError(t *testing.T) {
 	runner := execadaptermock.NewMockRunner(t)
 
-	_, err := computecontroller.New(runner, nil).Run(context.Background(), citypes.RunInput{
+	_, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
 		Root:    "/work",
 		Targets: []citypes.Target{{Alias: "deploy", Forge: "run deploy --cell {{.Params.cell}}"}},
 	})
@@ -143,7 +146,7 @@ func TestAMissingParamIsAnError(t *testing.T) {
 func TestABrokenTemplateIsAnError(t *testing.T) {
 	runner := execadaptermock.NewMockRunner(t)
 
-	_, err := computecontroller.New(runner, nil).Run(context.Background(), citypes.RunInput{
+	_, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
 		Root:    "/work",
 		Targets: []citypes.Target{{Alias: "deploy", Forge: "run {{.Params."}},
 	})
@@ -158,7 +161,7 @@ func TestATargetNeedsExactlyOneKindOfWork(t *testing.T) {
 		{Alias: "neither"},
 		{Alias: "both", Forge: "a", ForgeCI: "b"},
 	} {
-		_, err := computecontroller.New(runner, nil).Run(context.Background(), citypes.RunInput{
+		_, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
 			Root: "/work", Targets: []citypes.Target{target},
 		})
 		require.ErrorIs(t, err, computecontroller.ErrTarget)
@@ -166,7 +169,7 @@ func TestATargetNeedsExactlyOneKindOfWork(t *testing.T) {
 }
 
 func TestNoTargetsIsAnError(t *testing.T) {
-	_, err := computecontroller.New(execadaptermock.NewMockRunner(t), nil).
+	_, err := computecontroller.New(execadaptermock.NewMockRunner(t), nil, nil).
 		Run(context.Background(), citypes.RunInput{Root: "/work"})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "no targets given")
@@ -182,7 +185,7 @@ func TestForgeResultsAreHarvestedAndMerged(t *testing.T) {
 		TestReports: []forge.TestReport{{Stage: "unit", Status: "passed"}},
 	}}
 
-	out, err := computecontroller.New(runner, h).Run(context.Background(), citypes.RunInput{
+	out, err := computecontroller.New(runner, h, nil).Run(context.Background(), citypes.RunInput{
 		Root:    "/work",
 		Targets: []citypes.Target{{Alias: "build", Forge: "test-all", In: []string{"a", "b"}}},
 	})
@@ -197,7 +200,7 @@ func TestNothingToHarvestIsFine(t *testing.T) {
 	runner := execadaptermock.NewMockRunner(t)
 	runner.EXPECT().Run(mock.Anything, mock.Anything, "forge", "test-all").Return(passing(), nil).Once()
 
-	out, err := computecontroller.New(runner, &stubHarvester{}).Run(context.Background(), citypes.RunInput{
+	out, err := computecontroller.New(runner, &stubHarvester{}, nil).Run(context.Background(), citypes.RunInput{
 		Root: "/work", Targets: []citypes.Target{{Alias: "build", Forge: "test-all"}},
 	})
 	require.NoError(t, err)
@@ -208,7 +211,7 @@ func TestAHarvestFailureIsAnError(t *testing.T) {
 	runner := execadaptermock.NewMockRunner(t)
 	runner.EXPECT().Run(mock.Anything, mock.Anything, "forge", "test-all").Return(passing(), nil).Once()
 
-	_, err := computecontroller.New(runner, &stubHarvester{err: errBoom}).
+	_, err := computecontroller.New(runner, &stubHarvester{err: errBoom}, nil).
 		Run(context.Background(), citypes.RunInput{
 			Root: "/work", Targets: []citypes.Target{{Alias: "build", Forge: "test-all"}},
 		})
@@ -221,7 +224,7 @@ func TestAForgeCITargetIsNotHarvested(t *testing.T) {
 
 	h := &stubHarvester{result: &citypes.ForgeResult{Artifacts: []forge.Artifact{{Name: "x"}}}}
 
-	out, err := computecontroller.New(runner, h).Run(context.Background(), citypes.RunInput{
+	out, err := computecontroller.New(runner, h, nil).Run(context.Background(), citypes.RunInput{
 		Root: "/work", Targets: []citypes.Target{{Alias: "self", ForgeCI: "apply"}},
 	})
 	require.NoError(t, err)
@@ -230,7 +233,23 @@ func TestAForgeCITargetIsNotHarvested(t *testing.T) {
 }
 
 func TestComputeDeclaresNoResources(t *testing.T) {
-	out, err := computecontroller.New(nil, nil).Declare(nil)
+	out, err := computecontroller.New(nil, nil, nil).Declare(nil)
 	require.NoError(t, err)
 	require.Empty(t, out.Resources)
+}
+
+func TestTheHarvesterIsToldWhenTheRunStarted(t *testing.T) {
+	started := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
+
+	runner := execadaptermock.NewMockRunner(t)
+	runner.EXPECT().Run(mock.Anything, mock.Anything, "forge", "test-all").Return(passing(), nil).Once()
+
+	h := &stubHarvester{result: &citypes.ForgeResult{}}
+
+	_, err := computecontroller.New(runner, h, func() time.Time { return started }).
+		Run(context.Background(), citypes.RunInput{
+			Root: "/work", Targets: []citypes.Target{{Alias: "build", Forge: "test-all"}},
+		})
+	require.NoError(t, err)
+	require.Equal(t, started, h.since)
 }

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/forgeadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/fsadapter"
@@ -48,7 +49,7 @@ func writeStore(t *testing.T, body string) string {
 }
 
 func TestArtifactsAndReportsAreHarvested(t *testing.T) {
-	got, err := forgeadapter.New(fsadapter.New()).Harvest(writeStore(t, store))
+	got, err := forgeadapter.New(fsadapter.New()).Harvest(writeStore(t, store), time.Time{})
 	require.NoError(t, err)
 	require.NotNil(t, got)
 	require.Len(t, got.Artifacts, 1)
@@ -60,19 +61,19 @@ func TestArtifactsAndReportsAreHarvested(t *testing.T) {
 }
 
 func TestNoStoreIsNotAnError(t *testing.T) {
-	got, err := forgeadapter.New(fsadapter.New()).Harvest(t.TempDir())
+	got, err := forgeadapter.New(fsadapter.New()).Harvest(t.TempDir(), time.Time{})
 	require.NoError(t, err)
 	require.Nil(t, got)
 }
 
 func TestABrokenStoreIsReported(t *testing.T) {
-	_, err := forgeadapter.New(fsadapter.New()).Harvest(writeStore(t, "\tnot: [valid"))
+	_, err := forgeadapter.New(fsadapter.New()).Harvest(writeStore(t, "\tnot: [valid"), time.Time{})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "parsing the artifact store")
 }
 
 func TestANilReportIsSkipped(t *testing.T) {
-	got, err := forgeadapter.New(fsadapter.New()).Harvest(writeStore(t, "testReports:\n  unit: null\n"))
+	got, err := forgeadapter.New(fsadapter.New()).Harvest(writeStore(t, "testReports:\n  unit: null\n"), time.Time{})
 	require.NoError(t, err)
 	require.Empty(t, got.TestReports)
 }
@@ -81,7 +82,7 @@ func TestFilesystemFailuresAreReported(t *testing.T) {
 	fs := fsadaptermock.NewMockFS(t)
 	fs.EXPECT().Exists(mock.Anything).Return(false, errBoom).Once()
 
-	_, err := forgeadapter.New(fs).Harvest("/x")
+	_, err := forgeadapter.New(fs).Harvest("/x", time.Time{})
 	require.ErrorIs(t, err, errBoom)
 	require.Contains(t, err.Error(), "looking for the artifact store")
 
@@ -89,7 +90,37 @@ func TestFilesystemFailuresAreReported(t *testing.T) {
 	fs2.EXPECT().Exists(mock.Anything).Return(true, nil).Once()
 	fs2.EXPECT().ReadFile(mock.Anything).Return(nil, errBoom).Once()
 
-	_, err = forgeadapter.New(fs2).Harvest("/x")
+	_, err = forgeadapter.New(fs2).Harvest("/x", time.Time{})
 	require.ErrorIs(t, err, errBoom)
 	require.Contains(t, err.Error(), "reading the artifact store")
+}
+
+const withHistory = `
+testReports:
+  old-run:
+    id: o1
+    stage: unit
+    status: passed
+    startTime: 2020-01-01T00:00:00Z
+  this-run:
+    id: n1
+    stage: unit
+    status: passed
+    startTime: 2030-01-01T00:00:00Z
+`
+
+func TestReportsFromEarlierRunsAreDropped(t *testing.T) {
+	since := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	got, err := forgeadapter.New(fsadapter.New()).Harvest(writeStore(t, withHistory), since)
+	require.NoError(t, err)
+	require.Len(t, got.TestReports, 1,
+		"the artifact store keeps every past run, so a harvest must take only this one")
+	require.Equal(t, "n1", got.TestReports[0].ID)
+}
+
+func TestAZeroSinceTakesEverything(t *testing.T) {
+	got, err := forgeadapter.New(fsadapter.New()).Harvest(writeStore(t, withHistory), time.Time{})
+	require.NoError(t, err)
+	require.Len(t, got.TestReports, 2)
 }
