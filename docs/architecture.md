@@ -48,6 +48,19 @@ for each stage, in order:
 A passed substage is never run again. A failed one is retried next apply. That
 is what makes the loop safe on a timer.
 
+## What a revision covers
+
+A revision hashes each repo's HEAD **and** a hash of its uncommitted changes. So
+an edit you have not committed is its own revision and it reruns.
+
+That is deliberate. Keying only on the commit meant an uncommitted break was
+invisible: the substage was already recorded as passed, so the pipeline reported
+green on code that did not compile.
+
+The price is that a repo must gitignore its own build output. If it does not, the
+tree is dirty after every run, so every apply is a new revision and the loop
+never settles.
+
 ## Ports
 
 ```

@@ -344,13 +344,28 @@ func (c *Controller) resolveRevision(
 
 	names := make([]string, 0, len(p.Repos))
 
+	worktrees := map[string]string{}
+
 	for _, repo := range p.Repos {
-		sha, err := c.git.HeadSHA(ctx, filepath.Join(root, repo.Name))
+		dir := filepath.Join(root, repo.Name)
+
+		sha, err := c.git.HeadSHA(ctx, dir)
+		if err != nil {
+			return citypes.Revision{}, fmt.Errorf("resolving the revision of %s: %w", repo.Name, err)
+		}
+
+		worktree, err := c.git.WorktreeHash(ctx, dir)
 		if err != nil {
 			return citypes.Revision{}, fmt.Errorf("resolving the revision of %s: %w", repo.Name, err)
 		}
 
 		revision.Repos[repo.Name] = sha
+		worktrees[repo.Name] = worktree
+
+		if worktree != "" {
+			revision.Dirty = append(revision.Dirty, repo.Name)
+		}
+
 		names = append(names, repo.Name)
 	}
 
@@ -360,11 +375,17 @@ func (c *Controller) resolveRevision(
 	parts = append(parts, p.Name)
 
 	for _, name := range names {
-		parts = append(parts, name+"="+revision.Repos[name])
+		parts = append(parts, name+"="+revision.Repos[name]+"+"+worktrees[name])
 	}
 
 	sum := sha256.Sum256([]byte(strings.Join(parts, "\n")))
 	revision.ID = hex.EncodeToString(sum[:])[:12]
+
+	sort.Strings(revision.Dirty)
+
+	if len(revision.Dirty) > 0 {
+		revision.ID += "-dirty"
+	}
 
 	return revision, nil
 }

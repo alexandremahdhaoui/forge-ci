@@ -2,6 +2,8 @@ package gitadapter
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 
@@ -17,6 +19,7 @@ type Git interface {
 	HeadSHA(ctx context.Context, dir string) (string, error)
 	RemoteSHA(ctx context.Context, url, ref string) (string, error)
 	Dirty(ctx context.Context, dir string) (bool, error)
+	WorktreeHash(ctx context.Context, dir string) (string, error)
 }
 
 type CLI struct {
@@ -100,6 +103,26 @@ func (g *CLI) RemoteSHA(ctx context.Context, url, ref string) (string, error) {
 	}
 
 	return fields[0], nil
+}
+
+func (g *CLI) WorktreeHash(ctx context.Context, dir string) (string, error) {
+	status, err := g.run(ctx, dir, "reading status of "+dir, "status", "--porcelain")
+	if err != nil {
+		return "", err
+	}
+
+	if strings.TrimSpace(status.Stdout) == "" {
+		return "", nil
+	}
+
+	diff, err := g.run(ctx, dir, "reading uncommitted changes in "+dir, "diff", "HEAD")
+	if err != nil {
+		return "", err
+	}
+
+	sum := sha256.Sum256([]byte(status.Stdout + "\n" + diff.Stdout))
+
+	return hex.EncodeToString(sum[:])[:12], nil
 }
 
 func (g *CLI) Dirty(ctx context.Context, dir string) (bool, error) {

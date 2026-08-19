@@ -22,6 +22,7 @@ func gitAt(t *testing.T, sha string) *gitadaptermock.MockGit {
 
 	git := gitadaptermock.NewMockGit(t)
 	git.EXPECT().HeadSHA(mock.Anything, mock.Anything).Return(sha, nil).Maybe()
+	git.EXPECT().WorktreeHash(mock.Anything, mock.Anything).Return("", nil).Maybe()
 
 	return git
 }
@@ -466,4 +467,65 @@ func TestALongOutputIsTruncatedFromTheFront(t *testing.T) {
 	require.Less(t, len(got), 20000)
 	require.Contains(t, got, "THE INTERESTING PART")
 	require.Contains(t, got, "earlier output dropped")
+}
+
+func TestAnUncommittedChangeIsANewRevisionAndReruns(t *testing.T) {
+	f := newFakeEngines(t)
+	p := pipeline(stage("build", substage("default", []string{"build"})))
+
+	clean := gitadaptermock.NewMockGit(t)
+	clean.EXPECT().HeadSHA(mock.Anything, mock.Anything).Return("abc", nil).Maybe()
+	clean.EXPECT().WorktreeHash(mock.Anything, mock.Anything).Return("", nil).Maybe()
+
+	first, err := reconcilecontroller.New(f.caller(), clean, clock()).Apply(context.Background(), p, "/work")
+	require.NoError(t, err)
+	require.Empty(t, first.Revision.Dirty)
+	require.NotContains(t, first.Revision.ID, "-dirty")
+	require.Equal(t, 1, f.counted(call{uriCompute, "run"}))
+
+	dirty := gitadaptermock.NewMockGit(t)
+	dirty.EXPECT().HeadSHA(mock.Anything, mock.Anything).Return("abc", nil).Maybe()
+	dirty.EXPECT().WorktreeHash(mock.Anything, mock.Anything).Return("wt1", nil).Maybe()
+
+	second, err := reconcilecontroller.New(f.caller(), dirty, clock()).Apply(context.Background(), p, "/work")
+	require.NoError(t, err)
+	require.Equal(t, []string{"golden-rust"}, second.Revision.Dirty)
+	require.Contains(t, second.Revision.ID, "-dirty")
+	require.NotEqual(t, first.Revision.ID, second.Revision.ID)
+	require.Equal(t, 2, f.counted(call{uriCompute, "run"}),
+		"an uncommitted edit must rerun, or the pipeline reports green on code that does not compile")
+}
+
+func TestEditingAgainIsAnotherRevision(t *testing.T) {
+	f := newFakeEngines(t)
+	p := pipeline(stage("build", substage("default", []string{"build"})))
+
+	ids := map[string]bool{}
+
+	for _, worktree := range []string{"wt1", "wt2", "wt3"} {
+		git := gitadaptermock.NewMockGit(t)
+		git.EXPECT().HeadSHA(mock.Anything, mock.Anything).Return("abc", nil).Maybe()
+		git.EXPECT().WorktreeHash(mock.Anything, mock.Anything).Return(worktree, nil).Maybe()
+
+		report, err := reconcilecontroller.New(f.caller(), git, clock()).Apply(context.Background(), p, "/work")
+		require.NoError(t, err)
+
+		ids[report.Revision.ID] = true
+	}
+
+	require.Len(t, ids, 3, "each edit is its own revision")
+	require.Equal(t, 3, f.counted(call{uriCompute, "run"}))
+}
+
+func TestAWorktreeFailureNamesTheRepo(t *testing.T) {
+	f := newFakeEngines(t)
+
+	git := gitadaptermock.NewMockGit(t)
+	git.EXPECT().HeadSHA(mock.Anything, mock.Anything).Return("abc", nil).Once()
+	git.EXPECT().WorktreeHash(mock.Anything, mock.Anything).Return("", errBoom).Once()
+
+	_, err := reconcilecontroller.New(f.caller(), git, clock()).Apply(context.Background(),
+		pipeline(stage("build", substage("default", []string{"build"}))), "/work")
+	require.ErrorIs(t, err, errBoom)
+	require.Contains(t, err.Error(), "resolving the revision of golden-rust")
 }

@@ -131,3 +131,51 @@ func TestABrokenRunnerIsWrappedWithWhatWasAttempted(t *testing.T) {
 	require.ErrorIs(t, err, errBoom)
 	require.Contains(t, err.Error(), "initialising /repo")
 }
+
+func TestACleanWorktreeHashesToNothing(t *testing.T) {
+	r := execadaptermock.NewMockRunner(t)
+	r.EXPECT().Run(mock.Anything, "/repo", "git", "status", "--porcelain").Return(ok("\n"), nil).Once()
+
+	got, err := gitadapter.New(r).WorktreeHash(context.Background(), "/repo")
+	require.NoError(t, err)
+	require.Empty(t, got)
+}
+
+func TestADirtyWorktreeHashesItsContent(t *testing.T) {
+	build := func(status, diff string) string {
+		r := execadaptermock.NewMockRunner(t)
+		r.EXPECT().Run(mock.Anything, "/repo", "git", "status", "--porcelain").Return(ok(status), nil).Once()
+		r.EXPECT().Run(mock.Anything, "/repo", "git", "diff", "HEAD").Return(ok(diff), nil).Once()
+
+		got, err := gitadapter.New(r).WorktreeHash(context.Background(), "/repo")
+		require.NoError(t, err)
+		require.Len(t, got, 12)
+
+		return got
+	}
+
+	one := build(" M a.go\n", "-old\n+new\n")
+	same := build(" M a.go\n", "-old\n+new\n")
+	other := build(" M a.go\n", "-old\n+newer\n")
+
+	require.Equal(t, one, same, "the same edit gives the same revision")
+	require.NotEqual(t, one, other, "a different edit gives a different revision")
+}
+
+func TestWorktreeHashReportsBothFailures(t *testing.T) {
+	r := execadaptermock.NewMockRunner(t)
+	r.EXPECT().Run(mock.Anything, "/repo", "git", "status", "--porcelain").
+		Return(execadapter.Result{ExitCode: 128, Stderr: "fatal\n"}, nil).Once()
+
+	_, err := gitadapter.New(r).WorktreeHash(context.Background(), "/repo")
+	require.Error(t, err)
+
+	r2 := execadaptermock.NewMockRunner(t)
+	r2.EXPECT().Run(mock.Anything, "/repo", "git", "status", "--porcelain").Return(ok(" M a.go\n"), nil).Once()
+	r2.EXPECT().Run(mock.Anything, "/repo", "git", "diff", "HEAD").
+		Return(execadapter.Result{ExitCode: 128, Stderr: "fatal\n"}, nil).Once()
+
+	_, err = gitadapter.New(r2).WorktreeHash(context.Background(), "/repo")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "reading uncommitted changes in /repo")
+}

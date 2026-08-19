@@ -151,6 +151,8 @@ func workspace(t *testing.T, testCommand string) (root, statePath string) {
 	require.NoError(t, os.WriteFile(filepath.Join(repo, "forge.yaml"),
 		[]byte(strings.Replace(forgeYAML, "%s", testCommand, 1)), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(repo, ".envrc"), nil, 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(repo, ".gitignore"),
+		[]byte("/.forge/\n.envrc\n/tmp/\n"), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(repo, "README.md"), []byte("one"), 0o600))
 
 	mustRun(t, repo, "git", "init", "-b", "main")
@@ -380,4 +382,76 @@ func TestASelfStageUsingBootstrapReconcilesWithoutRecursing(t *testing.T) {
 	var selfRun citypes.Run
 	require.NoError(t, json.Unmarshal(raw, &selfRun))
 	require.Equal(t, citypes.StatusPassed, selfRun.Status)
+}
+
+func TestAnUncommittedBreakIsCaught(t *testing.T) {
+	root, statePath := workspace(t, "true")
+	config := filepath.Join(root, "pipeline.yaml")
+	repo := filepath.Join(root, "demo-repo")
+
+	mustRun(t, root, "forge-ci", "apply", "--config", config)
+
+	clean := revisionIDs(t, statePath)
+	require.Len(t, clean, 1)
+
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "forge.yaml"),
+		[]byte(strings.Replace(forgeYAML, "%s", "exit 1", 1)), 0o600))
+
+	out, err := run(t, root, "forge-ci", "apply", "--config", config)
+	require.Error(t, err, out)
+	require.Contains(t, out, "-dirty")
+	require.Contains(t, out, "default failed")
+
+	after := revisionIDs(t, statePath)
+	require.Len(t, after, 2, "an uncommitted edit must be its own revision")
+}
+
+func revisionIDs(t *testing.T, statePath string) []string {
+	t.Helper()
+
+	entries, err := os.ReadDir(filepath.Join(statePath, "revisions"))
+	require.NoError(t, err)
+
+	out := make([]string, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, strings.TrimSuffix(e.Name(), ".json"))
+	}
+
+	return out
+}
+
+func TestGitignoredBuildOutputDoesNotDirtyTheRevision(t *testing.T) {
+	root, statePath := workspace(t, "true")
+	config := filepath.Join(root, "pipeline.yaml")
+	repo := filepath.Join(root, "demo-repo")
+
+	mustRun(t, root, "forge-ci", "apply", "--config", config)
+
+	require.FileExists(t, filepath.Join(repo, ".forge", "artifact-store.yaml"),
+		"forge must have written build output into the repo")
+
+	ids := revisionIDs(t, statePath)
+	require.Len(t, ids, 1)
+	require.NotContains(t, ids[0], "-dirty",
+		"build output is gitignored, so it must not make every apply a new revision")
+
+	mustRun(t, root, "forge-ci", "apply", "--config", config)
+	require.Len(t, revisionIDs(t, statePath), 1, "the loop must settle")
+}
+
+func TestUntrackedBuildOutputNeverSettles(t *testing.T) {
+	root, statePath := workspace(t, "true")
+	config := filepath.Join(root, "pipeline.yaml")
+	repo := filepath.Join(root, "demo-repo")
+
+	require.NoError(t, os.Remove(filepath.Join(repo, ".gitignore")))
+	mustRun(t, repo, "git", "add", "-A")
+	mustRun(t, repo, "git", "commit", "-m", "drop the gitignore")
+
+	mustRun(t, root, "forge-ci", "apply", "--config", config)
+	mustRun(t, root, "forge-ci", "apply", "--config", config)
+
+	require.Greater(t, len(revisionIDs(t, statePath)), 1,
+		"without a gitignore, build output dirties the tree and every apply is a new revision. "+
+			"This is why a repo must gitignore its own output.")
 }

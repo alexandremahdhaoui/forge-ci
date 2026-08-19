@@ -45,6 +45,17 @@ which is why the integration suite exists.
 handed to an engine goes through `orEmpty`. Miss one call site and only that
 engine breaks, at runtime, in the field.
 
+**A revision covers uncommitted work, so a repo must gitignore its own output.**
+The revision id hashes each repo's HEAD plus a hash of its uncommitted changes.
+Without that, an edit that breaks the build is invisible: the trigger fires, the
+substage is already recorded as passed, and the pipeline reports green on code
+that does not compile. That happened live on golden-rust.
+
+The consequence is that any build output not covered by `.gitignore` makes the
+tree dirty, so every apply is a new revision and the loop never settles.
+`TestUntrackedBuildOutputNeverSettles` pins that, and it is a real footgun for a
+repo that does not ignore its own `.forge/`.
+
 **A go.work hides an incomplete go.sum until CI.** This repo shipped four tags
 that did not build. `go.sum` held 13 of the 36 lines it needed, and the
 workspace let it borrow the rest from sibling modules. A pristine clone failed

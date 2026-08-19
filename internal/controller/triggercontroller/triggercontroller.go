@@ -41,12 +41,12 @@ func (c *Controller) Poll(ctx context.Context, spec map[string]any) (citypes.Tri
 			return citypes.TriggerOutput{}, fmt.Errorf("watching %s: %w", dir, err)
 		}
 
-		dirty, err := c.git.Dirty(ctx, dir)
+		worktree, err := c.git.WorktreeHash(ctx, dir)
 		if err != nil {
 			return citypes.TriggerOutput{}, fmt.Errorf("watching %s: %w", dir, err)
 		}
 
-		parts = append(parts, fmt.Sprintf("%s=%s dirty=%t", dir, sha, dirty))
+		parts = append(parts, fmt.Sprintf("%s=%s+%s", dir, sha, worktree))
 	}
 
 	sort.Strings(parts)

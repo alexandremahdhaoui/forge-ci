@@ -112,6 +112,7 @@ type Revision struct {
 	ID        string            `json:"id"`
 	CreatedAt time.Time         `json:"createdAt"`
 	Repos     map[string]string `json:"repos,omitempty"`
+	Dirty     []string          `json:"dirty,omitempty"`
 }
 
 type Run struct {

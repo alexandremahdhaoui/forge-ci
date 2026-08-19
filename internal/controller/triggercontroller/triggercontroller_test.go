@@ -16,7 +16,7 @@ var errBoom = errors.New("boom")
 func TestFirstLookAlwaysCountsAsChanged(t *testing.T) {
 	git := gitadaptermock.NewMockGit(t)
 	git.EXPECT().HeadSHA(mock.Anything, "/repo").Return("abc", nil).Once()
-	git.EXPECT().Dirty(mock.Anything, "/repo").Return(false, nil).Once()
+	git.EXPECT().WorktreeHash(mock.Anything, "/repo").Return("", nil).Once()
 
 	out, err := triggercontroller.New(git).Poll(context.Background(), map[string]any{
 		"watch": []any{"/repo"},
@@ -30,7 +30,7 @@ func TestFirstLookAlwaysCountsAsChanged(t *testing.T) {
 func TestTheSameStateIsNotAChange(t *testing.T) {
 	git := gitadaptermock.NewMockGit(t)
 	git.EXPECT().HeadSHA(mock.Anything, "/repo").Return("abc", nil).Twice()
-	git.EXPECT().Dirty(mock.Anything, "/repo").Return(false, nil).Twice()
+	git.EXPECT().WorktreeHash(mock.Anything, "/repo").Return("", nil).Twice()
 
 	c := triggercontroller.New(git)
 
@@ -48,7 +48,7 @@ func TestTheSameStateIsNotAChange(t *testing.T) {
 func TestANewCommitIsAChange(t *testing.T) {
 	git := gitadaptermock.NewMockGit(t)
 	git.EXPECT().HeadSHA(mock.Anything, "/repo").Return("abc", nil).Once()
-	git.EXPECT().Dirty(mock.Anything, "/repo").Return(false, nil).Once()
+	git.EXPECT().WorktreeHash(mock.Anything, "/repo").Return("", nil).Once()
 
 	c := triggercontroller.New(git)
 
@@ -56,7 +56,7 @@ func TestANewCommitIsAChange(t *testing.T) {
 	require.NoError(t, err)
 
 	git.EXPECT().HeadSHA(mock.Anything, "/repo").Return("def", nil).Once()
-	git.EXPECT().Dirty(mock.Anything, "/repo").Return(false, nil).Once()
+	git.EXPECT().WorktreeHash(mock.Anything, "/repo").Return("", nil).Once()
 
 	second, err := c.Poll(context.Background(), map[string]any{
 		"watch": []any{"/repo"}, "previous": first.Fingerprint,
@@ -69,14 +69,14 @@ func TestANewCommitIsAChange(t *testing.T) {
 func TestAnUncommittedEditIsAChange(t *testing.T) {
 	git := gitadaptermock.NewMockGit(t)
 	git.EXPECT().HeadSHA(mock.Anything, "/repo").Return("abc", nil).Twice()
-	git.EXPECT().Dirty(mock.Anything, "/repo").Return(false, nil).Once()
+	git.EXPECT().WorktreeHash(mock.Anything, "/repo").Return("", nil).Once()
 
 	c := triggercontroller.New(git)
 
 	first, err := c.Poll(context.Background(), map[string]any{"watch": []any{"/repo"}})
 	require.NoError(t, err)
 
-	git.EXPECT().Dirty(mock.Anything, "/repo").Return(true, nil).Once()
+	git.EXPECT().WorktreeHash(mock.Anything, "/repo").Return("wt1", nil).Once()
 
 	second, err := c.Poll(context.Background(), map[string]any{
 		"watch": []any{"/repo"}, "previous": first.Fingerprint,
@@ -89,7 +89,7 @@ func TestTheFingerprintIsOrderIndependent(t *testing.T) {
 	build := func(order []any) string {
 		git := gitadaptermock.NewMockGit(t)
 		git.EXPECT().HeadSHA(mock.Anything, mock.Anything).Return("abc", nil).Times(2)
-		git.EXPECT().Dirty(mock.Anything, mock.Anything).Return(false, nil).Times(2)
+		git.EXPECT().WorktreeHash(mock.Anything, mock.Anything).Return("", nil).Times(2)
 
 		out, err := triggercontroller.New(git).Poll(context.Background(), map[string]any{"watch": order})
 		require.NoError(t, err)
@@ -117,7 +117,7 @@ func TestWatchIsRequired(t *testing.T) {
 func TestATypedStringSliceIsAccepted(t *testing.T) {
 	git := gitadaptermock.NewMockGit(t)
 	git.EXPECT().HeadSHA(mock.Anything, "/repo").Return("abc", nil).Once()
-	git.EXPECT().Dirty(mock.Anything, "/repo").Return(false, nil).Once()
+	git.EXPECT().WorktreeHash(mock.Anything, "/repo").Return("", nil).Once()
 
 	out, err := triggercontroller.New(git).Poll(context.Background(), map[string]any{
 		"watch": []string{"/repo"},
@@ -136,7 +136,7 @@ func TestGitFailuresNameTheDirectory(t *testing.T) {
 
 	git2 := gitadaptermock.NewMockGit(t)
 	git2.EXPECT().HeadSHA(mock.Anything, "/repo").Return("abc", nil).Once()
-	git2.EXPECT().Dirty(mock.Anything, "/repo").Return(false, errBoom).Once()
+	git2.EXPECT().WorktreeHash(mock.Anything, "/repo").Return("", errBoom).Once()
 
 	_, err = triggercontroller.New(git2).Poll(context.Background(), map[string]any{"watch": []any{"/repo"}})
 	require.ErrorIs(t, err, errBoom)
