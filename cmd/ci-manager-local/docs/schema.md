@@ -2,7 +2,7 @@
 
 # ci-manager-local spec
 
-The `spec` block on this engine's entry in `pipeline.yaml`.
+The `spec` block on this engine's entry in `forge-ci.yaml`.
 
 | Key | Type | Required | Means |
 |---|---|---|---|

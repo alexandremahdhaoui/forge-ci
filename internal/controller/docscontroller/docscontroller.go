@@ -73,7 +73,7 @@ func schema(e docstypes.Engine, source string) string {
 	var b strings.Builder
 
 	fmt.Fprintf(&b, header, source)
-	fmt.Fprintf(&b, "# %s spec\n\nThe `spec` block on this engine's entry in `pipeline.yaml`.\n\n", e.Name)
+	fmt.Fprintf(&b, "# %s spec\n\nThe `spec` block on this engine's entry in `forge-ci.yaml`.\n\n", e.Name)
 
 	if len(e.Spec) == 0 {
 		fmt.Fprintf(&b, "It reads none.\n")

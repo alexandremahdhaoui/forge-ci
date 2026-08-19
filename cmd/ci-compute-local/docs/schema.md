@@ -2,6 +2,6 @@
 
 # ci-compute-local spec
 
-The `spec` block on this engine's entry in `pipeline.yaml`.
+The `spec` block on this engine's entry in `forge-ci.yaml`.
 
 It reads none.

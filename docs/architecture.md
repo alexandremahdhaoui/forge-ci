@@ -6,7 +6,7 @@ The hand written guide. Everything else under `docs/` is generated.
 
 | Layer | Holds | Lives in |
 |---|---|---|
-| Definition | what you want | `pipeline.yaml` |
+| Definition | what you want | `forge-ci.yaml` |
 | Engines | what makes it happen | binaries named by URI |
 | State | what is true now | a state repo |
 

@@ -140,3 +140,7 @@ test:
     spec:
       command: sh
       args: ["hack/coverage.sh", "90"]
+
+factory:
+  module: github.com/alexandremahdhaoui/forge-ci
+  goVersion: "1.26.5"

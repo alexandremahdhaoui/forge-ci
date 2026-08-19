@@ -50,7 +50,7 @@ stages:
 func write(t *testing.T, body string) string {
 	t.Helper()
 
-	path := filepath.Join(t.TempDir(), "pipeline.yaml")
+	path := filepath.Join(t.TempDir(), "forge-ci.yaml")
 	require.NoError(t, os.WriteFile(path, []byte(body), 0o600))
 
 	return path
@@ -236,9 +236,9 @@ func TestDuplicateKeyIsRejected(t *testing.T) {
 
 func TestMissingFileIsNotAValidationError(t *testing.T) {
 	err := clidriver.New(&bytes.Buffer{}, clidrivermock.NewMockReconciler(t)).
-		Run(context.Background(), []string{"validate", "--config", "/nope/pipeline.yaml"})
+		Run(context.Background(), []string{"validate", "--config", "/nope/forge-ci.yaml"})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "reading /nope/pipeline.yaml")
+	require.Contains(t, err.Error(), "reading /nope/forge-ci.yaml")
 }
 
 func TestNoArgsIsUsage(t *testing.T) {

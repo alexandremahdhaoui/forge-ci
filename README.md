@@ -13,9 +13,9 @@ forge-ci answers those and calls forge for the rest.
 ## Try it
 
 ```sh
-forge-ci bootstrap --config pipeline.yaml
-forge-ci apply     --config pipeline.yaml
-forge-ci status    --config pipeline.yaml
+forge-ci bootstrap --config forge-ci.yaml
+forge-ci apply     --config forge-ci.yaml
+forge-ci status    --config forge-ci.yaml
 ```
 
 The first version needs no cloud, no credential and no account. If you own one
@@ -27,7 +27,8 @@ computer you can run your pipeline.
 name: demo
 
 repos:
-  - { name: my-repo, url: git@github.com:me/my-repo.git }
+  - name: my-repo
+    url: git@github.com:me/my-repo.git
 
 managers:
   - alias: local
@@ -42,17 +43,23 @@ engines:
     type: state
     engine: "go://github.com/alexandremahdhaoui/forge-ci/cmd/ci-state-git@v0.1.0"
     manager: local
-    spec: { path: ../demo-state }
+    spec:
+      path: ../demo-state
 
 state: ci-state
 
 targets:
-  - { alias: build-all, forge: test-all, in: [my-repo] }
+  - alias: build-all
+    forge: test-all
+    in: [my-repo]
 
 stages:
   - name: build
     substages:
-      - { name: default, engine: here, manager: local, targets: [build-all] }
+      - name: default
+        engine: here
+        manager: local
+        targets: [build-all]
 ```
 
 ## Reading order

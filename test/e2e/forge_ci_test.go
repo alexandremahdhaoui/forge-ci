@@ -161,7 +161,7 @@ func workspace(t *testing.T, testCommand string) (root, statePath string) {
 	mustRun(t, repo, "git", "add", ".")
 	mustRun(t, repo, "git", "commit", "-m", "first")
 
-	require.NoError(t, os.WriteFile(filepath.Join(root, "pipeline.yaml"),
+	require.NoError(t, os.WriteFile(filepath.Join(root, "forge-ci.yaml"),
 		[]byte(pipelineYAML(root, statePath)), 0o600))
 
 	return root, statePath
@@ -192,12 +192,12 @@ func readRun(t *testing.T, statePath, revision string) citypes.Run {
 func TestTheWholeLoopRunsLocallyWithNoCloud(t *testing.T) {
 	root, statePath := workspace(t, "true")
 
-	out := mustRun(t, root, "forge-ci", "bootstrap", "--config", filepath.Join(root, "pipeline.yaml"))
+	out := mustRun(t, root, "forge-ci", "bootstrap", "--config", filepath.Join(root, "forge-ci.yaml"))
 	require.Contains(t, out, "created directory "+statePath)
 	require.DirExists(t, filepath.Join(statePath, "revisions"))
 	require.DirExists(t, filepath.Join(statePath, "runs"))
 
-	out = mustRun(t, root, "forge-ci", "apply", "--config", filepath.Join(root, "pipeline.yaml"))
+	out = mustRun(t, root, "forge-ci", "apply", "--config", filepath.Join(root, "forge-ci.yaml"))
 	require.Contains(t, out, "stage build")
 	require.Contains(t, out, "default passed")
 
@@ -216,7 +216,7 @@ func TestTheWholeLoopRunsLocallyWithNoCloud(t *testing.T) {
 
 func TestStatusReadsBackWhatApplyRecorded(t *testing.T) {
 	root, statePath := workspace(t, "true")
-	config := filepath.Join(root, "pipeline.yaml")
+	config := filepath.Join(root, "forge-ci.yaml")
 
 	mustRun(t, root, "forge-ci", "apply", "--config", config)
 
@@ -228,7 +228,7 @@ func TestStatusReadsBackWhatApplyRecorded(t *testing.T) {
 
 func TestASecondApplyDoesNotRunAgain(t *testing.T) {
 	root, statePath := workspace(t, "true")
-	config := filepath.Join(root, "pipeline.yaml")
+	config := filepath.Join(root, "forge-ci.yaml")
 
 	mustRun(t, root, "forge-ci", "apply", "--config", config)
 	first := readRun(t, statePath, revisionID(t, statePath))
@@ -241,7 +241,7 @@ func TestASecondApplyDoesNotRunAgain(t *testing.T) {
 
 func TestANewCommitIsANewRevision(t *testing.T) {
 	root, statePath := workspace(t, "true")
-	config := filepath.Join(root, "pipeline.yaml")
+	config := filepath.Join(root, "forge-ci.yaml")
 	repo := filepath.Join(root, "demo-repo")
 
 	mustRun(t, root, "forge-ci", "apply", "--config", config)
@@ -266,7 +266,7 @@ func TestANewCommitIsANewRevision(t *testing.T) {
 
 func TestAFailingStageBlocksAndExitsNonZero(t *testing.T) {
 	root, statePath := workspace(t, "exit 1")
-	config := filepath.Join(root, "pipeline.yaml")
+	config := filepath.Join(root, "forge-ci.yaml")
 
 	out, err := run(t, root, "forge-ci", "apply", "--config", config)
 	require.Error(t, err, out)
@@ -278,7 +278,7 @@ func TestAFailingStageBlocksAndExitsNonZero(t *testing.T) {
 
 func TestPollSeesTheRepoMoveOnce(t *testing.T) {
 	root, _ := workspace(t, "true")
-	config := filepath.Join(root, "pipeline.yaml")
+	config := filepath.Join(root, "forge-ci.yaml")
 	repo := filepath.Join(root, "demo-repo")
 
 	mustRun(t, root, "forge-ci", "bootstrap", "--config", config)
@@ -299,7 +299,7 @@ func TestPollSeesTheRepoMoveOnce(t *testing.T) {
 
 func TestSwappingTheManagerIsRefusedEndToEnd(t *testing.T) {
 	root, _ := workspace(t, "true")
-	config := filepath.Join(root, "pipeline.yaml")
+	config := filepath.Join(root, "forge-ci.yaml")
 
 	mustRun(t, root, "forge-ci", "bootstrap", "--config", config)
 
@@ -319,7 +319,7 @@ func TestSwappingTheManagerIsRefusedEndToEnd(t *testing.T) {
 
 func TestApplyInsideApplyIsRefused(t *testing.T) {
 	root, _ := workspace(t, "true")
-	config := filepath.Join(root, "pipeline.yaml")
+	config := filepath.Join(root, "forge-ci.yaml")
 
 	raw, err := os.ReadFile(config)
 	require.NoError(t, err)
@@ -350,7 +350,7 @@ func TestApplyInsideApplyIsRefused(t *testing.T) {
 
 func TestASelfStageUsingBootstrapReconcilesWithoutRecursing(t *testing.T) {
 	root, statePath := workspace(t, "true")
-	config := filepath.Join(root, "pipeline.yaml")
+	config := filepath.Join(root, "forge-ci.yaml")
 
 	raw, err := os.ReadFile(config)
 	require.NoError(t, err)
@@ -386,7 +386,7 @@ func TestASelfStageUsingBootstrapReconcilesWithoutRecursing(t *testing.T) {
 
 func TestAnUncommittedBreakIsCaught(t *testing.T) {
 	root, statePath := workspace(t, "true")
-	config := filepath.Join(root, "pipeline.yaml")
+	config := filepath.Join(root, "forge-ci.yaml")
 	repo := filepath.Join(root, "demo-repo")
 
 	mustRun(t, root, "forge-ci", "apply", "--config", config)
@@ -422,7 +422,7 @@ func revisionIDs(t *testing.T, statePath string) []string {
 
 func TestGitignoredBuildOutputDoesNotDirtyTheRevision(t *testing.T) {
 	root, statePath := workspace(t, "true")
-	config := filepath.Join(root, "pipeline.yaml")
+	config := filepath.Join(root, "forge-ci.yaml")
 	repo := filepath.Join(root, "demo-repo")
 
 	mustRun(t, root, "forge-ci", "apply", "--config", config)
@@ -441,7 +441,7 @@ func TestGitignoredBuildOutputDoesNotDirtyTheRevision(t *testing.T) {
 
 func TestUntrackedBuildOutputNeverSettles(t *testing.T) {
 	root, statePath := workspace(t, "true")
-	config := filepath.Join(root, "pipeline.yaml")
+	config := filepath.Join(root, "forge-ci.yaml")
 	repo := filepath.Join(root, "demo-repo")
 
 	require.NoError(t, os.Remove(filepath.Join(repo, ".gitignore")))

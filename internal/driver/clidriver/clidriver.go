@@ -15,7 +15,7 @@ import (
 	"github.com/alexandremahdhaoui/forge-ci/pkg/config"
 )
 
-const DefaultPath = "pipeline.yaml"
+const DefaultPath = "forge-ci.yaml"
 
 const EnvInApply = "FORGE_CI_IN_APPLY"
 
@@ -108,7 +108,7 @@ func (d *Driver) load(verb string, args []string) (config.Pipeline, string, erro
 	fs := flag.NewFlagSet(verb, flag.ContinueOnError)
 	fs.SetOutput(d.out)
 
-	path := fs.String("config", DefaultPath, "path to the pipeline file")
+	path := fs.String("config", DefaultPath, "path to the forge-ci file")
 	root := fs.String("root", "", "directory holding the repos, defaults to the pipeline file's parent")
 
 	if err := fs.Parse(args); err != nil {
