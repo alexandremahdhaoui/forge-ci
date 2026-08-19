@@ -683,3 +683,47 @@ func TestAStageWithNoReleasePublishesNothing(t *testing.T) {
 	require.Empty(t, report.Released)
 	require.Empty(t, f.published)
 }
+
+func TestAPipelineWithNoVersionGetsTheNextPatch(t *testing.T) {
+	f := newFakeEngines(t)
+
+	git := gitAt(t, "abc123")
+	git.EXPECT().LatestTag(mock.Anything, "/work").Return("v0.2.4", nil).Maybe()
+
+	c := reconcilecontroller.New(f.caller(), git, clock())
+
+	p := pipeline(releasingStage("build", substage("default", []string{"build"})))
+
+	report, err := c.Apply(context.Background(), p, "/work")
+	require.NoError(t, err)
+	require.Len(t, f.published, 1)
+	require.Equal(t, "v0.2.5", f.published[0].Version,
+		"nothing here can read a minor or a major off a diff, so it moves the patch")
+	require.True(t, report.Minted)
+}
+
+func TestAPipelineThatNamesAVersionIsTakenAtItsWord(t *testing.T) {
+	f := newFakeEngines(t)
+	c := reconcilecontroller.New(f.caller(), gitAt(t, "abc123"), clock())
+
+	p := pipeline(releasingStage("build", substage("default", []string{"build"})))
+	p.Version = "v2.0.0"
+
+	_, err := c.Apply(context.Background(), p, "/work")
+	require.NoError(t, err)
+	require.Equal(t, "v2.0.0", f.published[0].Version)
+}
+
+func TestAWorkspaceThatNeverReleasedStartsAtTheFirstVersion(t *testing.T) {
+	f := newFakeEngines(t)
+
+	git := gitAt(t, "abc123")
+	git.EXPECT().LatestTag(mock.Anything, mock.Anything).Return("", nil).Maybe()
+
+	c := reconcilecontroller.New(f.caller(), git, clock())
+
+	_, err := c.Apply(context.Background(),
+		pipeline(releasingStage("build", substage("default", []string{"build"}))), "/work")
+	require.NoError(t, err)
+	require.Equal(t, "v0.1.0", f.published[0].Version)
+}

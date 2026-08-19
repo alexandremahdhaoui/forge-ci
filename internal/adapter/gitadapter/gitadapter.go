@@ -19,6 +19,7 @@ type Git interface {
 	HeadSHA(ctx context.Context, dir string) (string, error)
 	RemoteSHA(ctx context.Context, url, ref string) (string, error)
 	Dirty(ctx context.Context, dir string) (bool, error)
+	LatestTag(ctx context.Context, dir string) (string, error)
 	WorktreeHash(ctx context.Context, dir string) (string, error)
 }
 
@@ -132,4 +133,22 @@ func (g *CLI) Dirty(ctx context.Context, dir string) (bool, error) {
 	}
 
 	return strings.TrimSpace(res.Stdout) != "", nil
+}
+
+// LatestTag is the highest semver tag a checkout carries. A repo with no tag
+// answers empty rather than failing, because a workspace that has never
+// released has nothing to report.
+func (g *CLI) LatestTag(ctx context.Context, dir string) (string, error) {
+	res, err := g.run(ctx, dir, "listing tags", "tag", "--sort=-v:refname")
+	if err != nil {
+		return "", err
+	}
+
+	for _, line := range strings.Split(res.Stdout, "\n") {
+		if tag := strings.TrimSpace(line); tag != "" {
+			return tag, nil
+		}
+	}
+
+	return "", nil
 }

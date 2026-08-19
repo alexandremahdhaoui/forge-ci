@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
@@ -12,6 +13,7 @@ import (
 
 var (
 	ErrVersion  = errors.New("the version is not a semver tag")
+	ErrPrevious = errors.New("the previous version is not a semver tag")
 	ErrRevision = errors.New("a release needs the revision it publishes")
 	ErrDirty    = errors.New("a dirty revision was never proven and must not be released")
 )
@@ -44,6 +46,35 @@ func New() *Controller {
 // someone else's system and owns no resource of its own.
 func (c *Controller) Declare(_ map[string]any) (citypes.DeclareOutput, error) {
 	return citypes.DeclareOutput{Resources: []citypes.Resource{}}, nil
+}
+
+// NextVersion is the version after the highest tag already released. A
+// workspace that has never released starts at v0.1.0.
+//
+// The bump is the patch. A minor or a major is a claim about what changed, and
+// nothing here can read that off a diff, so those are named by hand and this
+// only moves the number nobody has an opinion about.
+func NextVersion(previous string) (string, error) {
+	if strings.TrimSpace(previous) == "" {
+		return "v0.1.0", nil
+	}
+
+	m := semver.FindStringSubmatch(previous)
+	if m == nil {
+		return "", fmt.Errorf("%w: %q", ErrPrevious, previous)
+	}
+
+	// A prerelease is released as the version it was a candidate for.
+	if m[4] != "" {
+		return fmt.Sprintf("v%s.%s.%s", m[1], m[2], m[3]), nil
+	}
+
+	patch, err := strconv.Atoi(m[3])
+	if err != nil {
+		return "", fmt.Errorf("%w: %q", ErrPrevious, previous)
+	}
+
+	return fmt.Sprintf("v%s.%s.%d", m[1], m[2], patch+1), nil
 }
 
 // Plan decides what to publish. A revision that was never proven, or one minted

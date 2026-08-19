@@ -93,3 +93,43 @@ func TestDeclareOwnsNothing(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, out.Resources, "a release writes to someone else's system")
 }
+
+func TestNextVersionStartsAtTheFirstRelease(t *testing.T) {
+	t.Parallel()
+
+	got, err := artifactcontroller.NextVersion("")
+	require.NoError(t, err)
+	assert.Equal(t, "v0.1.0", got, "a workspace that never released starts here")
+}
+
+func TestNextVersionBumpsThePatch(t *testing.T) {
+	t.Parallel()
+
+	for previous, want := range map[string]string{
+		"v0.1.0":  "v0.1.1",
+		"v0.1.9":  "v0.1.10",
+		"v1.2.3":  "v1.2.4",
+		"v0.44.2": "v0.44.3",
+	} {
+		got, err := artifactcontroller.NextVersion(previous)
+		require.NoError(t, err, previous)
+		assert.Equal(t, want, got, previous)
+	}
+}
+
+func TestAPrereleaseIsReleasedAsWhatItWasACandidateFor(t *testing.T) {
+	t.Parallel()
+
+	got, err := artifactcontroller.NextVersion("v1.0.0-rc.1")
+	require.NoError(t, err)
+	assert.Equal(t, "v1.0.0", got)
+}
+
+func TestNextVersionRefusesSomethingThatIsNotAVersion(t *testing.T) {
+	t.Parallel()
+
+	for _, previous := range []string{"latest", "1.2.3", "v1.2", "v1.2.3.4"} {
+		_, err := artifactcontroller.NextVersion(previous)
+		require.ErrorIs(t, err, artifactcontroller.ErrPrevious, previous)
+	}
+}

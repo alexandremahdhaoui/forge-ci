@@ -15,6 +15,7 @@ import (
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/engineadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/gitadapter"
+	"github.com/alexandremahdhaoui/forge-ci/internal/controller/artifactcontroller"
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 	"github.com/alexandremahdhaoui/forge-ci/pkg/config"
 )
@@ -163,9 +164,14 @@ func (c *Controller) release(
 		spec["root"] = root
 	}
 
+	version, err := c.releaseVersion(ctx, p, root)
+	if err != nil {
+		return citypes.ArtifactOutput{}, err
+	}
+
 	in := citypes.ArtifactInput{
 		Revision: revision.ID,
-		Version:  p.Version,
+		Version:  version,
 		Repos:    revision.Repos,
 		Spec:     spec,
 	}
@@ -177,6 +183,33 @@ func (c *Controller) release(
 	}
 
 	return out, nil
+}
+
+// releaseVersion is what the release publishes under. A pipeline that names
+// one is taken at its word, because a minor or a major is a claim about what
+// changed and nothing here can read that off a diff. A pipeline that names
+// none gets the patch after the highest tag the workspace already carries,
+// starting at v0.1.0.
+func (c *Controller) releaseVersion(
+	ctx context.Context,
+	p config.Pipeline,
+	root string,
+) (string, error) {
+	if strings.TrimSpace(p.Version) != "" {
+		return p.Version, nil
+	}
+
+	previous, err := c.git.LatestTag(ctx, root)
+	if err != nil {
+		return "", fmt.Errorf("reading the last released version: %w", err)
+	}
+
+	next, err := artifactcontroller.NextVersion(previous)
+	if err != nil {
+		return "", fmt.Errorf("deciding the next version: %w", err)
+	}
+
+	return next, nil
 }
 
 // mint records the revision as proven. Writing it twice is harmless, because
