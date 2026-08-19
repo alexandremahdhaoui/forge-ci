@@ -45,6 +45,11 @@ which is why the integration suite exists.
 handed to an engine goes through `orEmpty`. Miss one call site and only that
 engine breaks, at runtime, in the field.
 
+**`go test -run` matches the parent test name first.** A subtest filter like
+`-run 'put-then-get'` matches nothing and exits 0, which reads exactly like a
+pass. Use the full path, `-run 'TestParent/subtest'`. This hid a broken
+conformance assertion for one commit.
+
 **Substages run at the same time, so anything they share needs a lock.** They
 were sequential for a while and both the schema and the generated docs claimed
 otherwise, which is the kind of lie that only shows up when someone relies on

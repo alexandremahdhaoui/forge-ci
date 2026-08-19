@@ -14,7 +14,13 @@ build:
           sh hack/resolve-spec.sh
           github.com/alexandremahdhaoui/forge-ci-spec spec/forge-ci.v1.yaml .forge/spec-cache &&
           sh hack/resolve-spec.sh
-          github.com/alexandremahdhaoui/forge-ci-spec testdata/cases.json .forge/spec-cache
+          github.com/alexandremahdhaoui/forge-ci-spec testdata/cases.json .forge/spec-cache &&
+          sh hack/resolve-spec.sh
+          github.com/alexandremahdhaoui/forge-revision-spec testdata/cases.json
+          .forge/spec-cache/revision &&
+          sh hack/resolve-spec.sh
+          github.com/alexandremahdhaoui/forge-revision-spec spec/revision.v1.yaml
+          .forge/spec-cache/revision
 
   - name: generate-mocks
     src: .
@@ -115,6 +121,12 @@ test:
     spec:
       tags: [integration]
       packages: [./test/integration/...]
+
+  - name: conformance
+    runner: go://go-test
+    spec:
+      tags: [conformance]
+      packages: [./test/conformance/...]
 
   - name: e2e
     runner: go://go-test

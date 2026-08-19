@@ -7,3 +7,10 @@ modules:
     specs:
       - spec/forge-ci.v1.yaml
       - testdata/cases.json
+
+  github.com/alexandremahdhaoui/forge-revision-spec:
+    path: ../forge-revision-spec
+    version: v0.1.0
+    specs:
+      - spec/revision.v1.yaml
+      - testdata/cases.json
