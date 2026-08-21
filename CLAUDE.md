@@ -102,14 +102,19 @@ wiring, so a new engine needs an e2e case or it is decoration.
 
 ## The engine contract
 
-Every engine is a binary using `cienginekit.Engine`, which gives CLI and MCP
-from one tool definition. The CLI takes JSON on stdin and writes JSON to
-stdout, so an engine is debuggable by hand.
+Every engine is a `cmd/<name>` directory holding three hand-written files -
+`forge-dev.yaml`, `spec.yaml`, `handlers.go` - and everything else generated
+by `go://forge-dev` (`zz_generated.*`, plus `docs/list.yaml`, `usage.md` and
+`schema.md`, gated by `hack/engine-docs.sh`). Engines are MCP-only; a
+`config-validate` tool is generated for every engine, and the wire types come
+from the OpenAPI spec in `.forge/spec-cache/`, so the contract two tools
+share is the one the engine is built from.
 
-```sh
-echo '{"manager":"local","resources":[{"kind":"directory","name":"/tmp/x"}]}' \
-  | ci-manager-local reconcile
-```
+An engine declares resources and never names a manager kind. Break that and
+the manager layer stops being swappable, which is the whole reason it exists.
 
-An engine declares resources and never names a manager kind. Break that and the
-manager layer stops being swappable, which is the whole reason it exists.
+ci-state-git stores any record family: the built-in kinds are `revision`,
+`run` and `owned`, and a caller can name extras in `spec.kinds`, each stored
+under a directory of its own name - the register stores `index`, `request`
+and `verdict` this way, and this engine never learns what they mean. `list`
+walks nested keys recursively and returns relative slash paths.
