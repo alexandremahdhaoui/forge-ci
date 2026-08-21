@@ -37,12 +37,14 @@ engines:
     manager: local
     spec:
       path: <string>
+      kinds: <list of string>
 ```
 
 ## Worth knowing
 
-Kinds are `revision`, `run` and `owned`. A run key nests as
-`<revision>/<stage>/<substage>`.
+Kinds are `revision`, `run` and `owned`, plus any extras named in `spec.kinds`.
+A run key nests as `<revision>/<stage>/<substage>`, and `list` walks nested keys
+recursively.
 
 A key cannot escape the state root. `../../escape` lands inside it.
 

@@ -17,9 +17,11 @@ tools:
 example:
   tool: get
   input: '{"kind":"revision","key":"abc123","spec":{"path":"../my-state"}}'
-notes: 'Kinds are `revision`, `run` and `owned`. A run key nests as
+notes: 'Kinds are `revision`, `run` and `owned`, plus any extras named in `spec.kinds`.
 
-  `<revision>/<stage>/<substage>`.
+  A run key nests as `<revision>/<stage>/<substage>`, and `list` walks nested keys
+
+  recursively.
 
 
   A key cannot escape the state root. `../../escape` lands inside it.
@@ -33,3 +35,8 @@ spec:
   type: string
   required: true
   means: The state repo. Created and initialised if it is not a repo yet.
+- key: kinds
+  type: list of string
+  required: false
+  means: Extra record kinds, each stored under a directory of its own name. This
+    engine never learns what a caller stores in them.

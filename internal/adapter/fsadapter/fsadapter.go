@@ -13,6 +13,7 @@ type FS interface {
 	MkdirAll(path string) error
 	Exists(path string) (bool, error)
 	List(dir string) ([]string, error)
+	Walk(dir string) ([]string, error)
 	Remove(path string) error
 }
 
@@ -79,6 +80,42 @@ func (OS) List(dir string) ([]string, error) {
 	names := make([]string, 0, len(entries))
 	for _, e := range entries {
 		names = append(names, e.Name())
+	}
+
+	sort.Strings(names)
+
+	return names, nil
+}
+
+// Walk returns the relative slash paths of every file under dir, sorted. A
+// missing directory walks to nothing, matching List.
+func (OS) Walk(dir string) ([]string, error) {
+	var names []string
+
+	err := filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+
+			return err
+		}
+
+		if d.IsDir() {
+			return nil
+		}
+
+		rel, err := filepath.Rel(dir, p)
+		if err != nil {
+			return err
+		}
+
+		names = append(names, filepath.ToSlash(rel))
+
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("walking %s: %w", dir, err)
 	}
 
 	sort.Strings(names)

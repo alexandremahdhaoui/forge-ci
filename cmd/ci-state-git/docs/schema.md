@@ -7,5 +7,6 @@ The `spec` block on this engine's entry in `forge-ci.yaml`.
 | Key | Type | Required | Means |
 |---|---|---|---|
 | `path` | string | yes | The state repo. Created and initialised if it is not a repo yet. |
+| `kinds` | list of string | no | Extra record kinds, each stored under a directory of its own name. This engine never learns what a caller stores in them. |
 
 forge-ci never validates a spec. This engine does, because only it knows what the keys mean.

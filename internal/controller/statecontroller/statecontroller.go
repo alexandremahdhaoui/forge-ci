@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"path"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/fsadapter"
@@ -20,14 +22,50 @@ const (
 )
 
 var (
-	ErrPath = errors.New("the state engine needs spec.path naming the state repo")
-	ErrKind = errors.New("unknown state kind")
+	ErrPath  = errors.New("the state engine needs spec.path naming the state repo")
+	ErrKind  = errors.New("unknown state kind")
+	ErrKinds = errors.New("spec.kinds must be kebab-case names")
 )
 
 var kinds = map[string]string{
 	KindRevision: "revisions",
 	KindRun:      "runs",
 	KindOwned:    "owned",
+}
+
+var kindPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+
+// kindsFor merges spec.kinds over the built-in kinds. An extra kind maps to a
+// directory of its own name, so a caller can store new record families without
+// this engine learning what they mean.
+func kindsFor(spec map[string]any) (map[string]string, error) {
+	extras, ok := spec["kinds"]
+	if !ok {
+		return kinds, nil
+	}
+
+	list, ok := extras.([]any)
+	if !ok {
+		return nil, ErrKinds
+	}
+
+	merged := make(map[string]string, len(kinds)+len(list))
+	for k, v := range kinds {
+		merged[k] = v
+	}
+
+	for _, e := range list {
+		name, ok := e.(string)
+		if !ok || !kindPattern.MatchString(name) {
+			return nil, fmt.Errorf("adding kind %v: %w", e, ErrKinds)
+		}
+
+		if _, exists := merged[name]; !exists {
+			merged[name] = name
+		}
+	}
+
+	return merged, nil
 }
 
 type Controller struct {
@@ -45,8 +83,20 @@ func (c *Controller) Declare(spec map[string]any) (citypes.DeclareOutput, error)
 		return citypes.DeclareOutput{}, err
 	}
 
+	known, err := kindsFor(spec)
+	if err != nil {
+		return citypes.DeclareOutput{}, err
+	}
+
+	dirs := make([]string, 0, len(known))
+	for _, dir := range known {
+		dirs = append(dirs, dir)
+	}
+
+	sort.Strings(dirs)
+
 	out := citypes.DeclareOutput{Resources: []citypes.Resource{{Kind: "directory", Name: root}}}
-	for _, dir := range kinds {
+	for _, dir := range dirs {
 		out.Resources = append(out.Resources,
 			citypes.Resource{Kind: "directory", Name: filepath.Join(root, dir)})
 	}
@@ -105,14 +155,19 @@ func (c *Controller) List(ctx context.Context, in citypes.StateGetInput) (citype
 		return citypes.StateListOutput{}, err
 	}
 
-	dir, ok := kinds[in.Kind]
+	known, err := kindsFor(in.Spec)
+	if err != nil {
+		return citypes.StateListOutput{}, err
+	}
+
+	dir, ok := known[in.Kind]
 	if !ok {
 		return citypes.StateListOutput{}, fmt.Errorf("listing %q: %w", in.Kind, ErrKind)
 	}
 
 	base := filepath.Join(root, dir, filepath.FromSlash(in.Key))
 
-	names, err := c.fs.List(base)
+	names, err := c.fs.Walk(base)
 	if err != nil {
 		return citypes.StateListOutput{}, fmt.Errorf("listing %s: %w", in.Kind, err)
 	}
@@ -167,7 +222,12 @@ func (c *Controller) pathFor(spec map[string]any, kind, key string) (string, err
 		return "", err
 	}
 
-	dir, ok := kinds[kind]
+	known, err := kindsFor(spec)
+	if err != nil {
+		return "", err
+	}
+
+	dir, ok := known[kind]
 	if !ok {
 		return "", fmt.Errorf("resolving %q: %w", kind, ErrKind)
 	}

@@ -252,7 +252,7 @@ func TestPutReportsAWriteFailure(t *testing.T) {
 
 func TestListReportsAFailure(t *testing.T) {
 	fs := failingFS(t)
-	fs.EXPECT().List(mock.Anything).Return(nil, errBoom).Once()
+	fs.EXPECT().Walk(mock.Anything).Return(nil, errBoom).Once()
 
 	c := statecontroller.New(fs, nil)
 
@@ -260,6 +260,79 @@ func TestListReportsAFailure(t *testing.T) {
 		Kind: statecontroller.KindRevision, Spec: map[string]any{"path": "/tmp/x"},
 	})
 	require.ErrorIs(t, err, errBoom)
+}
+
+func TestListRecursesUnderAPrefix(t *testing.T) {
+	root := t.TempDir()
+	c := statecontroller.New(fsadapter.New(), nil)
+	spec := map[string]any{"path": root, "kinds": []any{"index"}}
+
+	for _, key := range []string{"go/example.com/pkg/1", "go/example.com/pkg/2", "rust/serde/1"} {
+		_, err := c.Put(context.Background(), citypes.StatePutInput{
+			Kind: "index", Key: key, Payload: "{}", Spec: spec,
+		})
+		require.NoError(t, err)
+	}
+
+	list, err := c.List(context.Background(), citypes.StateGetInput{
+		Kind: "index", Key: "go", Spec: spec,
+	})
+	require.NoError(t, err)
+	require.Equal(t, []string{"example.com/pkg/1", "example.com/pkg/2"}, list.Keys)
+}
+
+func TestAnExtraKindComesFromTheSpec(t *testing.T) {
+	root := t.TempDir()
+	c := statecontroller.New(fsadapter.New(), nil)
+	spec := map[string]any{"path": root, "kinds": []any{"request"}}
+
+	_, err := c.Put(context.Background(), citypes.StatePutInput{
+		Kind: "request", Key: "r1", Payload: "{}", Spec: spec,
+	})
+	require.NoError(t, err)
+
+	got, err := c.Get(context.Background(), citypes.StateGetInput{
+		Kind: "request", Key: "r1", Spec: spec,
+	})
+	require.NoError(t, err)
+	require.True(t, got.Found)
+
+	// The same kind without the spec entry stays unknown.
+	_, err = c.Get(context.Background(), citypes.StateGetInput{
+		Kind: "request", Key: "r1", Spec: map[string]any{"path": root},
+	})
+	require.ErrorIs(t, err, statecontroller.ErrKind)
+}
+
+func TestAMalformedKindsSpecIsAnError(t *testing.T) {
+	c := statecontroller.New(fsadapter.New(), nil)
+
+	for _, kinds := range []any{"index", []any{"Not Kebab"}, []any{42}} {
+		_, err := c.Get(context.Background(), citypes.StateGetInput{
+			Kind: statecontroller.KindRevision, Key: "a",
+			Spec: map[string]any{"path": t.TempDir(), "kinds": kinds},
+		})
+		require.ErrorIs(t, err, statecontroller.ErrKinds)
+	}
+}
+
+func TestABuiltInKindCannotBeRemapped(t *testing.T) {
+	root := t.TempDir()
+	c := statecontroller.New(fsadapter.New(), nil)
+
+	// Naming a built-in in spec.kinds is harmless: the built-in mapping wins.
+	spec := map[string]any{"path": root, "kinds": []any{"revision"}}
+
+	_, err := c.Put(context.Background(), citypes.StatePutInput{
+		Kind: "revision", Key: "k", Payload: "{}", Spec: spec,
+	})
+	require.NoError(t, err)
+
+	got, err := c.Get(context.Background(), citypes.StateGetInput{
+		Kind: "revision", Key: "k", Spec: map[string]any{"path": root},
+	})
+	require.NoError(t, err)
+	require.True(t, got.Found)
 }
 
 func TestListNeedsAPath(t *testing.T) {

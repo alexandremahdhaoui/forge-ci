@@ -99,3 +99,20 @@ func TestWriteNamesWhatItCouldNotWrite(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "creating directory for ")
 }
+
+func TestWalkReturnsRelativePathsRecursively(t *testing.T) {
+	dir := t.TempDir()
+	fs := fsadapter.New()
+	require.NoError(t, fs.WriteFile(dir+"/a/b/one.json", []byte("{}")))
+	require.NoError(t, fs.WriteFile(dir+"/a/two.json", []byte("{}")))
+
+	names, err := fs.Walk(dir)
+	require.NoError(t, err)
+	require.Equal(t, []string{"a/b/one.json", "a/two.json"}, names)
+}
+
+func TestWalkOfAMissingDirectoryIsEmpty(t *testing.T) {
+	names, err := fsadapter.New().Walk(t.TempDir() + "/absent")
+	require.NoError(t, err)
+	require.Empty(t, names)
+}
