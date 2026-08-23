@@ -126,6 +126,13 @@ build:
     dest: ./build/bin
     engine: forge://go-build
 
+# The CLI as a first class run target. Every toolchain runnable declares
+# forge-self-factory: the model has no exceptions.
+run:
+  - name: forge-ci
+    src: ./cmd/forge-ci
+    factory: git@github.com:alexandremahdhaoui/forge-self-factory.git
+
 test:
   - name: lint
     runner: forge://go-lint
