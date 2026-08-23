@@ -197,3 +197,4 @@ test:
 factory:
   module: github.com/alexandremahdhaoui/forge-ci
   goVersion: "1.26.5"
+  manifest: committed
