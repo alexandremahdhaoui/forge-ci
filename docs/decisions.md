@@ -148,7 +148,7 @@ What was decided, why, and what it costs. A ↩ marks one that reversed an earli
 
 ### Engines ship as binaries resolved by URI
 
-**Decided.** An engine is a go:// URI installed on demand, not a Go interface compiled in.
+**Decided.** An engine is a forge:// URI installed on demand, not a Go interface compiled in.
 
 **Why.** Adding a backend must not mean releasing forge-ci. It reuses the mechanism forge already has, and a third party engine needs no changes to forge.
 

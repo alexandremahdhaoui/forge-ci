@@ -103,11 +103,11 @@ func TestAReleasingStageNeedsNoVersionOnThePipeline(t *testing.T) {
 	err := config.Pipeline{
 		Name:     "demo",
 		State:    "st",
-		Managers: []config.Manager{{Alias: "local", Engine: "go://m"}},
+		Managers: []config.Manager{{Alias: "local", Engine: "forge://m"}},
 		Engines: []config.Engine{
-			{Alias: "st", Type: config.PortState, Engine: "go://x", Manager: "local"},
-			{Alias: "gh", Type: config.PortArtifact, Engine: "go://x", Manager: "local"},
-			{Alias: "here", Type: config.PortCompute, Engine: "go://x", Manager: "local"},
+			{Alias: "st", Type: config.PortState, Engine: "forge://x", Manager: "local"},
+			{Alias: "gh", Type: config.PortArtifact, Engine: "forge://x", Manager: "local"},
+			{Alias: "here", Type: config.PortCompute, Engine: "forge://x", Manager: "local"},
 		},
 		Targets: []config.Target{{Alias: "t", Forge: "test-all"}},
 		Stages: []config.Stage{{

@@ -31,7 +31,7 @@ echo '{"run":{"status":"passed"},"spec":{"approvalPath":"/tmp/approved"}}' \
 engines:
   - alias: my-gate
     type: gate
-    engine: "go://github.com/alexandremahdhaoui/forge-ci/cmd/ci-gate-manual@v0.1.4"
+    engine: "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-gate-manual@v0.1.4"
     manager: local
     spec:
       approvalPath: <string>

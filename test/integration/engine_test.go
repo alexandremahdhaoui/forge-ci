@@ -61,7 +61,7 @@ func TestAManagerRealizesADirectoryOverMCP(t *testing.T) {
 	var out citypes.ReconcileOutput
 
 	err := caller().Call(context.Background(),
-		"go://github.com/alexandremahdhaoui/forge-ci/cmd/ci-manager-local@v0.1.0",
+		"forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-manager-local@v0.1.0",
 		"reconcile",
 		citypes.ReconcileInput{
 			Manager:   "local",
@@ -78,7 +78,7 @@ func TestTheDryRunManagerChangesNothingOverMCP(t *testing.T) {
 	var out citypes.ReconcileOutput
 
 	err := caller().Call(context.Background(),
-		"go://github.com/alexandremahdhaoui/forge-ci/cmd/ci-manager-dryrun@v0.1.0",
+		"forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-manager-dryrun@v0.1.0",
 		"reconcile",
 		citypes.ReconcileInput{
 			Manager:   "dryrun",
@@ -93,7 +93,7 @@ func TestSwappingTheManagerIsRefusedOverMCP(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "state")
 
 	err := caller().Call(context.Background(),
-		"go://github.com/alexandremahdhaoui/forge-ci/cmd/ci-manager-dryrun@v0.1.0",
+		"forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-manager-dryrun@v0.1.0",
 		"reconcile",
 		citypes.ReconcileInput{
 			Manager:   "dryrun",
@@ -107,7 +107,7 @@ func TestSwappingTheManagerIsRefusedOverMCP(t *testing.T) {
 func TestTheStateEngineRoundTripsOverMCP(t *testing.T) {
 	root := t.TempDir()
 	c := caller()
-	uri := "go://github.com/alexandremahdhaoui/forge-ci/cmd/ci-state-git@v0.1.0"
+	uri := "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-state-git@v0.1.0"
 
 	err := c.Call(context.Background(), uri, "put", citypes.StatePutInput{
 		Kind: "revision", Key: "abc", Payload: `{"id":"abc"}`,
@@ -130,7 +130,7 @@ func TestThePromotionEngineDecidesOverMCP(t *testing.T) {
 	var out citypes.PromotionOutput
 
 	err := caller().Call(context.Background(),
-		"go://github.com/alexandremahdhaoui/forge-ci/cmd/ci-promotion-all@v0.1.0",
+		"forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-promotion-all@v0.1.0",
 		"evaluate",
 		citypes.PromotionInput{
 			Stage: "prod",
@@ -144,7 +144,7 @@ func TestThePromotionEngineDecidesOverMCP(t *testing.T) {
 func TestTheGateEngineWaitsForItsFileOverMCP(t *testing.T) {
 	approval := filepath.Join(t.TempDir(), "approved")
 	c := caller()
-	uri := "go://github.com/alexandremahdhaoui/forge-ci/cmd/ci-gate-manual@v0.1.0"
+	uri := "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-gate-manual@v0.1.0"
 
 	var pending citypes.GateResult
 
@@ -169,7 +169,7 @@ func TestTheGateEngineWaitsForItsFileOverMCP(t *testing.T) {
 
 func TestAnUnknownToolIsAnError(t *testing.T) {
 	err := caller().Call(context.Background(),
-		"go://github.com/alexandremahdhaoui/forge-ci/cmd/ci-promotion-all@v0.1.0",
+		"forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-promotion-all@v0.1.0",
 		"fly", map[string]any{}, &citypes.PromotionOutput{})
 	require.Error(t, err)
 }

@@ -80,13 +80,13 @@ artifactStorePath: .forge/artifact-store.yaml
 build:
   - name: noop
     src: .
-    engine: go://generic-builder
+    engine: forge://generic-builder
     spec:
       command: "true"
 
 test:
   - name: unit
-    runner: go://generic-test-runner
+    runner: forge://generic-test-runner
     spec:
       command: sh
       args: ["-c", "%s"]
@@ -99,29 +99,29 @@ repos:
     url: file://` + filepath.Join(root, "demo-repo") + `
 managers:
   - alias: local
-    engine: "go://github.com/alexandremahdhaoui/forge-ci/cmd/ci-manager-local@v0.1.0"
+    engine: "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-manager-local@v0.1.0"
     spec:
       statePath: ` + filepath.Join(root, "manager-local.json") + `
 engines:
   - alias: here
     type: compute
-    engine: "go://github.com/alexandremahdhaoui/forge-ci/cmd/ci-compute-local@v0.1.0"
+    engine: "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-compute-local@v0.1.0"
     manager: local
   - alias: ci-state
     type: state
-    engine: "go://github.com/alexandremahdhaoui/forge-ci/cmd/ci-state-git@v0.1.0"
+    engine: "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-state-git@v0.1.0"
     manager: local
     spec:
       path: ` + statePath + `
   - alias: on-change
     type: trigger
-    engine: "go://github.com/alexandremahdhaoui/forge-ci/cmd/ci-trigger-watch@v0.1.0"
+    engine: "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-trigger-watch@v0.1.0"
     manager: local
     spec:
       watch: ["` + filepath.Join(root, "demo-repo") + `"]
   - alias: all-pass
     type: promotion
-    engine: "go://github.com/alexandremahdhaoui/forge-ci/cmd/ci-promotion-all@v0.1.0"
+    engine: "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-promotion-all@v0.1.0"
     manager: local
 state: ci-state
 triggers: [on-change]

@@ -119,5 +119,5 @@ An adapter declares the interface it satisfies. A controller accepts it. A
 driver holds no logic. main wires them and starts a driver.
 
 `pkg/cienginekit` is a known divergence. forge generates this from an OpenAPI
-spec via `go://forge-dev`, and forge-ci hand-rolled it because forge-dev has no
+spec via `forge://forge-dev`, and forge-ci hand-rolled it because forge-dev has no
 engine type that fits. See the workspace `FOLLOWUP.md`.

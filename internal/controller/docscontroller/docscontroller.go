@@ -49,7 +49,7 @@ func usage(e docstypes.Engine, source string) string {
 		e.Example.Input, e.Name, e.Example.Tool)
 
 	fmt.Fprintf(&b, "## In a pipeline\n\n```yaml\nengines:\n  - alias: my-%s\n    type: %s\n"+
-		"    engine: \"go://github.com/alexandremahdhaoui/forge-ci/cmd/%s@%s\"\n    manager: local\n",
+		"    engine: \"forge://github.com/alexandremahdhaoui/forge-ci/cmd/%s@%s\"\n    manager: local\n",
 		e.Port, e.Port, e.Name, e.Version)
 
 	if len(e.Spec) > 0 {

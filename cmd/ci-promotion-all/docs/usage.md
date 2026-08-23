@@ -32,7 +32,7 @@ echo '{"stage":"prod","runs":[{"status":"passed"},{"status":"failed"}],"spec":{"
 engines:
   - alias: my-promotion
     type: promotion
-    engine: "go://github.com/alexandremahdhaoui/forge-ci/cmd/ci-promotion-all@v0.1.4"
+    engine: "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-promotion-all@v0.1.4"
     manager: local
     spec:
       threshold: <number>

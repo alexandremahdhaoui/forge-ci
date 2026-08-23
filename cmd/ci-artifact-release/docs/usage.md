@@ -32,7 +32,7 @@ echo '{"revision":"3dd48e96ed7e","version":"v0.2.0","repos":{"golden-rust":"a5b2
 engines:
   - alias: my-artifact
     type: artifact
-    engine: "go://github.com/alexandremahdhaoui/forge-ci/cmd/ci-artifact-release@v0.1.0"
+    engine: "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-artifact-release@v0.1.0"
     manager: local
     spec:
       releaseIn: <string>

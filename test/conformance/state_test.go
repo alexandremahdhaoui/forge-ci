@@ -17,7 +17,7 @@ import (
 const (
 	vectorPath = "../../.forge/spec-cache/revision/cases.json"
 
-	stateEngine = "go://github.com/alexandremahdhaoui/forge-ci/cmd/ci-state-git@v0.1.7"
+	stateEngine = "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-state-git@v0.1.7"
 )
 
 type op struct {

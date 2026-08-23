@@ -30,7 +30,7 @@ echo '{"manager":"dryrun","resources":[{"kind":"directory","name":"/tmp/state"}]
 engines:
   - alias: my-manager
     type: manager
-    engine: "go://github.com/alexandremahdhaoui/forge-ci/cmd/ci-manager-dryrun@v0.1.4"
+    engine: "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-manager-dryrun@v0.1.4"
     manager: local
 ```
 

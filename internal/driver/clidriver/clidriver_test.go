@@ -24,15 +24,15 @@ const minimal = `
 name: demo
 managers:
   - alias: local
-    engine: "go://x/cmd/m@v0.1.0"
+    engine: "forge://x/cmd/m@v0.1.0"
 engines:
   - alias: here
     type: compute
-    engine: "go://x/cmd/c@v0.1.0"
+    engine: "forge://x/cmd/c@v0.1.0"
     manager: local
   - alias: st
     type: state
-    engine: "go://x/cmd/s@v0.1.0"
+    engine: "forge://x/cmd/s@v0.1.0"
     manager: local
 state: st
 targets:
@@ -375,7 +375,7 @@ func TestGraphShowsGatesAndEngines(t *testing.T) {
 	withGate = strings.Replace(withGate, `  - alias: st`,
 		`  - alias: approve
     type: gate
-    engine: "go://x/cmd/g@v0.1.0"
+    engine: "forge://x/cmd/g@v0.1.0"
     manager: local
   - alias: st`, 1)
 

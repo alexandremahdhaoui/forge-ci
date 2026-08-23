@@ -24,7 +24,7 @@ forge parses yaml through `sigs.k8s.io/yaml`, so `json:` tags decide key names.
 | Enum values | kebab-case | `type: compute` |
 | Binaries | kebab-case, domain first | `ci-state-git` |
 | MCP tools | prefixed by domain | ours are `ci-*` |
-| Engine URIs | `go://` or `alias://` only | anything else is a hard error |
+| Engine URIs | `forge://` or `alias://` only | anything else is a hard error |
 
 ## A failing test is not an error
 
@@ -104,7 +104,7 @@ wiring, so a new engine needs an e2e case or it is decoration.
 
 Every engine is a `cmd/<name>` directory holding three hand-written files -
 `forge-dev.yaml`, `spec.yaml`, `handlers.go` - and everything else generated
-by `go://forge-dev` (`zz_generated.*`, plus `docs/list.yaml`, `usage.md` and
+by `forge://forge-dev` (`zz_generated.*`, plus `docs/list.yaml`, `usage.md` and
 `schema.md`, gated by `hack/engine-docs.sh`). Engines are MCP-only; a
 `config-validate` tool is generated for every engine, and the wire types come
 from the OpenAPI spec in `.forge/spec-cache/`, so the contract two tools

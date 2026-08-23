@@ -30,7 +30,7 @@ var ports = map[Port]bool{
 
 var (
 	aliasPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
-	uriPattern   = regexp.MustCompile(`^(go|alias)://.+`)
+	uriPattern   = regexp.MustCompile(`^(forge|alias)://.+`)
 )
 
 type Pipeline struct {
@@ -140,8 +140,10 @@ func (p Pipeline) Validate() error {
 			add("%s: alias must be lowercase kebab-case", where)
 		}
 
-		if !uriPattern.MatchString(m.Engine) {
-			add("%s: engine must start with go:// or alias://", where)
+		if strings.HasPrefix(m.Engine, "go://") {
+			add("%s: the go:// scheme is removed; use forge://", where)
+		} else if !uriPattern.MatchString(m.Engine) {
+			add("%s: engine must start with forge:// or alias://", where)
 		}
 
 		if managers[m.Alias] {
@@ -167,8 +169,10 @@ func (p Pipeline) Validate() error {
 			add("%s: type %q is not a known port", where, e.Type)
 		}
 
-		if !uriPattern.MatchString(e.Engine) {
-			add("%s: engine must start with go:// or alias://", where)
+		if strings.HasPrefix(e.Engine, "go://") {
+			add("%s: the go:// scheme is removed; use forge://", where)
+		} else if !uriPattern.MatchString(e.Engine) {
+			add("%s: engine must start with forge:// or alias://", where)
 		}
 
 		if !managers[e.Manager] {

@@ -15,13 +15,13 @@ import (
 )
 
 const (
-	uriManager   = "go://x/cmd/ci-manager-local@v1"
-	uriCompute   = "go://x/cmd/ci-compute-local@v1"
-	uriState     = "go://x/cmd/ci-state-git@v1"
-	uriGate      = "go://x/cmd/ci-gate-manual@v1"
-	uriPromotion = "go://x/cmd/ci-promotion-all@v1"
-	uriTrigger   = "go://x/cmd/ci-trigger-watch@v1"
-	uriRelease   = "go://x/cmd/ci-artifact-release@v1"
+	uriManager   = "forge://x/cmd/ci-manager-local@v1"
+	uriCompute   = "forge://x/cmd/ci-compute-local@v1"
+	uriState     = "forge://x/cmd/ci-state-git@v1"
+	uriGate      = "forge://x/cmd/ci-gate-manual@v1"
+	uriPromotion = "forge://x/cmd/ci-promotion-all@v1"
+	uriTrigger   = "forge://x/cmd/ci-trigger-watch@v1"
+	uriRelease   = "forge://x/cmd/ci-artifact-release@v1"
 )
 
 type call struct {

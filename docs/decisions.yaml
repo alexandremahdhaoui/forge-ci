@@ -115,7 +115,7 @@ groups:
         costs: The remote path stays unvalidated. The trigger port is exercised only by a file watcher.
 
       - title: Engines ship as binaries resolved by URI
-        decided: An engine is a go:// URI installed on demand, not a Go interface compiled in.
+        decided: An engine is a forge:// URI installed on demand, not a Go interface compiled in.
         why: Adding a backend must not mean releasing forge-ci. It reuses the mechanism forge already has, and a third party engine needs no changes to forge.
         costs: Every engine is a separate binary, separately versioned. Debugging crosses a process boundary.
 

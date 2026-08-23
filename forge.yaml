@@ -5,7 +5,7 @@ artifactStorePath: .forge/artifact-store.yaml
 build:
   - name: resolve-spec
     src: .
-    engine: go://generic-builder
+    engine: forge://generic-builder
     spec:
       command: sh
       args:
@@ -34,162 +34,162 @@ build:
   # engines always match the forge that calls them. Needs forge v0.44.2.
   - name: gen-ci-state-git
     src: ./cmd/ci-state-git
-    engine: go://forge-dev
+    engine: forge://forge-dev
 
   - name: gen-ci-manager-local
     src: ./cmd/ci-manager-local
-    engine: go://forge-dev
+    engine: forge://forge-dev
 
   - name: gen-ci-manager-dryrun
     src: ./cmd/ci-manager-dryrun
-    engine: go://forge-dev
+    engine: forge://forge-dev
 
   - name: gen-ci-trigger-watch
     src: ./cmd/ci-trigger-watch
-    engine: go://forge-dev
+    engine: forge://forge-dev
 
   - name: gen-ci-gate-manual
     src: ./cmd/ci-gate-manual
-    engine: go://forge-dev
+    engine: forge://forge-dev
 
   - name: gen-ci-promotion-all
     src: ./cmd/ci-promotion-all
-    engine: go://forge-dev
+    engine: forge://forge-dev
 
   - name: gen-ci-compute-local
     src: ./cmd/ci-compute-local
-    engine: go://forge-dev
+    engine: forge://forge-dev
 
   - name: gen-ci-artifact-release
     src: ./cmd/ci-artifact-release
-    engine: go://forge-dev
+    engine: forge://forge-dev
 
   - name: generate-mocks
     src: .
-    engine: go://generic-builder
+    engine: forge://generic-builder
     spec:
       command: mockery
 
   - name: generate-docs
     src: .
-    engine: go://generic-builder
+    engine: forge://generic-builder
     spec:
       command: go
       args: ["run", "./cmd/docgen"]
 
   - name: format-code
     src: .
-    engine: go://go-format
+    engine: forge://go-format
 
   - name: forge-ci
     src: ./cmd/forge-ci
     dest: ./build/bin
-    engine: go://go-build
+    engine: forge://go-build
 
   - name: ci-manager-local
     src: ./cmd/ci-manager-local
     dest: ./build/bin
-    engine: go://go-build
+    engine: forge://go-build
 
   - name: ci-manager-dryrun
     src: ./cmd/ci-manager-dryrun
     dest: ./build/bin
-    engine: go://go-build
+    engine: forge://go-build
 
   - name: ci-compute-local
     src: ./cmd/ci-compute-local
     dest: ./build/bin
-    engine: go://go-build
+    engine: forge://go-build
 
   - name: ci-state-git
     src: ./cmd/ci-state-git
     dest: ./build/bin
-    engine: go://go-build
+    engine: forge://go-build
 
   - name: ci-artifact-release
     src: ./cmd/ci-artifact-release
     dest: ./build/bin
-    engine: go://go-build
+    engine: forge://go-build
 
   - name: ci-trigger-watch
     src: ./cmd/ci-trigger-watch
     dest: ./build/bin
-    engine: go://go-build
+    engine: forge://go-build
 
   - name: ci-gate-manual
     src: ./cmd/ci-gate-manual
     dest: ./build/bin
-    engine: go://go-build
+    engine: forge://go-build
 
   - name: ci-promotion-all
     src: ./cmd/ci-promotion-all
     dest: ./build/bin
-    engine: go://go-build
+    engine: forge://go-build
 
 test:
   - name: lint
-    runner: go://go-lint
+    runner: forge://go-lint
 
   - name: no-hardcoding
-    runner: go://generic-test-runner
+    runner: forge://generic-test-runner
     spec:
       command: sh
       args: ["hack/no-hardcoding.sh"]
 
   - name: standalone
-    runner: go://generic-test-runner
+    runner: forge://generic-test-runner
     spec:
       command: sh
       args: ["hack/standalone.sh"]
 
   - name: engine-docs
-    runner: go://generic-test-runner
+    runner: forge://generic-test-runner
     spec:
       command: sh
       args: ["hack/engine-docs.sh"]
 
   - name: unwired
-    runner: go://generic-test-runner
+    runner: forge://generic-test-runner
     spec:
       command: sh
       args: ["hack/unwired.sh"]
 
   - name: architecture
-    runner: go://generic-test-runner
+    runner: forge://generic-test-runner
     spec:
       command: sh
       args: ["hack/architecture.sh"]
 
   - name: docs
-    runner: go://generic-test-runner
+    runner: forge://generic-test-runner
     spec:
       command: sh
       args: ["hack/docs-check.sh"]
 
   - name: unit
-    runner: go://go-test
+    runner: forge://go-test
 
   - name: integration
-    runner: go://go-test
+    runner: forge://go-test
     spec:
       tags: [integration]
       packages: [./test/integration/...]
 
   - name: conformance
-    runner: go://go-test
+    runner: forge://go-test
     spec:
       tags: [conformance]
       packages: [./test/conformance/...]
 
   - name: e2e
-    runner: go://go-test
+    runner: forge://go-test
     spec:
       tags: [e2e]
       packages: [./test/e2e/...]
       timeout: "15m"
 
   - name: coverage
-    runner: go://generic-test-runner
+    runner: forge://generic-test-runner
     spec:
       command: sh
       args: ["hack/coverage.sh", "90"]

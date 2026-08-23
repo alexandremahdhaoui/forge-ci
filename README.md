@@ -32,16 +32,16 @@ repos:
 
 managers:
   - alias: local
-    engine: "go://github.com/alexandremahdhaoui/forge-ci/cmd/ci-manager-local@v0.1.0"
+    engine: "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-manager-local@v0.1.0"
 
 engines:
   - alias: here
     type: compute
-    engine: "go://github.com/alexandremahdhaoui/forge-ci/cmd/ci-compute-local@v0.1.0"
+    engine: "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-compute-local@v0.1.0"
     manager: local
   - alias: ci-state
     type: state
-    engine: "go://github.com/alexandremahdhaoui/forge-ci/cmd/ci-state-git@v0.1.0"
+    engine: "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-state-git@v0.1.0"
     manager: local
     spec:
       path: ../demo-state
@@ -82,7 +82,7 @@ stages:
 | `ci-manager-local` | manager | Creates directories and files, and records what it made |
 | `ci-manager-dryrun` | manager | Reports what it would create, changes nothing |
 
-Write your own. An engine is a binary named by a `go://` URI. Nothing needs to
+Write your own. An engine is a binary named by a `forge://` URI. Nothing needs to
 know it exists until a pipeline file names it.
 
 ## Gates

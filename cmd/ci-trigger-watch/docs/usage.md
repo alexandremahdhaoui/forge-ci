@@ -33,7 +33,7 @@ echo '{"spec":{"watch":["../my-repo"],"previous":""}}' \
 engines:
   - alias: my-trigger
     type: trigger
-    engine: "go://github.com/alexandremahdhaoui/forge-ci/cmd/ci-trigger-watch@v0.1.4"
+    engine: "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-trigger-watch@v0.1.4"
     manager: local
     spec:
       watch: <list of string>

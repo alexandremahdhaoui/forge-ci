@@ -11,11 +11,11 @@ func base() config.Pipeline {
 	return config.Pipeline{
 		Name:     "demo",
 		Repos:    []config.Repo{{Name: "a", URL: "git@example.com:a.git"}},
-		Managers: []config.Manager{{Alias: "local", Engine: "go://x@v1"}},
+		Managers: []config.Manager{{Alias: "local", Engine: "forge://x@v1"}},
 		Engines: []config.Engine{
-			{Alias: "here", Type: config.PortCompute, Engine: "go://x@v1", Manager: "local"},
-			{Alias: "st", Type: config.PortState, Engine: "go://x@v1", Manager: "local"},
-			{Alias: "watch", Type: config.PortTrigger, Engine: "go://x@v1", Manager: "local"},
+			{Alias: "here", Type: config.PortCompute, Engine: "forge://x@v1", Manager: "local"},
+			{Alias: "st", Type: config.PortState, Engine: "forge://x@v1", Manager: "local"},
+			{Alias: "watch", Type: config.PortTrigger, Engine: "forge://x@v1", Manager: "local"},
 		},
 		State:    "st",
 		Triggers: []string{"watch"},
@@ -67,7 +67,7 @@ func TestDuplicateRepoNamesAreRejected(t *testing.T) {
 
 func TestDuplicateAliasesAreRejectedEverywhere(t *testing.T) {
 	p := base()
-	p.Managers = append(p.Managers, config.Manager{Alias: "local", Engine: "go://x@v1"})
+	p.Managers = append(p.Managers, config.Manager{Alias: "local", Engine: "forge://x@v1"})
 	requireInvalid(t, p, "duplicate manager alias")
 
 	p = base()
@@ -90,7 +90,17 @@ func TestAManagerNeedsAValidAliasAndURI(t *testing.T) {
 
 	p = base()
 	p.Managers[0].Engine = "https://example.com"
-	requireInvalid(t, p, "must start with go:// or alias://")
+	requireInvalid(t, p, "must start with forge:// or alias://")
+}
+
+func TestTheGoSchemeIsRemoved(t *testing.T) {
+	p := base()
+	p.Managers[0].Engine = "go://ci-manager-local"
+	requireInvalid(t, p, "the go:// scheme is removed; use forge://")
+
+	p = base()
+	p.Engines[0].Engine = "go://ci-compute-local"
+	requireInvalid(t, p, "the go:// scheme is removed; use forge://")
 }
 
 func TestAStageNeedsAKebabCaseName(t *testing.T) {

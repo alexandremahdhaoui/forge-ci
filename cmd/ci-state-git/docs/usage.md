@@ -33,7 +33,7 @@ echo '{"kind":"revision","key":"abc123","spec":{"path":"../my-state"}}' \
 engines:
   - alias: my-state
     type: state
-    engine: "go://github.com/alexandremahdhaoui/forge-ci/cmd/ci-state-git@v0.1.4"
+    engine: "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-state-git@v0.1.4"
     manager: local
     spec:
       path: <string>

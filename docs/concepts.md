@@ -16,7 +16,7 @@ The question an engine answers. The list is closed.
 |---|---|
 | `alias` | Lowercase kebab-case identifier. |
 | `artifactStorePath` | Where forge-ci records its own artifacts. |
-| `engineURI` | Only go:// and alias:// resolve. Anything else is a hard error, matching forge. |
+| `engineURI` | Only forge:// and alias:// resolve. Anything else is a hard error, matching forge. |
 | `engines` | Named engine instances. An engine implements one port. It declares the resources it needs and never names a manager kind. |
 | `forge` | Arguments passed to forge. For example "test-all". |
 | `forgeCI` | A forge-ci verb. For example "apply". |

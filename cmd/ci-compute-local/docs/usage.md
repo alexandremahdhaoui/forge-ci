@@ -34,7 +34,7 @@ echo '{"revision":"abc","stage":"build","substage":"default","root":"/work","tar
 engines:
   - alias: my-compute
     type: compute
-    engine: "go://github.com/alexandremahdhaoui/forge-ci/cmd/ci-compute-local@v0.1.4"
+    engine: "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-compute-local@v0.1.4"
     manager: local
 ```
 
