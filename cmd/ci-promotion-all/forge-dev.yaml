@@ -1,5 +1,5 @@
 name: ci-promotion-all
-type: generic
+kind: mcp-server
 version: 0.1.5
 description: Advance a stage when enough of its substages passed.
 openapi:
@@ -7,6 +7,7 @@ openapi:
 generate:
   packageName: main
   docsBaseURL: https://raw.githubusercontent.com/alexandremahdhaoui/forge-ci/refs/heads/main
+surface:
   tools:
     - name: declare
       description: Report the resources this promotion needs. It needs none.

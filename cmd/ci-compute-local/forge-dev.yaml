@@ -1,5 +1,5 @@
 name: ci-compute-local
-type: generic
+kind: mcp-server
 version: 0.1.5
 description: Run targets here and harvest forge's artifact store.
 openapi:
@@ -7,6 +7,7 @@ openapi:
 generate:
   packageName: main
   docsBaseURL: https://raw.githubusercontent.com/alexandremahdhaoui/forge-ci/refs/heads/main
+surface:
   tools:
     - name: declare
       description: Report the resources this compute needs.

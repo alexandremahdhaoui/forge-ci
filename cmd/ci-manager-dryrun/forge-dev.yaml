@@ -1,5 +1,5 @@
 name: ci-manager-dryrun
-type: generic
+kind: mcp-server
 version: 0.1.5
 description: Report what would be made, and make nothing.
 openapi:
@@ -7,6 +7,7 @@ openapi:
 generate:
   packageName: main
   docsBaseURL: https://raw.githubusercontent.com/alexandremahdhaoui/forge-ci/refs/heads/main
+surface:
   tools:
     - name: reconcile
       description: Report what would be made. Nothing is created.

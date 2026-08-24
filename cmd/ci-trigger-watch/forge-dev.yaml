@@ -1,5 +1,5 @@
 name: ci-trigger-watch
-type: generic
+kind: mcp-server
 version: 0.1.5
 description: Fingerprint the watched repos and say whether they moved.
 openapi:
@@ -7,6 +7,7 @@ openapi:
 generate:
   packageName: main
   docsBaseURL: https://raw.githubusercontent.com/alexandremahdhaoui/forge-ci/refs/heads/main
+surface:
   tools:
     - name: declare
       description: Report the resources this trigger needs.
