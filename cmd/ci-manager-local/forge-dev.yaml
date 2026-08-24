@@ -1,5 +1,5 @@
 name: ci-manager-local
-type: generic
+kind: mcp-server
 version: 0.1.5
 description: Create directories and files, and record what it made.
 openapi:
@@ -7,6 +7,7 @@ openapi:
 generate:
   packageName: main
   docsBaseURL: https://raw.githubusercontent.com/alexandremahdhaoui/forge-ci/refs/heads/main
+surface:
   tools:
     - name: reconcile
       description: Make the declared resources exist, and record what was made.

@@ -1,5 +1,5 @@
 name: ci-artifact-release
-type: generic
+kind: mcp-server
 version: 0.1.0
 description: Tag every repo of a revision and publish a GitHub release.
 openapi:
@@ -7,6 +7,7 @@ openapi:
 generate:
   packageName: main
   docsBaseURL: https://raw.githubusercontent.com/alexandremahdhaoui/forge-ci/refs/heads/main
+surface:
   tools:
     - name: declare
       description: Report the resources this release needs. It needs none.
