@@ -1,0 +1,51 @@
+# Scheduled security intake: run the register pipeline so a fresh OSV
+# snapshot re-evaluates every track and raises any advisory that is due.
+#
+# UNEXERCISED: written where Actions cannot run. It needs one secret,
+# WORKSPACE_TOKEN - a token that can read every workspace member and push
+# to this repo - because the pipeline builds the whole playground
+# workspace around this checkout.
+name: intake
+
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+
+      - name: Check out the workspace around this repo
+        run: |
+          git config --global url."https://x-access-token:${{ secrets.WORKSPACE_TOKEN }}@github.com/".insteadOf "git@github.com:"
+          git clone "git@github.com:${{ github.repository_owner }}/golden-factory.git"
+          sh golden-factory/hack/place.sh
+          git clone "git@github.com:${{ github.repository }}.git" golden-register
+          (cd golden-register && go run github.com/alexandremahdhaoui/forge-factory/cmd/forge-factory@latest clone --config ../forge-factory.yaml --root ..)
+
+      - name: Install the toolchain from the workspace
+        run: |
+          (cd forge && go install ./cmd/forge) || go install github.com/alexandremahdhaoui/forge/cmd/forge@latest
+          (cd forge-factory && go install ./cmd/...)
+          (cd forge-ci && go install ./cmd/...)
+          (cd forge-register && go install ./cmd/...)
+          echo "$HOME/go/bin" >> "$GITHUB_PATH"
+
+      - name: Run the register pipeline
+        run: |
+          cd golden-register
+          touch .envrc
+          forge-ci apply --config forge-ci.yaml --root ..
+
+      - name: Push what the pipeline wrote
+        run: |
+          cd golden-register
+          git push origin HEAD:main

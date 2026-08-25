@@ -91,7 +91,7 @@ func New(caller engineadapter.Caller, git gitadapter.Git, now func() time.Time) 
 func (c *Controller) Apply(ctx context.Context, p config.Pipeline, root string) (Report, error) {
 	index := newIndex(p)
 
-	actions, err := c.reconcileResources(ctx, p, index)
+	actions, err := c.reconcileResources(ctx, p, index, root)
 	if err != nil {
 		return Report{}, err
 	}
@@ -394,6 +394,7 @@ func (c *Controller) reconcileResources(
 	ctx context.Context,
 	p config.Pipeline,
 	index engineIndex,
+	root string,
 ) ([]string, error) {
 	owned, err := c.readOwnership(ctx, index)
 	if err != nil {
@@ -435,11 +436,17 @@ func (c *Controller) reconcileResources(
 
 		var out citypes.ReconcileOutput
 
+		// The pipeline root rides in the manager spec so a relative
+		// resource name resolves against the root wherever forge-ci was
+		// started from, while ownership ids stay root-relative.
+		spec := orEmpty(manager.Spec)
+		spec["root"] = root
+
 		if err := c.caller.Call(ctx, manager.Engine, ToolReconcile, citypes.ReconcileInput{
 			Manager:   alias,
 			Resources: byManager[alias],
 			Owned:     owned,
-			Spec:      orEmpty(manager.Spec),
+			Spec:      spec,
 		}, &out); err != nil {
 			return nil, fmt.Errorf("manager %q: %w", alias, err)
 		}

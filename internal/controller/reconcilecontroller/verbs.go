@@ -10,7 +10,7 @@ import (
 func (c *Controller) Bootstrap(ctx context.Context, p config.Pipeline, root string) (Report, error) {
 	index := newIndex(p)
 
-	actions, err := c.reconcileResources(ctx, p, index)
+	actions, err := c.reconcileResources(ctx, p, index, root)
 	if err != nil {
 		return Report{}, err
 	}

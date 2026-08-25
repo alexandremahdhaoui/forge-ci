@@ -44,6 +44,14 @@ build:
     src: ./cmd/ci-manager-dryrun
     engine: forge://forge-dev
 
+  - name: gen-ci-manager-github
+    src: ./cmd/ci-manager-github
+    engine: forge://forge-dev
+
+  - name: gen-ci-compute-github
+    src: ./cmd/ci-compute-github
+    engine: forge://forge-dev
+
   - name: gen-ci-trigger-watch
     src: ./cmd/ci-trigger-watch
     engine: forge://forge-dev
@@ -93,6 +101,16 @@ build:
 
   - name: ci-manager-dryrun
     src: ./cmd/ci-manager-dryrun
+    dest: ./build/bin
+    engine: forge://go-build
+
+  - name: ci-manager-github
+    src: ./cmd/ci-manager-github
+    dest: ./build/bin
+    engine: forge://go-build
+
+  - name: ci-compute-github
+    src: ./cmd/ci-compute-github
     dest: ./build/bin
     engine: forge://go-build
 

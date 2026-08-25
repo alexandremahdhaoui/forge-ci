@@ -1,0 +1,26 @@
+# A new register tag is news every consumer wants: tell them, so their
+# pipelines re-sync against it instead of waiting for a human.
+#
+# UNEXERCISED: written where Actions cannot run. It needs one secret,
+# DISPATCH_TOKEN - a token that can send repository_dispatch to the
+# consumer repos named below.
+name: propagate
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        consumer: [golden-factory, golden-register-consumer]
+    steps:
+      - name: Tell ${{ matrix.consumer }}
+        run: |
+          curl -sS -X POST \
+            -H "Authorization: Bearer ${{ secrets.DISPATCH_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository_owner }}/${{ matrix.consumer }}/dispatches" \
+            -d '{"event_type":"register-tag","client_payload":{"tag":"${{ github.ref_name }}"}}'

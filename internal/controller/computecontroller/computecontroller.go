@@ -51,14 +51,9 @@ func (c *Controller) Run(ctx context.Context, in citypes.RunInput) (citypes.RunO
 	out := citypes.RunOutput{Status: citypes.StatusPassed}
 
 	for _, target := range in.Targets {
-		binary, raw, err := binaryFor(target)
+		binary, expanded, err := CommandFor(target, in.Params)
 		if err != nil {
 			return citypes.RunOutput{}, err
-		}
-
-		expanded, err := expand(raw, in.Params)
-		if err != nil {
-			return citypes.RunOutput{}, fmt.Errorf("expanding target %q: %w", target.Alias, err)
 		}
 
 		for _, dir := range dirsFor(target, in) {
@@ -94,6 +89,23 @@ func (c *Controller) Run(ctx context.Context, in citypes.RunInput) (citypes.RunO
 	out.Output = log.String()
 
 	return out, nil
+}
+
+// CommandFor answers the binary and the expanded arguments one target
+// runs. It is shared with the remote compute engines, so a target means
+// the same thing wherever it executes.
+func CommandFor(t citypes.Target, params map[string]string) (string, string, error) {
+	binary, raw, err := binaryFor(t)
+	if err != nil {
+		return "", "", err
+	}
+
+	expanded, err := expand(raw, params)
+	if err != nil {
+		return "", "", fmt.Errorf("expanding target %q: %w", t.Alias, err)
+	}
+
+	return binary, expanded, nil
 }
 
 func binaryFor(t citypes.Target) (string, string, error) {

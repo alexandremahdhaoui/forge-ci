@@ -27,6 +27,13 @@ packages:
     interfaces:
       Caller:
 
+  github.com/alexandremahdhaoui/forge-ci/internal/adapter/githubadapter:
+    config:
+      dir: internal/mocks/githubadaptermock
+      pkgname: githubadaptermock
+    interfaces:
+      API:
+
   github.com/alexandremahdhaoui/forge-ci/internal/adapter/fsadapter:
     config:
       dir: internal/mocks/fsadaptermock

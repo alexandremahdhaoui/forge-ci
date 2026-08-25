@@ -1,0 +1,59 @@
+# The remote consumer's request door: a repository_dispatch of type
+# admission-request files the request into the register's store, where the
+# next pipeline run answers it under the same policy as everything else.
+# A request is untrusted input whoever files it and however it arrives.
+#
+# UNEXERCISED: written where Actions cannot run. It needs the same
+# WORKSPACE_TOKEN as intake. A consumer fires it with:
+#
+#   forge-register add go:github.com/x/pkg --reason "..." \
+#     --dispatch <owner>/golden-register
+name: request
+
+on:
+  repository_dispatch:
+    types: [admission-request]
+
+permissions:
+  contents: write
+
+jobs:
+  file:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+
+      - name: Check out the workspace around this repo
+        run: |
+          git config --global url."https://x-access-token:${{ secrets.WORKSPACE_TOKEN }}@github.com/".insteadOf "git@github.com:"
+          git clone "git@github.com:${{ github.repository_owner }}/golden-factory.git"
+          sh golden-factory/hack/place.sh
+          git clone "git@github.com:${{ github.repository }}.git" golden-register
+          (cd golden-register && go run github.com/alexandremahdhaoui/forge-factory/cmd/forge-factory@latest clone --config ../forge-factory.yaml --root ..)
+
+      - name: Install the toolchain from the workspace
+        run: |
+          (cd forge && go install ./cmd/forge) || go install github.com/alexandremahdhaoui/forge/cmd/forge@latest
+          (cd forge-factory && go install ./cmd/...)
+          (cd forge-ci && go install ./cmd/...)
+          (cd forge-register && go install ./cmd/...)
+          echo "$HOME/go/bin" >> "$GITHUB_PATH"
+
+      - name: File the request
+        env:
+          ECOSYSTEM: ${{ github.event.client_payload.ecosystem }}
+          PACKAGE: ${{ github.event.client_payload.package }}
+          TRACK: ${{ github.event.client_payload.track }}
+          VERSION: ${{ github.event.client_payload.version }}
+          REQUESTER: ${{ github.event.client_payload.requester }}
+          REASON: ${{ github.event.client_payload.reason }}
+        run: |
+          cd golden-register
+          forge-register add \
+            ${TRACK:+--track "$TRACK"} \
+            ${VERSION:+--version "$VERSION"} \
+            ${REQUESTER:+--requester "$REQUESTER"} \
+            --reason "$REASON" \
+            "$ECOSYSTEM:$PACKAGE"
