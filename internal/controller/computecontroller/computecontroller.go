@@ -50,6 +50,11 @@ func (c *Controller) Run(ctx context.Context, in citypes.RunInput) (citypes.RunO
 	started := c.now()
 	out := citypes.RunOutput{Status: citypes.StatusPassed}
 
+	// The revision reaches every target as an environment variable, so an
+	// instance's build can stamp the tuple it was proven with - the release
+	// side keys the distribution on the same id.
+	env := map[string]string{"FORGE_CI_REVISION": in.Revision}
+
 	for _, target := range in.Targets {
 		binary, expanded, err := CommandFor(target, in.Params)
 		if err != nil {
@@ -57,7 +62,7 @@ func (c *Controller) Run(ctx context.Context, in citypes.RunInput) (citypes.RunO
 		}
 
 		for _, dir := range dirsFor(target, in) {
-			res, err := c.runner.Run(ctx, dir, binary, strings.Fields(expanded)...)
+			res, err := c.runner.RunEnv(ctx, dir, env, binary, strings.Fields(expanded)...)
 			if err != nil {
 				return citypes.RunOutput{}, fmt.Errorf("running target %q in %s: %w", target.Alias, dir, err)
 			}
@@ -78,6 +83,7 @@ func (c *Controller) Run(ctx context.Context, in citypes.RunInput) (citypes.RunO
 				return citypes.RunOutput{}, err
 			}
 
+			rebase(harvested, in.Root, dir)
 			out.Forge = merge(out.Forge, harvested)
 		}
 
@@ -159,6 +165,31 @@ func expand(raw string, params map[string]string) (string, error) {
 	}
 
 	return b.String(), nil
+}
+
+// rebase rewrites harvested artifact locations to be relative to the
+// pipeline root: a store records them relative to its own repo, which means
+// nothing to the release side. URLs pass through untouched.
+func rebase(result *citypes.ForgeResult, root, dir string) {
+	if result == nil {
+		return
+	}
+
+	rel, err := filepath.Rel(root, dir)
+	if err != nil || rel == "." {
+		return
+	}
+
+	for i, artifact := range result.Artifacts {
+		// A colon marks a URL or an image reference; a local relative path
+		// never carries one, and only those are rebased.
+		if artifact.Location == "" || strings.Contains(artifact.Location, ":") ||
+			filepath.IsAbs(artifact.Location) {
+			continue
+		}
+
+		result.Artifacts[i].Location = filepath.Join(rel, artifact.Location)
+	}
 }
 
 func merge(into, from *citypes.ForgeResult) *citypes.ForgeResult {

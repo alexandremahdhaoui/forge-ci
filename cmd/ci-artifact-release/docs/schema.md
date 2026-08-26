@@ -8,5 +8,7 @@ The `spec` block on this engine's entry in `forge-ci.yaml`.
 |---|---|---|---|
 | `releaseIn` | string | yes | Repo the release is created in. The workspace root is not a repo, so a release of the whole workspace belongs in the repo that holds its files. |
 | `root` | string | no | Directory holding the repos. Defaults to the working directory. |
+| `apiBaseURL` | string | no | GitHub API base for the gh-less path. Defaults to https://api.github.com; a fake in tests, a mirror in an airgap. |
+| `tokenEnv` | string | no | Environment variable holding the token the gh-less path authenticates with. Defaults to GITHUB_TOKEN. |
 
 forge-ci never validates a spec. This engine does, because only it knows what the keys mean.

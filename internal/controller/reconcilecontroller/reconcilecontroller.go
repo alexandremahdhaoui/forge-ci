@@ -18,6 +18,7 @@ import (
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/artifactcontroller"
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 	"github.com/alexandremahdhaoui/forge-ci/pkg/config"
+	"github.com/alexandremahdhaoui/forge/pkg/forge"
 )
 
 const (
@@ -128,7 +129,7 @@ func (c *Controller) Apply(ctx context.Context, p config.Pipeline, root string) 
 		}
 
 		if stage.Release != "" {
-			released, err := c.release(ctx, p, index, stage, revision, root)
+			released, err := c.release(ctx, p, index, stage, revision, root, report.Stages)
 			if err != nil {
 				return Report{}, err
 			}
@@ -149,6 +150,7 @@ func (c *Controller) release(
 	stage config.Stage,
 	revision citypes.Revision,
 	root string,
+	stages []StageReport,
 ) (citypes.ArtifactOutput, error) {
 	engine, err := index.require(stage.Release, config.PortArtifact)
 	if err != nil {
@@ -164,16 +166,17 @@ func (c *Controller) release(
 		spec["root"] = root
 	}
 
-	version, err := c.releaseVersion(ctx, p, root)
+	version, err := c.releaseVersion(ctx, p, root, spec)
 	if err != nil {
 		return citypes.ArtifactOutput{}, err
 	}
 
 	in := citypes.ArtifactInput{
-		Revision: revision.ID,
-		Version:  version,
-		Repos:    revision.Repos,
-		Spec:     spec,
+		Revision:  revision.ID,
+		Version:   version,
+		Repos:     revision.Repos,
+		Artifacts: runArtifacts(stages),
+		Spec:      spec,
 	}
 
 	var out citypes.ArtifactOutput
@@ -185,21 +188,47 @@ func (c *Controller) release(
 	return out, nil
 }
 
+// runArtifacts gathers everything the apply's runs built, in stage order.
+// This is the channel a distribution rides: what the substages produced is
+// exactly what a release may publish.
+func runArtifacts(stages []StageReport) []forge.Artifact {
+	out := []forge.Artifact{}
+
+	for _, stage := range stages {
+		for _, run := range stage.Runs {
+			if run.Forge == nil {
+				continue
+			}
+
+			out = append(out, run.Forge.Artifacts...)
+		}
+	}
+
+	return out
+}
+
 // releaseVersion is what the release publishes under. A pipeline that names
 // one is taken at its word, because a minor or a major is a claim about what
 // changed and nothing here can read that off a diff. A pipeline that names
-// none gets the patch after the highest tag the workspace already carries,
-// starting at v0.1.0.
+// none gets the patch after the highest tag already released, starting at
+// v0.1.0 - read in the repo the release is created in when the engine names
+// one, because a workspace root is not a repo and carries no tags.
 func (c *Controller) releaseVersion(
 	ctx context.Context,
 	p config.Pipeline,
 	root string,
+	engineSpec map[string]any,
 ) (string, error) {
 	if strings.TrimSpace(p.Version) != "" {
 		return p.Version, nil
 	}
 
-	previous, err := c.git.LatestTag(ctx, root)
+	tagDir := root
+	if home, _ := engineSpec["releaseIn"].(string); home != "" {
+		tagDir = filepath.Join(root, home)
+	}
+
+	previous, err := c.git.LatestTag(ctx, tagDir)
 	if err != nil {
 		return "", fmt.Errorf("reading the last released version: %w", err)
 	}

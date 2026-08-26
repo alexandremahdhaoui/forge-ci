@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"os/exec"
 	"path/filepath"
+	"time"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/execadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/releaseadapter"
@@ -21,7 +24,6 @@ import (
 // forge emits. Those travel as the JSON they already are.
 func NewHandlers() Handlers {
 	ctrl := artifactcontroller.New()
-	publisher := releaseadapter.New(execadapter.New())
 
 	return Handlers{
 		Declare: func(_ context.Context, in DeclareInput) (*DeclareOutput, error) {
@@ -38,7 +40,7 @@ func NewHandlers() Handlers {
 				return nil, err
 			}
 
-			out, err := publish(ctx, ctrl, publisher, citypes.ArtifactInput{
+			out, err := publish(ctx, ctrl, publisherFor(in.Spec), citypes.ArtifactInput{
 				Revision:  in.Revision,
 				Version:   in.Version,
 				Repos:     in.Repos,
@@ -93,6 +95,24 @@ func fromResources(in []citypes.Resource) []Resource {
 	return out
 }
 
+// publisherFor picks how to reach GitHub: the gh CLI when the host carries
+// it, else the REST API directly with the token the spec names (default
+// GITHUB_TOKEN) against spec.apiBaseURL (default the public API).
+func publisherFor(spec map[string]any) releaseadapter.Publisher {
+	if _, err := exec.LookPath("gh"); err == nil {
+		return releaseadapter.New(execadapter.New())
+	}
+
+	tokenEnv, _ := spec["tokenEnv"].(string)
+	if tokenEnv == "" {
+		tokenEnv = "GITHUB_TOKEN"
+	}
+
+	base, _ := spec["apiBaseURL"].(string)
+
+	return releaseadapter.NewAPI(execadapter.New(), base, os.Getenv(tokenEnv))
+}
+
 // publish carries out what the controller decided. The decision is not made
 // here, so what gets released is testable without a network.
 func publish(
@@ -132,7 +152,15 @@ func publish(
 		out.Tagged = append(out.Tagged, tag.Repo)
 	}
 
-	url, err := publisher.Release(ctx, filepath.Join(root, home), plan.Version, plan.Uploads)
+	assets, err := stageAssets(root, plan, in.Revision)
+	if err != nil {
+		return out, fmt.Errorf("releasing %s: %w", plan.Version, err)
+	}
+
+	// One aggregated release per revision: every binary the runs built plus
+	// the index that pins their digests, under the dist tag - the
+	// register/revision is one thing, built together and released together.
+	url, err := publisher.Release(ctx, filepath.Join(root, home), plan.DistTag, assets)
 	if err != nil {
 		return out, fmt.Errorf("releasing %s: %w", plan.Version, err)
 	}
@@ -141,4 +169,46 @@ func publish(
 	out.URL = url
 
 	return out, nil
+}
+
+// stageAssets resolves the uploads against the root, digests each one, and
+// writes the distribution index beside them in a staging dir. The index is
+// built from the measured digests, never from claims.
+func stageAssets(root string, plan artifactcontroller.Plan, revision string) ([]string, error) {
+	assets := make([]string, 0, len(plan.Uploads)+1)
+	digests := make([]artifactcontroller.UploadDigest, 0, len(plan.Uploads))
+
+	for _, upload := range plan.Uploads {
+		path := upload
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(root, path)
+		}
+
+		digest, size, err := releaseadapter.DigestFile(path)
+		if err != nil {
+			return nil, err
+		}
+
+		assets = append(assets, path)
+		digests = append(digests, artifactcontroller.UploadDigest{Path: path, Digest: digest, Size: size})
+	}
+
+	index, err := artifactcontroller.BuildIndex(
+		revision, plan.Version, time.Now().UTC().Format(time.RFC3339),
+		artifactcontroller.Release{Tag: plan.DistTag}, digests)
+	if err != nil {
+		return nil, err
+	}
+
+	staging, err := os.MkdirTemp("", "ci-artifact-release-*")
+	if err != nil {
+		return nil, fmt.Errorf("staging the index: %w", err)
+	}
+
+	indexPath := filepath.Join(staging, "index.json")
+	if err := os.WriteFile(indexPath, index, 0o600); err != nil {
+		return nil, fmt.Errorf("staging the index: %w", err)
+	}
+
+	return append(assets, indexPath), nil
 }

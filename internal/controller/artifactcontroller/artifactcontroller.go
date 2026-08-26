@@ -3,6 +3,7 @@ package artifactcontroller
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -28,6 +29,11 @@ type Plan struct {
 	Version string
 	Tags    []Tag
 	Uploads []string
+
+	// DistTag names the aggregated release: one per revision, carrying every
+	// upload plus the index that maps the revision to their digests. The
+	// register/revision is one thing - built together, released together.
+	DistTag string
 }
 
 // Tag is one repo to tag at one commit.
@@ -92,7 +98,12 @@ func (c *Controller) Plan(in citypes.ArtifactInput) (Plan, error) {
 		return Plan{}, fmt.Errorf("%w: %q", ErrVersion, in.Version)
 	}
 
-	plan := Plan{Version: in.Version, Tags: []Tag{}, Uploads: []string{}}
+	plan := Plan{
+		Version: in.Version,
+		Tags:    []Tag{},
+		Uploads: []string{},
+		DistTag: "dist-" + in.Revision,
+	}
 
 	names := make([]string, 0, len(in.Repos))
 	for name := range in.Repos {
@@ -105,13 +116,30 @@ func (c *Controller) Plan(in citypes.ArtifactInput) (Plan, error) {
 		plan.Tags = append(plan.Tags, Tag{Repo: name, SHA: in.Repos[name]})
 	}
 
-	// forge records a location, which is a URL. Only a local file can be
-	// uploaded, and a container image is published by whatever built it.
+	// What uploads: every binary artifact, plus anything whose file name
+	// carries the `name_os_arch` platform suffix - a cross-built dist binary
+	// travels under that convention whatever engine produced it. A container
+	// image or a URL is somebody else's to serve, and a local path never
+	// carries a colon.
+	seen := map[string]bool{}
+
 	for _, artifact := range in.Artifacts {
-		path, ok := strings.CutPrefix(artifact.Location, "file://")
-		if !ok || path == "" {
+		path := artifact.Location
+		if trimmed, ok := strings.CutPrefix(path, "file://"); ok {
+			path = trimmed
+		} else if strings.Contains(path, ":") {
 			continue
 		}
+
+		if path == "" || seen[path] {
+			continue
+		}
+
+		if artifact.Type != "binary" && !platformSuffix.MatchString(filepath.Base(path)) {
+			continue
+		}
+
+		seen[path] = true
 
 		plan.Uploads = append(plan.Uploads, path)
 	}

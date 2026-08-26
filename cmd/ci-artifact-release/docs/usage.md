@@ -37,6 +37,8 @@ engines:
     spec:
       releaseIn: <string>
       root: <string>
+      apiBaseURL: <string>
+      tokenEnv: <string>
 ```
 
 ## Worth knowing
@@ -47,5 +49,17 @@ something nobody can reproduce.
 A tag that already exists is refused rather than moved, because a moved tag changes
 what a consumer already pinned.
 
-Only an artifact whose location is a file:// URL is uploaded. A container image is
-published by whatever built it.
+What uploads: every binary artifact the runs built, plus anything whose file name
+carries the name_os_arch platform suffix - a cross-built binary travels under that
+convention whatever engine produced it. A container image or a URL is somebody
+else's to serve.
+
+The release itself is ONE aggregated release per revision, tagged dist-<revision>
+in the releaseIn repo, carrying every upload plus index.json - the distribution
+index mapping the revision to the sha256 of each binary per platform, measured on
+the actual files. forge-factory sync consumes that index into the store. The
+dist tag is not semver on purpose, so a v* fan-out never fires for it.
+
+The host's gh CLI publishes when present; otherwise the GitHub REST API is spoken
+directly with the token named by spec.tokenEnv, against spec.apiBaseURL, and the
+repo is read off the releaseIn checkout's own origin remote.

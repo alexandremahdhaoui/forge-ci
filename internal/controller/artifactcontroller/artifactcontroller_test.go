@@ -67,23 +67,38 @@ func TestPlanAcceptsAPrerelease(t *testing.T) {
 	assert.Equal(t, "v1.0.0-rc.1", plan.Version)
 }
 
-func TestPlanUploadsOnlyLocalFiles(t *testing.T) {
+func TestPlanUploadsOnlyLocalBinaries(t *testing.T) {
 	t.Parallel()
 
 	plan, err := artifactcontroller.New().Plan(citypes.ArtifactInput{
 		Revision: "abc123",
 		Version:  "v0.2.0",
 		Artifacts: []forge.Artifact{
-			{Name: "cli", Location: "file:///out/cli"},
-			{Name: "img", Location: "ghcr.io/x/img:v1"},
-			{Name: "empty", Location: ""},
-			{Name: "other", Location: "file:///out/a.tar"},
+			{Name: "cli", Type: "binary", Location: "file:///out/cli"},
+			{Name: "rel", Type: "binary", Location: "member/build/dist/rel_linux_amd64"},
+			{Name: "img", Type: "binary", Location: "ghcr.io/x/img:v1"},
+			{Name: "empty", Type: "binary", Location: ""},
+			{Name: "gen", Type: "generated", Location: "member/zz_generated.go"},
+			{Name: "dup", Type: "binary", Location: "member/build/dist/rel_linux_amd64"},
 		},
 	})
 	require.NoError(t, err)
 
-	assert.Equal(t, []string{"/out/a.tar", "/out/cli"}, plan.Uploads,
-		"a container image is published by whatever built it")
+	assert.Equal(t, []string{"/out/cli", "member/build/dist/rel_linux_amd64"}, plan.Uploads,
+		"binaries upload once each; images and generated files belong to whatever made them")
+}
+
+// The aggregated release is one per revision: everything built together is
+// released together, under a tag no semver fan-out matches.
+func TestPlanNamesTheAggregatedDistTag(t *testing.T) {
+	t.Parallel()
+
+	plan, err := artifactcontroller.New().Plan(citypes.ArtifactInput{
+		Revision: "abc123def456",
+		Version:  "v0.2.0",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "dist-abc123def456", plan.DistTag)
 }
 
 func TestDeclareOwnsNothing(t *testing.T) {

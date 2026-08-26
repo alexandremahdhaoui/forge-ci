@@ -2,7 +2,10 @@ package releaseadapter
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -12,7 +15,9 @@ import (
 // Publisher puts a release where people can fetch it.
 type Publisher interface {
 	Tag(ctx context.Context, dir, version, sha string) error
-	Release(ctx context.Context, dir, version string, files []string) (string, error)
+	// Release creates the release named by tag in dir's repo, attaches the
+	// files, and answers its URL.
+	Release(ctx context.Context, dir, tag string, files []string) (string, error)
 }
 
 // GH shells out to the GitHub CLI. It is the only thing here that reaches the
@@ -63,12 +68,25 @@ func (g *GH) Tag(ctx context.Context, dir, version, sha string) error {
 }
 
 // Release creates the release and attaches the files, and returns its URL.
-func (g *GH) Release(ctx context.Context, dir, version string, files []string) (string, error) {
-	args := []string{"release", "create", version, "--generate-notes"}
+func (g *GH) Release(ctx context.Context, dir, tag string, files []string) (string, error) {
+	args := []string{"release", "create", tag, "--generate-notes"}
 
 	for _, f := range files {
 		args = append(args, filepath.Clean(f))
 	}
 
-	return g.run(ctx, dir, "creating release "+version, "gh", args...)
+	return g.run(ctx, dir, "creating release "+tag, "gh", args...)
+}
+
+// DigestFile measures one file: its sha256 hex and size. The index is built
+// from these, so it never claims a byte nobody hashed.
+func DigestFile(path string) (string, int64, error) {
+	data, err := os.ReadFile(filepath.Clean(path))
+	if err != nil {
+		return "", 0, fmt.Errorf("digesting %s: %w", path, err)
+	}
+
+	sum := sha256.Sum256(data)
+
+	return hex.EncodeToString(sum[:]), int64(len(data)), nil
 }

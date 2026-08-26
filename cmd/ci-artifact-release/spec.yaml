@@ -25,9 +25,31 @@ notes: 'A dirty revision is refused. It was never proven, so releasing it publis
   what a consumer already pinned.
 
 
-  Only an artifact whose location is a file:// URL is uploaded. A container image is
+  What uploads: every binary artifact the runs built, plus anything whose file name
 
-  published by whatever built it.'
+  carries the name_os_arch platform suffix - a cross-built binary travels under that
+
+  convention whatever engine produced it. A container image or a URL is somebody
+
+  else''s to serve.
+
+
+  The release itself is ONE aggregated release per revision, tagged dist-<revision>
+
+  in the releaseIn repo, carrying every upload plus index.json - the distribution
+
+  index mapping the revision to the sha256 of each binary per platform, measured on
+
+  the actual files. forge-factory sync consumes that index into the store. The
+
+  dist tag is not semver on purpose, so a v* fan-out never fires for it.
+
+
+  The host''s gh CLI publishes when present; otherwise the GitHub REST API is spoken
+
+  directly with the token named by spec.tokenEnv, against spec.apiBaseURL, and the
+
+  repo is read off the releaseIn checkout''s own origin remote.'
 spec:
 - key: releaseIn
   type: string
@@ -37,3 +59,11 @@ spec:
   type: string
   required: false
   means: Directory holding the repos. Defaults to the working directory.
+- key: apiBaseURL
+  type: string
+  required: false
+  means: GitHub API base for the gh-less path. Defaults to https://api.github.com; a fake in tests, a mirror in an airgap.
+- key: tokenEnv
+  type: string
+  required: false
+  means: Environment variable holding the token the gh-less path authenticates with. Defaults to GITHUB_TOKEN.

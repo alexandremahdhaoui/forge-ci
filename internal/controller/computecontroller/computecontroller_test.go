@@ -37,7 +37,7 @@ func passing() execadapter.Result { return execadapter.Result{Stdout: "ok\n"} }
 func TestForgeTargetRunsInTheNamedRepo(t *testing.T) {
 	runner := execadaptermock.NewMockRunner(t)
 	runner.EXPECT().
-		Run(mock.Anything, "/work/golden-rust", "forge", "test-all").
+		RunEnv(mock.Anything, "/work/golden-rust", mock.Anything, "forge", "test-all").
 		Return(passing(), nil).Once()
 
 	out, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
@@ -51,7 +51,7 @@ func TestForgeTargetRunsInTheNamedRepo(t *testing.T) {
 
 func TestNoRepoMeansTheRoot(t *testing.T) {
 	runner := execadaptermock.NewMockRunner(t)
-	runner.EXPECT().Run(mock.Anything, "/work", "forge-ci", "apply").Return(passing(), nil).Once()
+	runner.EXPECT().RunEnv(mock.Anything, "/work", mock.Anything, "forge-ci", "apply").Return(passing(), nil).Once()
 
 	out, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
 		Root:    "/work",
@@ -63,7 +63,7 @@ func TestNoRepoMeansTheRoot(t *testing.T) {
 
 func TestACheckoutPathWins(t *testing.T) {
 	runner := execadaptermock.NewMockRunner(t)
-	runner.EXPECT().Run(mock.Anything, "/checkouts/abc/golden-rust", "forge", "test-all").
+	runner.EXPECT().RunEnv(mock.Anything, "/checkouts/abc/golden-rust", mock.Anything, "forge", "test-all").
 		Return(passing(), nil).Once()
 
 	_, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
@@ -76,7 +76,7 @@ func TestACheckoutPathWins(t *testing.T) {
 
 func TestAFailingTestIsNotAnError(t *testing.T) {
 	runner := execadaptermock.NewMockRunner(t)
-	runner.EXPECT().Run(mock.Anything, mock.Anything, "forge", "test-all").
+	runner.EXPECT().RunEnv(mock.Anything, mock.Anything, mock.Anything, "forge", "test-all").
 		Return(execadapter.Result{ExitCode: 1, Stderr: "two tests failed\n"}, nil).Once()
 
 	out, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
@@ -91,7 +91,7 @@ func TestAFailingTestIsNotAnError(t *testing.T) {
 
 func TestABrokenRunnerIsAnError(t *testing.T) {
 	runner := execadaptermock.NewMockRunner(t)
-	runner.EXPECT().Run(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+	runner.EXPECT().RunEnv(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 		Return(execadapter.Result{}, errBoom).Once()
 
 	_, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
@@ -104,7 +104,7 @@ func TestABrokenRunnerIsAnError(t *testing.T) {
 
 func TestAFailedTargetStopsTheRest(t *testing.T) {
 	runner := execadaptermock.NewMockRunner(t)
-	runner.EXPECT().Run(mock.Anything, mock.Anything, "forge", "one").
+	runner.EXPECT().RunEnv(mock.Anything, mock.Anything, mock.Anything, "forge", "one").
 		Return(execadapter.Result{ExitCode: 2}, nil).Once()
 
 	out, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
@@ -121,7 +121,7 @@ func TestAFailedTargetStopsTheRest(t *testing.T) {
 func TestParamsAreTemplatedIntoTheTarget(t *testing.T) {
 	runner := execadaptermock.NewMockRunner(t)
 	runner.EXPECT().
-		Run(mock.Anything, "/work", "forge", "run", "deploy", "--region", "eu-west-1", "--cell", "a").
+		RunEnv(mock.Anything, "/work", mock.Anything, "forge", "run", "deploy", "--region", "eu-west-1", "--cell", "a").
 		Return(passing(), nil).Once()
 
 	_, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
@@ -177,7 +177,7 @@ func TestNoTargetsIsAnError(t *testing.T) {
 
 func TestForgeResultsAreHarvestedAndMerged(t *testing.T) {
 	runner := execadaptermock.NewMockRunner(t)
-	runner.EXPECT().Run(mock.Anything, mock.Anything, "forge", "test-all").
+	runner.EXPECT().RunEnv(mock.Anything, mock.Anything, mock.Anything, "forge", "test-all").
 		Return(passing(), nil).Twice()
 
 	h := &stubHarvester{result: &citypes.ForgeResult{
@@ -196,9 +196,51 @@ func TestForgeResultsAreHarvestedAndMerged(t *testing.T) {
 	require.Equal(t, []string{filepath.Join("/work", "a"), filepath.Join("/work", "b")}, h.dirs)
 }
 
+// The revision reaches every target as FORGE_CI_REVISION, so an instance's
+// build can stamp the tuple it was proven with.
+func TestTheRevisionReachesTheTargetEnvironment(t *testing.T) {
+	runner := execadaptermock.NewMockRunner(t)
+	runner.EXPECT().
+		RunEnv(mock.Anything, mock.Anything,
+			map[string]string{"FORGE_CI_REVISION": "abc123def456"}, "forge", "test-all").
+		Return(passing(), nil).Once()
+
+	_, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
+		Root:     "/work",
+		Revision: "abc123def456",
+		Targets:  []citypes.Target{{Alias: "build", Forge: "test-all"}},
+	})
+	require.NoError(t, err)
+}
+
+// A store records locations relative to its own repo, which means nothing
+// to the release side; harvested artifacts are rebased onto the root.
+func TestHarvestedArtifactLocationsAreRebasedOntoTheRoot(t *testing.T) {
+	runner := execadaptermock.NewMockRunner(t)
+	runner.EXPECT().RunEnv(mock.Anything, mock.Anything, mock.Anything, "forge", "test-all").
+		Return(passing(), nil).Once()
+
+	h := &stubHarvester{result: &citypes.ForgeResult{
+		Artifacts: []forge.Artifact{
+			{Name: "bin", Location: "build/dist/bin_linux_amd64"},
+			{Name: "img", Location: "ghcr.io/x/img:v1"},
+			{Name: "empty", Location: ""},
+		},
+	}}
+
+	out, err := computecontroller.New(runner, h, nil).Run(context.Background(), citypes.RunInput{
+		Root:    "/work",
+		Targets: []citypes.Target{{Alias: "build", Forge: "test-all", In: []string{"member"}}},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "member/build/dist/bin_linux_amd64", out.Forge.Artifacts[0].Location)
+	require.Equal(t, "ghcr.io/x/img:v1", out.Forge.Artifacts[1].Location, "URLs pass through")
+	require.Equal(t, "", out.Forge.Artifacts[2].Location, "nothing is invented for an empty location")
+}
+
 func TestNothingToHarvestIsFine(t *testing.T) {
 	runner := execadaptermock.NewMockRunner(t)
-	runner.EXPECT().Run(mock.Anything, mock.Anything, "forge", "test-all").Return(passing(), nil).Once()
+	runner.EXPECT().RunEnv(mock.Anything, mock.Anything, mock.Anything, "forge", "test-all").Return(passing(), nil).Once()
 
 	out, err := computecontroller.New(runner, &stubHarvester{}, nil).Run(context.Background(), citypes.RunInput{
 		Root: "/work", Targets: []citypes.Target{{Alias: "build", Forge: "test-all"}},
@@ -209,7 +251,7 @@ func TestNothingToHarvestIsFine(t *testing.T) {
 
 func TestAHarvestFailureIsAnError(t *testing.T) {
 	runner := execadaptermock.NewMockRunner(t)
-	runner.EXPECT().Run(mock.Anything, mock.Anything, "forge", "test-all").Return(passing(), nil).Once()
+	runner.EXPECT().RunEnv(mock.Anything, mock.Anything, mock.Anything, "forge", "test-all").Return(passing(), nil).Once()
 
 	_, err := computecontroller.New(runner, &stubHarvester{err: errBoom}, nil).
 		Run(context.Background(), citypes.RunInput{
@@ -220,7 +262,7 @@ func TestAHarvestFailureIsAnError(t *testing.T) {
 
 func TestAForgeCITargetIsNotHarvested(t *testing.T) {
 	runner := execadaptermock.NewMockRunner(t)
-	runner.EXPECT().Run(mock.Anything, mock.Anything, "forge-ci", "apply").Return(passing(), nil).Once()
+	runner.EXPECT().RunEnv(mock.Anything, mock.Anything, mock.Anything, "forge-ci", "apply").Return(passing(), nil).Once()
 
 	h := &stubHarvester{result: &citypes.ForgeResult{Artifacts: []forge.Artifact{{Name: "x"}}}}
 
@@ -242,7 +284,7 @@ func TestTheHarvesterIsToldWhenTheRunStarted(t *testing.T) {
 	started := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
 
 	runner := execadaptermock.NewMockRunner(t)
-	runner.EXPECT().Run(mock.Anything, mock.Anything, "forge", "test-all").Return(passing(), nil).Once()
+	runner.EXPECT().RunEnv(mock.Anything, mock.Anything, mock.Anything, "forge", "test-all").Return(passing(), nil).Once()
 
 	h := &stubHarvester{result: &citypes.ForgeResult{}}
 

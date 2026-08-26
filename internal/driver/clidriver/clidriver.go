@@ -217,6 +217,16 @@ func render(report reconcilecontroller.Report) string {
 		}
 	}
 
+	for _, released := range report.Released {
+		fmt.Fprintf(&b, "released %s", released.URL)
+
+		if len(released.Tagged) > 0 {
+			fmt.Fprintf(&b, " (tagged %s)", strings.Join(released.Tagged, ", "))
+		}
+
+		fmt.Fprintln(&b)
+	}
+
 	return b.String()
 }
 

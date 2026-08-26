@@ -421,6 +421,10 @@ func scriptFor(in citypes.RunInput) (string, error) {
 
 	b.WriteString("set -eu\n")
 
+	// The revision reaches the targets exactly as the local compute engine
+	// hands it: an instance's build can stamp the tuple it was proven with.
+	fmt.Fprintf(&b, "export FORGE_CI_REVISION=%s\n", quote(in.Revision))
+
 	for _, repo := range in.Repos {
 		if repo.SHA == "" || repo.Name == "" {
 			continue
