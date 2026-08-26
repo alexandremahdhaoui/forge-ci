@@ -39,6 +39,7 @@ engines:
       root: <string>
       apiBaseURL: <string>
       tokenEnv: <string>
+      assets: <list of strings>
 ```
 
 ## Worth knowing

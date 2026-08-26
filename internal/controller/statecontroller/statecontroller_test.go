@@ -2,6 +2,7 @@ package statecontroller_test
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -154,6 +155,29 @@ func TestAnEmptyRepoIsInitialised(t *testing.T) {
 
 	_, err := c.Put(context.Background(), citypes.StatePutInput{
 		Kind: statecontroller.KindRevision, Key: "abc", Payload: `{}`, Spec: spec,
+	})
+	require.NoError(t, err)
+}
+
+// A store named by a relative path stages a repo-relative pathspec:
+// git -C <root> resolves inside the repo, so a root-prefixed target would
+// match nothing. This broke a pipeline whose state engine named its store
+// as a plain sibling directory.
+func TestARelativeStorePathStagesARepoRelativeTarget(t *testing.T) {
+	git := gitadaptermock.NewMockGit(t)
+	c := statecontroller.New(fsadapter.New(), git)
+
+	t.Chdir(t.TempDir())
+	require.NoError(t, os.MkdirAll("golden-state", 0o750))
+
+	git.EXPECT().IsRepo(mock1(), "golden-state").Return(true, nil).Once()
+	git.EXPECT().Add(mock1(), "golden-state", filepath.Join("revisions", "abc.json")).
+		Return(nil).Once()
+	git.EXPECT().Staged(mock1(), "golden-state").Return(false, nil).Once()
+
+	_, err := c.Put(context.Background(), citypes.StatePutInput{
+		Kind: statecontroller.KindRevision, Key: "abc", Payload: `{}`,
+		Spec: map[string]any{"path": "golden-state"},
 	})
 	require.NoError(t, err)
 }

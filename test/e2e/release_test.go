@@ -77,7 +77,7 @@ build:
     engine: forge://generic-builder
     spec:
       command: sh
-      args: ["-c", "mkdir -p build/dist && printf '#!/bin/sh\necho demo-tool works\n' > build/dist/demo-tool_linux_amd64 && chmod +x build/dist/demo-tool_linux_amd64"]
+      args: ["-c", "mkdir -p build/dist && printf '#!/bin/sh\necho demo-tool works\n' > build/dist/demo-tool_linux_amd64 && chmod +x build/dist/demo-tool_linux_amd64 && printf '#!/bin/sh\necho extra\n' > build/dist/extra-tool_linux_arm64"]
 
 test:
   - name: unit
@@ -125,6 +125,7 @@ engines:
     spec:
       releaseIn: demo-repo
       apiBaseURL: ` + apiBaseURL + `
+      assets: ["demo-repo/build/dist/extra-tool_linux_*"]
 state: ci-state
 triggers: [on-change]
 targets:
@@ -198,8 +199,14 @@ func TestAGreenBuildReleasesTheAggregatedDistribution(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rawIndex, &index))
 	require.Equal(t, revision, index.Revision)
 	require.Equal(t, "dist-"+revision, index.Release.Tag)
-	require.Len(t, index.Tools, 1)
+	require.Len(t, index.Tools, 2)
 	require.Equal(t, "demo-tool", index.Tools[0].Name)
+
+	// spec.assets is the door for files no artifact record carries: the
+	// glob-matched extra binary rides the same release and index.
+	require.Equal(t, "extra-tool", index.Tools[1].Name)
+	_, ok = fake.assets["extra-tool_linux_arm64"]
+	require.True(t, ok, "a spec.assets glob match must ride the release")
 
 	// The digest in the index is the digest of the uploaded bytes: the
 	// index never claims a byte nobody hashed.

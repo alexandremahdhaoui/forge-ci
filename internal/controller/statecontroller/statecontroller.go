@@ -200,7 +200,15 @@ func (c *Controller) commit(ctx context.Context, root, target, kind, key string)
 		}
 	}
 
-	if err := c.git.Add(ctx, root, target); err != nil {
+	// git -C root resolves pathspecs inside the repo, so the target is
+	// handed over relative to it - a store named by a relative path would
+	// otherwise stage a root-prefixed path that exists nowhere.
+	relTarget := target
+	if rel, err := filepath.Rel(root, target); err == nil && !strings.HasPrefix(rel, "..") {
+		relTarget = rel
+	}
+
+	if err := c.git.Add(ctx, root, relTarget); err != nil {
 		return fmt.Errorf("recording %s %q: %w", kind, key, err)
 	}
 

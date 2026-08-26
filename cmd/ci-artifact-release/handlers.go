@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/execadapter"
@@ -152,7 +153,12 @@ func publish(
 		out.Tagged = append(out.Tagged, tag.Repo)
 	}
 
-	assets, err := stageAssets(root, plan, in.Revision)
+	uploads, err := expandAssets(root, plan.Uploads, in.Spec)
+	if err != nil {
+		return out, fmt.Errorf("releasing %s: %w", plan.Version, err)
+	}
+
+	assets, err := stageAssets(root, plan, uploads, in.Revision)
 	if err != nil {
 		return out, fmt.Errorf("releasing %s: %w", plan.Version, err)
 	}
@@ -171,14 +177,64 @@ func publish(
 	return out, nil
 }
 
+// expandAssets widens the uploads with spec.assets: root-relative globs the
+// instance names, the door for cross-built binaries no artifact record
+// carries. A glob that matches nothing is an error - a distribution that
+// silently shrinks is worse than one that fails.
+func expandAssets(root string, uploads []string, spec map[string]any) ([]string, error) {
+	raw, _ := spec["assets"].([]any)
+
+	out := append([]string{}, uploads...)
+	seen := map[string]bool{}
+
+	for _, path := range out {
+		seen[path] = true
+	}
+
+	for _, entry := range raw {
+		pattern, _ := entry.(string)
+		if pattern == "" {
+			continue
+		}
+
+		matches, err := filepath.Glob(filepath.Join(root, pattern))
+		if err != nil {
+			return nil, fmt.Errorf("expanding assets glob %q: %w", pattern, err)
+		}
+
+		if len(matches) == 0 {
+			return nil, fmt.Errorf("assets glob %q matches nothing; a distribution never shrinks silently", pattern)
+		}
+
+		for _, match := range matches {
+			rel, err := filepath.Rel(root, match)
+			if err != nil {
+				rel = match
+			}
+
+			if seen[rel] {
+				continue
+			}
+
+			seen[rel] = true
+
+			out = append(out, rel)
+		}
+	}
+
+	sort.Strings(out)
+
+	return out, nil
+}
+
 // stageAssets resolves the uploads against the root, digests each one, and
 // writes the distribution index beside them in a staging dir. The index is
 // built from the measured digests, never from claims.
-func stageAssets(root string, plan artifactcontroller.Plan, revision string) ([]string, error) {
-	assets := make([]string, 0, len(plan.Uploads)+1)
-	digests := make([]artifactcontroller.UploadDigest, 0, len(plan.Uploads))
+func stageAssets(root string, plan artifactcontroller.Plan, uploads []string, revision string) ([]string, error) {
+	assets := make([]string, 0, len(uploads)+1)
+	digests := make([]artifactcontroller.UploadDigest, 0, len(uploads))
 
-	for _, upload := range plan.Uploads {
+	for _, upload := range uploads {
 		path := upload
 		if !filepath.IsAbs(path) {
 			path = filepath.Join(root, path)

@@ -67,3 +67,7 @@ spec:
   type: string
   required: false
   means: Environment variable holding the token the gh-less path authenticates with. Defaults to GITHUB_TOKEN.
+- key: assets
+  type: list of strings
+  required: false
+  means: Root-relative globs of extra files to publish - the door for cross-built binaries no artifact record carries. A glob that matches nothing fails the release, because a distribution never shrinks silently.
