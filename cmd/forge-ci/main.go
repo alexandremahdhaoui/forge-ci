@@ -11,6 +11,7 @@ import (
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/reconcilecontroller"
 	"github.com/alexandremahdhaoui/forge-ci/internal/driver/clidriver"
 	"github.com/alexandremahdhaoui/forge/pkg/enginecli"
+	"github.com/alexandremahdhaoui/forge/pkg/engineversion"
 )
 
 var Version = "dev"
@@ -18,7 +19,10 @@ var Version = "dev"
 func main() {
 	sourceDir := os.Getenv("FORGE_CI_SOURCE_DIR")
 
-	caller := engineadapter.NewMCPCaller(sourceDir, Version, os.Stderr)
+	// The effective version pins engine go-run fallbacks: a go-install build
+	// carries its module version in build info even when ldflags stamped
+	// nothing, so every engine matches the CLI that spawned it.
+	caller := engineadapter.NewMCPCaller(sourceDir, engineversion.GetEffectiveVersion(Version), os.Stderr)
 	git := gitadapter.New(execadapter.New())
 	reconciler := reconcilecontroller.New(caller, git, nil)
 

@@ -17,8 +17,17 @@ for word in $BANNED; do
     fi
 done
 
+# Latest is never a fallback: every go-run carries a pin, so a floating
+# version in production code is a regression.
+latest_hits=$(grep -rn "@latest" $FILES || true)
+if [ -n "$latest_hits" ]; then
+    echo "forge-ci must never float to @latest; a go run carries a pinned version." >&2
+    echo "$latest_hits" >&2
+    fail=1
+fi
+
 if [ "$fail" -eq 0 ]; then
-    echo "forge-ci names no project and no language toolchain"
+    echo "forge-ci names no project, no language toolchain, and no floating version"
 fi
 
 exit "$fail"
