@@ -68,7 +68,17 @@ func (g *CLI) IsRepo(ctx context.Context, dir string) (bool, error) {
 }
 
 func (g *CLI) Add(ctx context.Context, dir, path string) error {
-	_, err := g.run(ctx, dir, "staging "+path, "add", path)
+	res, err := g.run(ctx, dir, "staging "+path, "add", path)
+
+	// Record keys embed caller-chosen names (a stage called "build", say),
+	// so an unanchored output pattern in the state repo's .gitignore can
+	// swallow a record path. Name the fix, or the refusal reads like a
+	// broken engine.
+	if err != nil && strings.Contains(res.Stderr, ".gitignore") {
+		return fmt.Errorf(
+			"%w - the repo's .gitignore matches this record path; anchor output patterns to the repo root (write /build/, not build/)",
+			err)
+	}
 
 	return err
 }

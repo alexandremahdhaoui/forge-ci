@@ -95,6 +95,24 @@ func TestAddAndCommit(t *testing.T) {
 	require.NoError(t, g.Commit(context.Background(), "/repo", "ci: x"))
 }
 
+// A state repo whose .gitignore carries an unanchored output pattern (build/
+// instead of /build/) swallows record paths like runs/<rev>/build/x.json.
+// The refusal must name the fix, not read like a broken engine. Live case:
+// forge-self-state blocked every run record this way.
+func TestAnIgnoredRecordPathNamesTheGitignoreFix(t *testing.T) {
+	r := execadaptermock.NewMockRunner(t)
+	r.EXPECT().Run(mock.Anything, "/state", "git", "add", "runs/abc/build/default.json").
+		Return(execadapter.Result{
+			ExitCode: 1,
+			Stderr:   "The following paths are ignored by one of your .gitignore files:\nruns/abc/build\n",
+		}, nil).Once()
+
+	err := gitadapter.New(r).Add(context.Background(), "/state", "runs/abc/build/default.json")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "anchor output patterns to the repo root")
+	require.Contains(t, err.Error(), "/build/, not build/")
+}
+
 func TestANonZeroGitExitCarriesStderr(t *testing.T) {
 	r := execadaptermock.NewMockRunner(t)
 	r.EXPECT().Run(mock.Anything, "/repo", "git", "rev-parse", "HEAD").
