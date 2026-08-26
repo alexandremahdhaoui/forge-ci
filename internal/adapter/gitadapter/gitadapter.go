@@ -18,7 +18,7 @@ type Git interface {
 	Commit(ctx context.Context, dir, message string) error
 	HeadSHA(ctx context.Context, dir string) (string, error)
 	RemoteSHA(ctx context.Context, url, ref string) (string, error)
-	Dirty(ctx context.Context, dir string) (bool, error)
+	Staged(ctx context.Context, dir string) (bool, error)
 	LatestTag(ctx context.Context, dir string) (string, error)
 	WorktreeHash(ctx context.Context, dir string) (string, error)
 }
@@ -79,6 +79,19 @@ func (g *CLI) Commit(ctx context.Context, dir, message string) error {
 	return err
 }
 
+// Staged reports whether anything is in the index waiting to be
+// committed. The state engine stages only the record it wrote, so this
+// is what decides whether a commit happens - the rest of the tree is
+// not the engine's to judge.
+func (g *CLI) Staged(ctx context.Context, dir string) (bool, error) {
+	res, err := g.run(ctx, dir, "reading the index of "+dir, "diff", "--cached", "--name-only")
+	if err != nil {
+		return false, err
+	}
+
+	return strings.TrimSpace(res.Stdout) != "", nil
+}
+
 func (g *CLI) HeadSHA(ctx context.Context, dir string) (string, error) {
 	res, err := g.run(ctx, dir, "reading HEAD of "+dir, "rev-parse", "HEAD")
 	if err != nil {
@@ -124,15 +137,6 @@ func (g *CLI) WorktreeHash(ctx context.Context, dir string) (string, error) {
 	sum := sha256.Sum256([]byte(status.Stdout + "\n" + diff.Stdout))
 
 	return hex.EncodeToString(sum[:])[:12], nil
-}
-
-func (g *CLI) Dirty(ctx context.Context, dir string) (bool, error) {
-	res, err := g.run(ctx, dir, "reading status of "+dir, "status", "--porcelain")
-	if err != nil {
-		return false, err
-	}
-
-	return strings.TrimSpace(res.Stdout) != "", nil
 }
 
 // LatestTag is the highest semver tag a checkout carries. A repo with no tag

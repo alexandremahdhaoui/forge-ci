@@ -178,3 +178,50 @@ func TestAnUnresolvableEngineIsAnError(t *testing.T) {
 	err := caller().Call(context.Background(), "https://example.com/engine", "x", nil, nil)
 	require.ErrorIs(t, err, engineadapter.ErrScheme)
 }
+
+// TestTheStateEngineLeavesUnrelatedDirtyFilesAlone pins the scoped-commit
+// contract: a store often shares a repo with other work (the register
+// stores its index beside its own sources), and a "ci:" commit must
+// record exactly the file the write produced - never sweep the rest of a
+// dirty tree along with it. That happened live: a pipeline run buried an
+// operator's uncommitted config edit inside an index commit.
+func TestTheStateEngineLeavesUnrelatedDirtyFilesAlone(t *testing.T) {
+	root := t.TempDir()
+
+	gitIn := func(args ...string) string {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, string(out))
+
+		return string(out)
+	}
+
+	gitIn("init", "-b", "main")
+	gitIn("config", "user.email", "it@example.com")
+	gitIn("config", "user.name", "it")
+	require.NoError(t, os.WriteFile(filepath.Join(root, "unrelated.yaml"), []byte("v: 1\n"), 0o600))
+	gitIn("add", ".")
+	gitIn("commit", "-m", "base")
+
+	// The operator's uncommitted work: one tracked edit, one new file.
+	require.NoError(t, os.WriteFile(filepath.Join(root, "unrelated.yaml"), []byte("v: 2\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "untracked.txt"), []byte("mine\n"), 0o600))
+
+	err := caller().Call(context.Background(),
+		"forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-state-git@v0.1.0",
+		"put", citypes.StatePutInput{
+			Kind: "revision", Key: "abc", Payload: `{"id":"abc"}`,
+			Spec: map[string]any{"path": root},
+		}, &citypes.StateGetOutput{})
+	require.NoError(t, err)
+
+	committed := gitIn("show", "--name-only", "--format=", "HEAD")
+	require.Contains(t, committed, "revisions/abc.json")
+	require.NotContains(t, committed, "unrelated.yaml")
+	require.NotContains(t, committed, "untracked.txt")
+
+	status := gitIn("status", "--short")
+	require.Contains(t, status, "unrelated.yaml", "the operator's edit must still be uncommitted")
+	require.Contains(t, status, "untracked.txt", "the operator's new file must still be untracked")
+}

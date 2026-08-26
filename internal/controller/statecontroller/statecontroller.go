@@ -142,7 +142,7 @@ func (c *Controller) Put(ctx context.Context, in citypes.StatePutInput) (citypes
 		return citypes.StateGetOutput{}, fmt.Errorf("writing %s %q: %w", in.Kind, in.Key, err)
 	}
 
-	if err := c.commit(ctx, root, in.Kind, in.Key); err != nil {
+	if err := c.commit(ctx, root, target, in.Kind, in.Key); err != nil {
 		return citypes.StateGetOutput{}, err
 	}
 
@@ -180,7 +180,11 @@ func (c *Controller) List(ctx context.Context, in citypes.StateGetInput) (citype
 	return citypes.StateListOutput{Keys: keys}, nil
 }
 
-func (c *Controller) commit(ctx context.Context, root, kind, key string) error {
+// commit records exactly the file this write produced. It stages that
+// one path and commits only what is staged: the store often shares a
+// repo with other work, and sweeping a dirty tree into a "ci:" commit
+// buries changes the engine had no business recording.
+func (c *Controller) commit(ctx context.Context, root, target, kind, key string) error {
 	if c.git == nil {
 		return nil
 	}
@@ -196,16 +200,16 @@ func (c *Controller) commit(ctx context.Context, root, kind, key string) error {
 		}
 	}
 
-	if err := c.git.Add(ctx, root, "."); err != nil {
+	if err := c.git.Add(ctx, root, target); err != nil {
 		return fmt.Errorf("recording %s %q: %w", kind, key, err)
 	}
 
-	dirty, err := c.git.Dirty(ctx, root)
+	staged, err := c.git.Staged(ctx, root)
 	if err != nil {
 		return fmt.Errorf("recording %s %q: %w", kind, key, err)
 	}
 
-	if !dirty {
+	if !staged {
 		return nil
 	}
 

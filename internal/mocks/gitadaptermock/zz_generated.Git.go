@@ -226,72 +226,6 @@ func (_c *MockGit_Commit_Call) RunAndReturn(run func(ctx context.Context, dir st
 	return _c
 }
 
-// Dirty provides a mock function for the type MockGit
-func (_mock *MockGit) Dirty(ctx context.Context, dir string) (bool, error) {
-	ret := _mock.Called(ctx, dir)
-
-	if len(ret) == 0 {
-		panic("no return value specified for Dirty")
-	}
-
-	var r0 bool
-	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (bool, error)); ok {
-		return returnFunc(ctx, dir)
-	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string) bool); ok {
-		r0 = returnFunc(ctx, dir)
-	} else {
-		r0 = ret.Get(0).(bool)
-	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
-		r1 = returnFunc(ctx, dir)
-	} else {
-		r1 = ret.Error(1)
-	}
-	return r0, r1
-}
-
-// MockGit_Dirty_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Dirty'
-type MockGit_Dirty_Call struct {
-	*mock.Call
-}
-
-// Dirty is a helper method to define mock.On call
-//   - ctx context.Context
-//   - dir string
-func (_e *MockGit_Expecter) Dirty(ctx any, dir any) *MockGit_Dirty_Call {
-	return &MockGit_Dirty_Call{Call: _e.mock.On("Dirty", ctx, dir)}
-}
-
-func (_c *MockGit_Dirty_Call) Run(run func(ctx context.Context, dir string)) *MockGit_Dirty_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 context.Context
-		if args[0] != nil {
-			arg0 = args[0].(context.Context)
-		}
-		var arg1 string
-		if args[1] != nil {
-			arg1 = args[1].(string)
-		}
-		run(
-			arg0,
-			arg1,
-		)
-	})
-	return _c
-}
-
-func (_c *MockGit_Dirty_Call) Return(b bool, err error) *MockGit_Dirty_Call {
-	_c.Call.Return(b, err)
-	return _c
-}
-
-func (_c *MockGit_Dirty_Call) RunAndReturn(run func(ctx context.Context, dir string) (bool, error)) *MockGit_Dirty_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // HeadSHA provides a mock function for the type MockGit
 func (_mock *MockGit) HeadSHA(ctx context.Context, dir string) (string, error) {
 	ret := _mock.Called(ctx, dir)
@@ -615,6 +549,72 @@ func (_c *MockGit_RemoteSHA_Call) Return(s string, err error) *MockGit_RemoteSHA
 }
 
 func (_c *MockGit_RemoteSHA_Call) RunAndReturn(run func(ctx context.Context, url string, ref string) (string, error)) *MockGit_RemoteSHA_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// Staged provides a mock function for the type MockGit
+func (_mock *MockGit) Staged(ctx context.Context, dir string) (bool, error) {
+	ret := _mock.Called(ctx, dir)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Staged")
+	}
+
+	var r0 bool
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (bool, error)); ok {
+		return returnFunc(ctx, dir)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) bool); ok {
+		r0 = returnFunc(ctx, dir)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = returnFunc(ctx, dir)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockGit_Staged_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Staged'
+type MockGit_Staged_Call struct {
+	*mock.Call
+}
+
+// Staged is a helper method to define mock.On call
+//   - ctx context.Context
+//   - dir string
+func (_e *MockGit_Expecter) Staged(ctx any, dir any) *MockGit_Staged_Call {
+	return &MockGit_Staged_Call{Call: _e.mock.On("Staged", ctx, dir)}
+}
+
+func (_c *MockGit_Staged_Call) Run(run func(ctx context.Context, dir string)) *MockGit_Staged_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockGit_Staged_Call) Return(b bool, err error) *MockGit_Staged_Call {
+	_c.Call.Return(b, err)
+	return _c
+}
+
+func (_c *MockGit_Staged_Call) RunAndReturn(run func(ctx context.Context, dir string) (bool, error)) *MockGit_Staged_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -85,22 +85,6 @@ func TestRemoteSHAWithNoSuchRef(t *testing.T) {
 	require.Contains(t, err.Error(), "no such ref")
 }
 
-func TestDirtyIsTrueWhenStatusPrintsAnything(t *testing.T) {
-	r := execadaptermock.NewMockRunner(t)
-	r.EXPECT().Run(mock.Anything, "/repo", "git", "status", "--porcelain").Return(ok(" M f.go\n"), nil).Once()
-
-	dirty, err := gitadapter.New(r).Dirty(context.Background(), "/repo")
-	require.NoError(t, err)
-	require.True(t, dirty)
-
-	r2 := execadaptermock.NewMockRunner(t)
-	r2.EXPECT().Run(mock.Anything, "/repo", "git", "status", "--porcelain").Return(ok("\n"), nil).Once()
-
-	clean, err := gitadapter.New(r2).Dirty(context.Background(), "/repo")
-	require.NoError(t, err)
-	require.False(t, clean)
-}
-
 func TestAddAndCommit(t *testing.T) {
 	r := execadaptermock.NewMockRunner(t)
 	r.EXPECT().Run(mock.Anything, "/repo", "git", "add", ".").Return(ok(""), nil).Once()
@@ -178,4 +162,24 @@ func TestWorktreeHashReportsBothFailures(t *testing.T) {
 	_, err = gitadapter.New(r2).WorktreeHash(context.Background(), "/repo")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "reading uncommitted changes in /repo")
+}
+
+func TestStagedIsTrueWhenTheIndexHoldsAnything(t *testing.T) {
+	t.Parallel()
+
+	r := execadaptermock.NewMockRunner(t)
+	r.EXPECT().Run(mock.Anything, "/repo", "git", "diff", "--cached", "--name-only").
+		Return(execadapter.Result{Stdout: "revisions/abc.json\n"}, nil)
+
+	staged, err := gitadapter.New(r).Staged(context.Background(), "/repo")
+	require.NoError(t, err)
+	require.True(t, staged)
+
+	r2 := execadaptermock.NewMockRunner(t)
+	r2.EXPECT().Run(mock.Anything, "/repo", "git", "diff", "--cached", "--name-only").
+		Return(execadapter.Result{Stdout: "\n"}, nil)
+
+	clean, err := gitadapter.New(r2).Staged(context.Background(), "/repo")
+	require.NoError(t, err)
+	require.False(t, clean)
 }

@@ -25,8 +25,8 @@ func setup(t *testing.T) (*statecontroller.Controller, *gitadaptermock.MockGit, 
 
 func expectCommit(git *gitadaptermock.MockGit, dirty bool) {
 	git.EXPECT().IsRepo(mock1(), mock2()).Return(true, nil).Maybe()
-	git.EXPECT().Add(mock1(), mock2(), ".").Return(nil).Maybe()
-	git.EXPECT().Dirty(mock1(), mock2()).Return(dirty, nil).Maybe()
+	git.EXPECT().Add(mock1(), mock2(), mock.Anything).Return(nil).Maybe()
+	git.EXPECT().Staged(mock1(), mock2()).Return(dirty, nil).Maybe()
 	git.EXPECT().Commit(mock1(), mock2(), mock3()).Return(nil).Maybe()
 }
 
@@ -148,8 +148,8 @@ func TestAnEmptyRepoIsInitialised(t *testing.T) {
 	c, git, spec := setup(t)
 	git.EXPECT().IsRepo(mock1(), mock2()).Return(false, nil).Once()
 	git.EXPECT().Init(mock1(), mock2()).Return(nil).Once()
-	git.EXPECT().Add(mock1(), mock2(), ".").Return(nil).Once()
-	git.EXPECT().Dirty(mock1(), mock2()).Return(true, nil).Once()
+	git.EXPECT().Add(mock1(), mock2(), mock.Anything).Return(nil).Once()
+	git.EXPECT().Staged(mock1(), mock2()).Return(true, nil).Once()
 	git.EXPECT().Commit(mock1(), mock2(), "ci: revision abc").Return(nil).Once()
 
 	_, err := c.Put(context.Background(), citypes.StatePutInput{
@@ -161,8 +161,8 @@ func TestAnEmptyRepoIsInitialised(t *testing.T) {
 func TestNothingToCommitIsNotAnError(t *testing.T) {
 	c, git, spec := setup(t)
 	git.EXPECT().IsRepo(mock1(), mock2()).Return(true, nil).Once()
-	git.EXPECT().Add(mock1(), mock2(), ".").Return(nil).Once()
-	git.EXPECT().Dirty(mock1(), mock2()).Return(false, nil).Once()
+	git.EXPECT().Add(mock1(), mock2(), mock.Anything).Return(nil).Once()
+	git.EXPECT().Staged(mock1(), mock2()).Return(false, nil).Once()
 
 	_, err := c.Put(context.Background(), citypes.StatePutInput{
 		Kind: statecontroller.KindRevision, Key: "abc", Payload: `{}`, Spec: spec,
@@ -173,7 +173,7 @@ func TestNothingToCommitIsNotAnError(t *testing.T) {
 func TestCommitFailureNamesWhatItWasRecording(t *testing.T) {
 	c, git, spec := setup(t)
 	git.EXPECT().IsRepo(mock1(), mock2()).Return(true, nil).Once()
-	git.EXPECT().Add(mock1(), mock2(), ".").Return(errBoom).Once()
+	git.EXPECT().Add(mock1(), mock2(), mock.Anything).Return(errBoom).Once()
 
 	_, err := c.Put(context.Background(), citypes.StatePutInput{
 		Kind: statecontroller.KindRevision, Key: "abc", Payload: `{}`, Spec: spec,
@@ -356,13 +356,13 @@ func TestEveryCommitFailureIsReported(t *testing.T) {
 		}},
 		{"dirty", func(g *gitadaptermock.MockGit) {
 			g.EXPECT().IsRepo(mock.Anything, mock.Anything).Return(true, nil).Once()
-			g.EXPECT().Add(mock.Anything, mock.Anything, ".").Return(nil).Once()
-			g.EXPECT().Dirty(mock.Anything, mock.Anything).Return(false, errBoom).Once()
+			g.EXPECT().Add(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+			g.EXPECT().Staged(mock.Anything, mock.Anything).Return(false, errBoom).Once()
 		}},
 		{"commit", func(g *gitadaptermock.MockGit) {
 			g.EXPECT().IsRepo(mock.Anything, mock.Anything).Return(true, nil).Once()
-			g.EXPECT().Add(mock.Anything, mock.Anything, ".").Return(nil).Once()
-			g.EXPECT().Dirty(mock.Anything, mock.Anything).Return(true, nil).Once()
+			g.EXPECT().Add(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+			g.EXPECT().Staged(mock.Anything, mock.Anything).Return(true, nil).Once()
 			g.EXPECT().Commit(mock.Anything, mock.Anything, mock.Anything).Return(errBoom).Once()
 		}},
 	} {
