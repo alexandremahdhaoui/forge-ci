@@ -36,6 +36,20 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 
+	// The suite is hermetic: the spawned engines inherit this process's
+	// environment, and a developer machine's global signing config would
+	// turn the state engine's plain commits into signed ones that demand
+	// a key. Identity comes from env so commits still carry an author.
+	for k, v := range map[string]string{
+		"GIT_CONFIG_GLOBAL": os.DevNull, "GIT_CONFIG_SYSTEM": os.DevNull,
+		"GIT_AUTHOR_NAME": "integration", "GIT_AUTHOR_EMAIL": "integration@example.com",
+		"GIT_COMMITTER_NAME": "integration", "GIT_COMMITTER_EMAIL": "integration@example.com",
+	} {
+		if err := os.Setenv(k, v); err != nil {
+			panic(err)
+		}
+	}
+
 	code := m.Run()
 
 	_ = os.RemoveAll(dir)
@@ -191,6 +205,10 @@ func TestTheStateEngineLeavesUnrelatedDirtyFilesAlone(t *testing.T) {
 	gitIn := func(args ...string) string {
 		cmd := exec.Command("git", args...)
 		cmd.Dir = root
+		// The machine's global git config stays out: a global signing
+		// setup would turn these plain commits into signed ones.
+		cmd.Env = append(os.Environ(),
+			"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
 		out, err := cmd.CombinedOutput()
 		require.NoError(t, err, string(out))
 

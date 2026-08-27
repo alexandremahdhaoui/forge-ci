@@ -57,7 +57,15 @@ func run(t *testing.T, dir, name string, args ...string) (string, error) {
 
 	cmd := exec.CommandContext(context.Background(), name, args...)
 	cmd.Dir = dir
-	cmd.Env = os.Environ()
+	// The suite is hermetic: no git command here - the tests' own or the
+	// pipeline's - may read the machine's git config, or a developer's
+	// global signing setup turns plain commits and tags into signed ones
+	// that demand keys and messages the tests do not have.
+	cmd.Env = append(os.Environ(),
+		"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
+		"GIT_AUTHOR_NAME=e2e", "GIT_AUTHOR_EMAIL=e2e@example.com",
+		"GIT_COMMITTER_NAME=e2e", "GIT_COMMITTER_EMAIL=e2e@example.com",
+	)
 
 	out, err := cmd.CombinedOutput()
 
