@@ -86,3 +86,45 @@ func TestAFailureToRunIsReported(t *testing.T) {
 	_, err := releaseadapter.New(runner).Release(t.Context(), "/w", "v0.2.0", nil)
 	require.ErrorIs(t, err, assert.AnError)
 }
+
+func TestLatestTagAnswersTheHighestOrEmpty(t *testing.T) {
+	t.Parallel()
+
+	runner := execadaptermock.NewMockRunner(t)
+	runner.EXPECT().Run(mock.Anything, "/w/a", "git", "tag", "--sort=-v:refname").
+		Return(execadapter.Result{Stdout: "v0.44.4\nv0.44.3\n"}, nil).Once()
+
+	tag, err := releaseadapter.New(runner).LatestTag(t.Context(), "/w/a")
+	require.NoError(t, err)
+	require.Equal(t, "v0.44.4", tag)
+
+	runner2 := execadaptermock.NewMockRunner(t)
+	runner2.EXPECT().Run(mock.Anything, "/w/b", "git", "tag", "--sort=-v:refname").
+		Return(execadapter.Result{Stdout: "\n"}, nil).Once()
+
+	tag, err = releaseadapter.New(runner2).LatestTag(t.Context(), "/w/b")
+	require.NoError(t, err)
+	require.Empty(t, tag, "a never-tagged repo starts fresh")
+}
+
+// A commit some tag already points at is a member already released: a
+// re-run of the same revision must not stack a second tag on it.
+func TestTaggedAtSpotsAnAlreadyReleasedCommit(t *testing.T) {
+	t.Parallel()
+
+	runner := execadaptermock.NewMockRunner(t)
+	runner.EXPECT().Run(mock.Anything, "/w/a", "git", "tag", "--points-at", "abc123").
+		Return(execadapter.Result{Stdout: "v0.44.4\n"}, nil).Once()
+
+	released, err := releaseadapter.New(runner).TaggedAt(t.Context(), "/w/a", "abc123")
+	require.NoError(t, err)
+	require.True(t, released)
+
+	runner2 := execadaptermock.NewMockRunner(t)
+	runner2.EXPECT().Run(mock.Anything, "/w/a", "git", "tag", "--points-at", "def456").
+		Return(execadapter.Result{Stdout: ""}, nil).Once()
+
+	released, err = releaseadapter.New(runner2).TaggedAt(t.Context(), "/w/a", "def456")
+	require.NoError(t, err)
+	require.False(t, released)
+}

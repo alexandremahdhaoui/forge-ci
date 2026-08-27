@@ -15,6 +15,10 @@ import (
 // Publisher puts a release where people can fetch it.
 type Publisher interface {
 	Tag(ctx context.Context, dir, version, sha string) error
+	// LatestTag answers the highest semver tag dir carries, "" when none.
+	LatestTag(ctx context.Context, dir string) (string, error)
+	// TaggedAt answers whether any tag already points at sha in dir.
+	TaggedAt(ctx context.Context, dir, sha string) (bool, error)
 	// Release creates the release named by tag in dir's repo, attaches the
 	// files, and answers its URL.
 	Release(ctx context.Context, dir, tag string, files []string) (string, error)
@@ -68,6 +72,34 @@ func (g *GH) Tag(ctx context.Context, dir, version, sha string) error {
 	_, err = g.run(ctx, dir, "pushing "+version, "git", "push", "origin", version)
 
 	return err
+}
+
+// LatestTag answers the highest semver tag the repo carries. A repo that
+// has never been tagged answers empty, and its next version starts fresh.
+func (g *GH) LatestTag(ctx context.Context, dir string) (string, error) {
+	out, err := g.run(ctx, dir, "listing tags of "+dir, "git", "tag", "--sort=-v:refname")
+	if err != nil {
+		return "", err
+	}
+
+	for _, line := range strings.Split(out, "\n") {
+		if tag := strings.TrimSpace(line); tag != "" {
+			return tag, nil
+		}
+	}
+
+	return "", nil
+}
+
+// TaggedAt answers whether any tag already points at the commit: a re-run
+// of an already-released revision must not stack a second tag on it.
+func (g *GH) TaggedAt(ctx context.Context, dir, sha string) (bool, error) {
+	out, err := g.run(ctx, dir, "reading tags at "+sha, "git", "tag", "--points-at", sha)
+	if err != nil {
+		return false, err
+	}
+
+	return strings.TrimSpace(out) != "", nil
 }
 
 // Release creates the release and attaches the files, and returns its URL.

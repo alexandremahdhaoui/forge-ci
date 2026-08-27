@@ -244,3 +244,58 @@ func TestADirtyTreeNeverReleases(t *testing.T) {
 	require.Contains(t, strings.ToLower(out), "dirty")
 	require.Empty(t, fake.releases, "nothing may publish from a dirty tree")
 }
+
+// A member that carries release history from before this pipeline existed
+// keeps its own version line: the release must not mint one shared number
+// from the releaseIn repo and stamp it onto members that already own those
+// tags. Live case: forge carried v0.1.0..v0.44.4 and the first dist-release
+// died trying to re-tag v0.1.0.
+func TestAPreTaggedMemberKeepsItsOwnVersionLine(t *testing.T) {
+	fake := newReleaseFake(t)
+
+	root := t.TempDir()
+	repo := filepath.Join(root, "demo-repo")
+	statePath := filepath.Join(root, "state")
+
+	require.NoError(t, os.MkdirAll(repo, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "forge.yaml"), []byte(releaseForgeYAML), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(repo, ".envrc"), nil, 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(repo, ".gitignore"),
+		[]byte("/.forge/\n.envrc\n/build/\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "README.md"), []byte("one"), 0o600))
+
+	mustRun(t, repo, "git", "init", "-b", "main")
+	mustRun(t, repo, "git", "config", "user.email", "e2e@example.com")
+	mustRun(t, repo, "git", "config", "user.name", "e2e")
+	mustRun(t, repo, "git", "add", ".")
+	mustRun(t, repo, "git", "commit", "-m", "first")
+
+	// The pre-existing history: tags minted long before this pipeline.
+	mustRun(t, repo, "git", "tag", "-m", "v0.1.0", "v0.1.0")
+	mustRun(t, repo, "git", "tag", "-m", "v0.44.4", "v0.44.4")
+
+	// The head moves past the tagged commit, so the release tags fresh work.
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "README.md"), []byte("two"), 0o600))
+	mustRun(t, repo, "git", "add", ".")
+	mustRun(t, repo, "git", "commit", "-m", "second")
+
+	origin := filepath.Join(root, "remotes", "owner", "demo-repo.git")
+	require.NoError(t, os.MkdirAll(origin, 0o750))
+	mustRun(t, origin, "git", "init", "--bare")
+	mustRun(t, repo, "git", "remote", "add", "origin", origin)
+
+	require.NoError(t, os.WriteFile(filepath.Join(root, "forge-ci.yaml"),
+		[]byte(releasePipelineYAML(root, statePath, fake.server.URL)), 0o600))
+
+	out := mustRun(t, root, "forge-ci", "apply", "--config", "forge-ci.yaml", "--root", ".")
+	require.Contains(t, out, "released")
+
+	// The member's own line continues: v0.44.4 bumps to v0.44.5. Nothing
+	// tries to reuse v0.1.0.
+	tags := mustRun(t, origin, "git", "tag")
+	require.Contains(t, tags, "v0.44.5")
+	require.NotContains(t, mustRun(t, repo, "git", "tag", "--points-at", "HEAD"), "v0.1.0")
+
+	revision := revisionID(t, statePath)
+	require.Equal(t, "dist-"+revision, fake.releases["owner/demo-repo"])
+}

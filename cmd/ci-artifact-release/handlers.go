@@ -143,11 +143,34 @@ func publish(
 
 	out := citypes.ArtifactOutput{Tagged: []string{}}
 
+	// Each member is tagged on ITS OWN version line: one shared number
+	// breaks the moment a member carries history from before this
+	// pipeline existed. A commit some tag already points at is a member
+	// already released - a re-run stacks nothing on it.
 	for _, tag := range plan.Tags {
 		dir := root + "/" + tag.Repo
 
-		if err := publisher.Tag(ctx, dir, plan.Version, tag.SHA); err != nil {
-			return out, fmt.Errorf("releasing %s: %w", plan.Version, err)
+		released, err := publisher.TaggedAt(ctx, dir, tag.SHA)
+		if err != nil {
+			return out, fmt.Errorf("releasing %s: %w", tag.Repo, err)
+		}
+
+		if released {
+			continue
+		}
+
+		previous, err := publisher.LatestTag(ctx, dir)
+		if err != nil {
+			return out, fmt.Errorf("releasing %s: %w", tag.Repo, err)
+		}
+
+		version, err := artifactcontroller.NextVersion(previous)
+		if err != nil {
+			return out, fmt.Errorf("releasing %s: %w", tag.Repo, err)
+		}
+
+		if err := publisher.Tag(ctx, dir, version, tag.SHA); err != nil {
+			return out, fmt.Errorf("releasing %s: %w", version, err)
 		}
 
 		out.Tagged = append(out.Tagged, tag.Repo)
