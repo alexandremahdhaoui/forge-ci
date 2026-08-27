@@ -93,56 +93,67 @@ build:
     src: ./cmd/forge-ci
     dest: ./build/bin
     engine: forge://go-build
+    platforms: [linux/amd64, linux/arm64]
 
   - name: ci-manager-local
     src: ./cmd/ci-manager-local
     dest: ./build/bin
     engine: forge://go-build
+    platforms: [linux/amd64, linux/arm64]
 
   - name: ci-manager-dryrun
     src: ./cmd/ci-manager-dryrun
     dest: ./build/bin
     engine: forge://go-build
+    platforms: [linux/amd64, linux/arm64]
 
   - name: ci-manager-github
     src: ./cmd/ci-manager-github
     dest: ./build/bin
     engine: forge://go-build
+    platforms: [linux/amd64, linux/arm64]
 
   - name: ci-compute-github
     src: ./cmd/ci-compute-github
     dest: ./build/bin
     engine: forge://go-build
+    platforms: [linux/amd64, linux/arm64]
 
   - name: ci-compute-local
     src: ./cmd/ci-compute-local
     dest: ./build/bin
     engine: forge://go-build
+    platforms: [linux/amd64, linux/arm64]
 
   - name: ci-state-git
     src: ./cmd/ci-state-git
     dest: ./build/bin
     engine: forge://go-build
+    platforms: [linux/amd64, linux/arm64]
 
   - name: ci-artifact-release
     src: ./cmd/ci-artifact-release
     dest: ./build/bin
     engine: forge://go-build
+    platforms: [linux/amd64, linux/arm64]
 
   - name: ci-trigger-watch
     src: ./cmd/ci-trigger-watch
     dest: ./build/bin
     engine: forge://go-build
+    platforms: [linux/amd64, linux/arm64]
 
   - name: ci-gate-manual
     src: ./cmd/ci-gate-manual
     dest: ./build/bin
     engine: forge://go-build
+    platforms: [linux/amd64, linux/arm64]
 
   - name: ci-promotion-all
     src: ./cmd/ci-promotion-all
     dest: ./build/bin
     engine: forge://go-build
+    platforms: [linux/amd64, linux/arm64]
 
 # The CLI as a first class run target. Every toolchain runnable declares
 # forge-self-factory: the model has no exceptions.
@@ -225,8 +236,8 @@ test:
   - name: dist
     runner: forge://generic-test-runner
     spec:
-      command: sh
-      args: ["hack/build-dist.sh"]
+      command: forge
+      args: ["build", "--platforms", "linux/amd64,linux/arm64"]
 
 factory:
   module: github.com/alexandremahdhaoui/forge-ci

@@ -17,6 +17,9 @@ var (
 	ErrPrevious = errors.New("the previous version is not a semver tag")
 	ErrRevision = errors.New("a release needs the revision it publishes")
 	ErrDirty    = errors.New("a dirty revision was never proven and must not be released")
+	// ErrCollision means two artifacts travel under one file name, so the
+	// release would overwrite one with the other.
+	ErrCollision = errors.New("two artifacts claim the same asset name")
 )
 
 // semver is deliberately strict. A tag is what a consumer pins, so a release
@@ -116,12 +119,13 @@ func (c *Controller) Plan(in citypes.ArtifactInput) (Plan, error) {
 		plan.Tags = append(plan.Tags, Tag{Repo: name, SHA: in.Repos[name]})
 	}
 
-	// What uploads: every binary artifact, plus anything whose file name
-	// carries the `name_os_arch` platform suffix - a cross-built dist binary
-	// travels under that convention whatever engine produced it. A container
-	// image or a URL is somebody else's to serve, and a local path never
-	// carries a colon.
+	// What uploads: exactly what travels, and a thing travels only under the
+	// `name_os_arch` convention - the name says which machine it runs on, so
+	// a consumer can pick its own. A host build carries no platform in its
+	// name and stays home; a container image or a URL is somebody else's to
+	// serve, and a local path never carries a colon.
 	seen := map[string]bool{}
+	byName := map[string]string{}
 
 	for _, artifact := range in.Artifacts {
 		path := artifact.Location
@@ -135,11 +139,22 @@ func (c *Controller) Plan(in citypes.ArtifactInput) (Plan, error) {
 			continue
 		}
 
-		if artifact.Type != "binary" && !platformSuffix.MatchString(filepath.Base(path)) {
+		if !platformSuffix.MatchString(filepath.Base(path)) {
 			continue
 		}
 
 		seen[path] = true
+
+		// One release, one asset per name: two artifacts that travel under
+		// the same file name would overwrite each other in the release, so
+		// the collision is refused and both sources are named. This is a
+		// declaration mistake in the repos, not a machine failure.
+		base := filepath.Base(path)
+		if first, clash := byName[base]; clash {
+			return Plan{}, fmt.Errorf("%w: %q is built by both %s and %s", ErrCollision, base, first, path)
+		}
+
+		byName[base] = path
 
 		plan.Uploads = append(plan.Uploads, path)
 	}

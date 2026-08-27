@@ -67,7 +67,11 @@ func TestPlanAcceptsAPrerelease(t *testing.T) {
 	assert.Equal(t, "v1.0.0-rc.1", plan.Version)
 }
 
-func TestPlanUploadsOnlyLocalBinaries(t *testing.T) {
+// Only what travels is published, and a thing travels only under the
+// name_os_arch convention: the name says which machine it runs on. A host
+// build carries no platform and stays home - publishing it would hand a
+// consumer a binary with no way to know whether it runs.
+func TestPlanUploadsOnlyWhatTravels(t *testing.T) {
 	t.Parallel()
 
 	plan, err := artifactcontroller.New().Plan(citypes.ArtifactInput{
@@ -84,8 +88,8 @@ func TestPlanUploadsOnlyLocalBinaries(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	assert.Equal(t, []string{"/out/cli", "member/build/dist/rel_linux_amd64"}, plan.Uploads,
-		"binaries upload once each; images and generated files belong to whatever made them")
+	assert.Equal(t, []string{"member/build/dist/rel_linux_amd64"}, plan.Uploads,
+		"a platform-named binary uploads once; a host build, an image and a generated file never travel")
 }
 
 // The aggregated release is one per revision: everything built together is
@@ -147,4 +151,40 @@ func TestNextVersionRefusesSomethingThatIsNotAVersion(t *testing.T) {
 		_, err := artifactcontroller.NextVersion(previous)
 		require.ErrorIs(t, err, artifactcontroller.ErrPrevious, previous)
 	}
+}
+
+// Two repos that each build a command of the same name would upload one
+// asset over the other. The release refuses and names both sources, so the
+// fix is obvious: rename one, or stop declaring it public. Live case:
+// forge-ci and forge-factory each ship their own cmd/docgen.
+func TestTwoArtifactsClaimingOneAssetNameAreRefused(t *testing.T) {
+	t.Parallel()
+
+	_, err := artifactcontroller.New().Plan(citypes.ArtifactInput{
+		Revision: "abc123", Version: "v0.2.0",
+		Artifacts: []forge.Artifact{
+			{Name: "docgen_linux_amd64", Type: "binary", Location: "forge-ci/build/dist/docgen_linux_amd64"},
+			{Name: "docgen_linux_amd64", Type: "binary", Location: "forge-factory/build/dist/docgen_linux_amd64"},
+		},
+	})
+	require.ErrorIs(t, err, artifactcontroller.ErrCollision)
+	require.ErrorContains(t, err, "docgen_linux_amd64")
+	require.ErrorContains(t, err, "forge-ci/build/dist/docgen_linux_amd64")
+	require.ErrorContains(t, err, "forge-factory/build/dist/docgen_linux_amd64")
+}
+
+// The same name from the same path twice is one artifact recorded twice,
+// not a collision.
+func TestOneArtifactRecordedTwiceIsNotACollision(t *testing.T) {
+	t.Parallel()
+
+	plan, err := artifactcontroller.New().Plan(citypes.ArtifactInput{
+		Revision: "abc123", Version: "v0.2.0",
+		Artifacts: []forge.Artifact{
+			{Name: "forge_linux_amd64", Type: "binary", Location: "forge/build/dist/forge_linux_amd64"},
+			{Name: "forge_linux_amd64", Type: "binary", Location: "forge/build/dist/forge_linux_amd64"},
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, plan.Uploads, 1)
 }
