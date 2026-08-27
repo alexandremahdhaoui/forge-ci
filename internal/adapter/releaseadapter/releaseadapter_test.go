@@ -17,7 +17,9 @@ func TestTagPointsAVersionAtACommitAndPushes(t *testing.T) {
 	runner := execadaptermock.NewMockRunner(t)
 	runner.EXPECT().Run(mock.Anything, "/w/a", "git", "tag", "--list", "v0.2.0").
 		Return(execadapter.Result{}, nil).Once()
-	runner.EXPECT().Run(mock.Anything, "/w/a", "git", "tag", "v0.2.0", "abc123").
+	// Annotated with a message: a lightweight tag fails with "no tag
+	// message" wherever the machine's git config signs tags.
+	runner.EXPECT().Run(mock.Anything, "/w/a", "git", "tag", "-m", "v0.2.0", "v0.2.0", "abc123").
 		Return(execadapter.Result{}, nil).Once()
 	runner.EXPECT().Run(mock.Anything, "/w/a", "git", "push", "origin", "v0.2.0").
 		Return(execadapter.Result{}, nil).Once()

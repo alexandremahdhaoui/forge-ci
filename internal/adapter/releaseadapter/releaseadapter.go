@@ -58,7 +58,10 @@ func (g *GH) Tag(ctx context.Context, dir, version, sha string) error {
 		return fmt.Errorf("tagging %s: %s already exists and a tag is never moved", dir, version)
 	}
 
-	if _, err := g.run(ctx, dir, "tagging "+version, "git", "tag", version, sha); err != nil {
+	// Annotated, with the version as its message: a lightweight tag dies
+	// with "no tag message" on a machine whose global config signs tags,
+	// while an annotated tag works signed and unsigned alike.
+	if _, err := g.run(ctx, dir, "tagging "+version, "git", "tag", "-m", version, version, sha); err != nil {
 		return err
 	}
 
