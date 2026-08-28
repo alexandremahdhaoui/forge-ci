@@ -32,7 +32,6 @@ type Release struct {
 // Tool is one distributed binary across its platforms.
 type Tool struct {
 	Name      string              `json:"name"`
-	Version   string              `json:"version,omitempty"`
 	Platforms map[string]Platform `json:"platforms"`
 }
 
@@ -61,7 +60,15 @@ var platformSuffix = regexp.MustCompile(`^(.+)_([a-z0-9]+)_([a-z0-9]+)$`)
 // tool entry; anything else is a plain asset and stays out of the index.
 // The digests are what the adapter measured on the actual files - the
 // index never claims a byte nobody hashed.
-func BuildIndex(revision, version, createdAt string, release Release, files []UploadDigest) ([]byte, error) {
+// BuildIndex writes the index a consumer verifies against: the revision, the
+// release it travels in, and every binary's digest.
+//
+// It carries no per-tool version. The pipeline tags each member on its own
+// line, and a tool's binary name says nothing about which member built it -
+// so the only version available here was the release's own, stamped onto
+// every tool alike. An index saying forge is v0.1.5 when forge was tagged
+// v0.44.4 is worse than an index that does not say.
+func BuildIndex(revision, createdAt string, release Release, files []UploadDigest) ([]byte, error) {
 	if strings.TrimSpace(revision) == "" {
 		return nil, ErrRevision
 	}
@@ -85,7 +92,7 @@ func BuildIndex(revision, version, createdAt string, release Release, files []Up
 
 		tool, ok := byName[name]
 		if !ok {
-			tool = &Tool{Name: name, Version: version, Platforms: map[string]Platform{}}
+			tool = &Tool{Name: name, Platforms: map[string]Platform{}}
 			byName[name] = tool
 			names = append(names, name)
 		}

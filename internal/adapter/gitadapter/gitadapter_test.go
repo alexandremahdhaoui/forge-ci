@@ -201,3 +201,15 @@ func TestStagedIsTrueWhenTheIndexHoldsAnything(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, clean)
 }
+
+// The same rule as releaseadapter's: git sorts every tag, and a tag the
+// version rule cannot read is not a previous version.
+func TestLatestTagSkipsWhatTheVersionRuleCannotRead(t *testing.T) {
+	r := execadaptermock.NewMockRunner(t)
+	r.EXPECT().Run(mock.Anything, "/w/a", "git", "tag", "--sort=-v:refname").
+		Return(ok("v1.2\nwip\nv0.44.4\nv0.44.3\n"), nil).Once()
+
+	got, err := gitadapter.New(r).LatestTag(context.Background(), "/w/a")
+	require.NoError(t, err)
+	require.Equal(t, "v0.44.4", got)
+}

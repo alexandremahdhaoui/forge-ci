@@ -128,3 +128,38 @@ func TestTaggedAtSpotsAnAlreadyReleasedCommit(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, released)
 }
+
+// git sorts every tag a repo carries, and a repo that predates this pipeline
+// carries tags this pipeline cannot read. One of them sorting above the
+// release line was returned as the previous version, the version rule
+// rejected it as "not a semver tag", and publish reported that as machinery
+// failure - so nothing was tagged or released, for any member.
+func TestLatestTagSkipsWhatTheVersionRuleCannotRead(t *testing.T) {
+	t.Parallel()
+
+	for name, tc := range map[string]struct {
+		tags string
+		want string
+	}{
+		"a two-part legacy tag":   {"v1.2\nv0.44.4\nv0.44.3\n", "v0.44.4"},
+		"a word":                  {"wip\nv0.44.4\n", "v0.44.4"},
+		"build metadata":          {"v1.0.0+build\nv0.44.4\n", "v0.44.4"},
+		"a bare number":           {"2\nv0.44.4\n", "v0.44.4"},
+		"a prerelease is a tag":   {"v1.0.0-rc.1\nv0.44.4\n", "v1.0.0-rc.1"},
+		"nothing readable at all": {"v1.2\nwip\n", ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			runner := execadaptermock.NewMockRunner(t)
+			runner.EXPECT().Run(mock.Anything, "/w/a", "git", "tag", "--sort=-v:refname").
+				Return(execadapter.Result{Stdout: tc.tags}, nil).Once()
+
+			tag, err := releaseadapter.New(runner).LatestTag(t.Context(), "/w/a")
+			require.NoError(t, err)
+			// Nothing readable is the same as never tagged: the next
+			// version starts fresh rather than aborting the release.
+			require.Equal(t, tc.want, tag)
+		})
+	}
+}

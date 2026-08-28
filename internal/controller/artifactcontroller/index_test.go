@@ -14,7 +14,7 @@ func TestBuildIndexGroupsPlatformSuffixedUploads(t *testing.T) {
 	t.Parallel()
 
 	raw, err := artifactcontroller.BuildIndex(
-		"abc123def456", "v0.2.0", "2026-08-26T00:00:00Z",
+		"abc123def456", "2026-08-26T00:00:00Z",
 		artifactcontroller.Release{Tag: "dist-abc123def456"},
 		[]artifactcontroller.UploadDigest{
 			{Path: "/w/m/build/dist/alpha_linux_amd64", Digest: "aa", Size: 10},
@@ -33,7 +33,11 @@ func TestBuildIndexGroupsPlatformSuffixedUploads(t *testing.T) {
 
 	alpha := index.Tools[0]
 	assert.Equal(t, "alpha", alpha.Name)
-	assert.Equal(t, "v0.2.0", alpha.Version)
+	// No per-tool version. The pipeline tags each member on its own line
+	// and a binary's name says nothing about which member built it, so the
+	// only version available here was the release's own - stamped alike on
+	// tools tagged v0.44.4 and v0.1.5. A field that can only be filled in
+	// wrongly is better absent.
 	assert.Equal(t, "sha256:aa", alpha.Platforms["linux/amd64"].Digest)
 	assert.Equal(t, "alpha_linux_amd64", alpha.Platforms["linux/amd64"].Asset)
 	assert.Equal(t, "sha256:bb", alpha.Platforms["linux/arm64"].Digest)
@@ -44,7 +48,7 @@ func TestBuildIndexGroupsPlatformSuffixedUploads(t *testing.T) {
 func TestBuildIndexRefusesAmbiguityAndClaims(t *testing.T) {
 	t.Parallel()
 
-	_, err := artifactcontroller.BuildIndex("abc", "v0.1.0", "",
+	_, err := artifactcontroller.BuildIndex("abc", "",
 		artifactcontroller.Release{},
 		[]artifactcontroller.UploadDigest{
 			{Path: "x_linux_amd64", Digest: "aa"},
@@ -52,11 +56,11 @@ func TestBuildIndexRefusesAmbiguityAndClaims(t *testing.T) {
 		})
 	require.ErrorContains(t, err, "two binaries for linux/amd64")
 
-	_, err = artifactcontroller.BuildIndex("abc", "v0.1.0", "",
+	_, err = artifactcontroller.BuildIndex("abc", "",
 		artifactcontroller.Release{},
 		[]artifactcontroller.UploadDigest{{Path: "x_linux_amd64"}})
 	require.ErrorContains(t, err, "no digest")
 
-	_, err = artifactcontroller.BuildIndex("", "v0.1.0", "", artifactcontroller.Release{}, nil)
+	_, err = artifactcontroller.BuildIndex("", "", artifactcontroller.Release{}, nil)
 	require.ErrorIs(t, err, artifactcontroller.ErrRevision)
 }

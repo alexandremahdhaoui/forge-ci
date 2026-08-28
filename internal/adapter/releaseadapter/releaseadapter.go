@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/execadapter"
@@ -31,6 +32,12 @@ type GH struct {
 }
 
 var _ Publisher = (*GH)(nil)
+
+// semverTag is the tag shape the version rule reads: strict vMAJOR.MINOR.PATCH
+// with an optional prerelease. It is the same expression artifactcontroller
+// parses with, because a tag this does not match is a tag that cannot become
+// the next version.
+var semverTag = regexp.MustCompile(`^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z.-]+)?$`)
 
 func New(runner execadapter.Runner) *GH {
 	return &GH{runner: runner}
@@ -83,7 +90,13 @@ func (g *GH) LatestTag(ctx context.Context, dir string) (string, error) {
 	}
 
 	for _, line := range strings.Split(out, "\n") {
-		if tag := strings.TrimSpace(line); tag != "" {
+		// Only a tag the version rule can read. git sorts every tag it
+		// has, so one legacy tag sorting above the release line - "v1.2",
+		// "wip" - was returned as the previous version, and the whole
+		// release then failed on "not a semver tag", for every member.
+		// A repo that carries release history from before this pipeline
+		// existed is exactly the case this has to survive.
+		if tag := strings.TrimSpace(line); semverTag.MatchString(tag) {
 			return tag, nil
 		}
 	}

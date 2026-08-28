@@ -273,7 +273,7 @@ func stageAssets(root string, plan artifactcontroller.Plan, uploads []string, re
 	}
 
 	index, err := artifactcontroller.BuildIndex(
-		revision, plan.Version, time.Now().UTC().Format(time.RFC3339),
+		revision, time.Now().UTC().Format(time.RFC3339),
 		artifactcontroller.Release{Tag: plan.DistTag}, digests)
 	if err != nil {
 		return nil, err

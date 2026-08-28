@@ -6,7 +6,7 @@ go 1.26.5
 
 require (
 	github.com/alexandremahdhaoui/forge v0.43.0
-	github.com/alexandremahdhaoui/forge-revision-spec v0.3.0
+	github.com/alexandremahdhaoui/forge-revision-spec v0.3.1
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/stretchr/testify v1.12.1
 	golang.org/x/crypto v0.55.0
