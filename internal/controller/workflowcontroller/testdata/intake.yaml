@@ -38,6 +38,8 @@ jobs:
           echo "$HOME/go/bin" >> "$GITHUB_PATH"
 
       - name: Run the register pipeline
+        env:
+          WORKSPACE_TOKEN: ${{ secrets.WORKSPACE_TOKEN }}
         run: |
           cd golden-register
           touch .envrc

@@ -732,3 +732,56 @@ func TestAWorkflowThatPublishesNothingCarriesNoToken(t *testing.T) {
 	assert.NotContains(t, got, "GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}")
 	assert.NotContains(t, got, "packages: write")
 }
+
+// TestTheWorkflowSecretReachesTheCommandAndNotOnlyTheCheckout pins the gap
+// that failed the pipeline at its real work.
+//
+// An apply reconciles the resources it declares before it runs anything, and
+// a sealed Actions secret is realized by PUTTING it: the API is write-only,
+// so a put is the only convergence there is, and a put needs the value. The
+// secret reached the checkout step's git config and nothing else, so every
+// run died on "environment variable WORKSPACE_TOKEN is empty" - advice
+// written for an operator's laptop, printed inside a runner that has no
+// .envrc to fix.
+func TestTheWorkflowSecretReachesTheCommandAndNotOnlyTheCheckout(t *testing.T) {
+	t.Parallel()
+
+	rendered, err := workflowcontroller.RenderAll(workflowcontroller.Spec{
+		Dir: "workspace",
+		Ref: "main",
+		Workflows: []workflowcontroller.WorkflowSpec{{
+			Name:    "pipeline",
+			Kind:    "command",
+			Events:  []string{"member-pushed"},
+			Secret:  "WORKSPACE_TOKEN",
+			Command: "forge-ci apply --config forge-ci.yaml --root .",
+		}},
+	})
+	require.NoError(t, err)
+
+	got := rendered[0].Content
+
+	assert.Contains(t, got, "WORKSPACE_TOKEN: ${{ secrets.WORKSPACE_TOKEN }}",
+		"the apply re-seals this secret, so it needs the value")
+	assert.Contains(t, got, "x-access-token:${{ secrets.WORKSPACE_TOKEN }}",
+		"the checkout still gets it too")
+}
+
+// A workflow that names no secret carries none. A credential in an
+// environment is a credential something can read.
+func TestAWorkflowWithNoSecretCarriesNoSecretEnv(t *testing.T) {
+	t.Parallel()
+
+	rendered, err := workflowcontroller.RenderAll(workflowcontroller.Spec{
+		Dir: "workspace",
+		Ref: "main",
+		Workflows: []workflowcontroller.WorkflowSpec{{
+			Name:    "check",
+			Kind:    "command",
+			Cron:    "0 * * * *",
+			Command: "forge test-all",
+		}},
+	})
+	require.NoError(t, err)
+	assert.NotContains(t, rendered[0].Content, "secrets.WORKSPACE_TOKEN")
+}

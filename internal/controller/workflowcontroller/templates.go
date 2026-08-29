@@ -112,11 +112,23 @@ func renderCommand(spec Spec, w WorkflowSpec) string {
 	//
 	// secrets.GITHUB_TOKEN is injected by Actions. There is no secret to
 	// create, seal or rotate.
-	if len(w.PayloadEnv) > 0 || w.Token {
+	if len(w.PayloadEnv) > 0 || w.Token || w.Secret != "" {
 		b.WriteString("        env:\n")
 
 		if w.Token {
 			b.WriteString("          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}\n")
+		}
+
+		// The workflow's own secret, by its own name. A run reconciles the
+		// resources it declares before it does anything else, and a sealed
+		// Actions secret is realized by PUTTING it: the API is write-only,
+		// so a put is the only convergence there is, and a put needs the
+		// value. Without this the secret reaches the checkout step and
+		// nothing else, and every apply died on "environment variable
+		// WORKSPACE_TOKEN is empty" - advice written for an operator's
+		// laptop, printed inside a runner where there is no .envrc to fix.
+		if w.Secret != "" {
+			fmt.Fprintf(&b, "          %s: ${{ secrets.%s }}\n", w.Secret, w.Secret)
 		}
 
 		for _, field := range w.PayloadEnv {

@@ -42,6 +42,7 @@ jobs:
 
       - name: File the request
         env:
+          WORKSPACE_TOKEN: ${{ secrets.WORKSPACE_TOKEN }}
           ECOSYSTEM: ${{ github.event.client_payload.ecosystem }}
           PACKAGE: ${{ github.event.client_payload.package }}
           TRACK: ${{ github.event.client_payload.track }}
