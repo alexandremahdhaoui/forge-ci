@@ -66,7 +66,12 @@ func renderCommand(spec Spec, w WorkflowSpec) string {
 	}
 
 	if len(w.Events) > 0 {
-		fmt.Fprintf(&b, "  repository_dispatch:\n    types: [%s]\n", strings.Join(w.Events, ", "))
+		// workflow_dispatch as well, always. A workflow only another repo
+		// can fire cannot be tested by the person who just changed it, and
+		// an untestable workflow is how one of these went eight days
+		// without completing a single run.
+		fmt.Fprintf(&b, "  repository_dispatch:\n    types: [%s]\n  workflow_dispatch: {}\n",
+			strings.Join(w.Events, ", "))
 	}
 
 	job := w.Job
@@ -114,16 +119,25 @@ func renderCommand(spec Spec, w WorkflowSpec) string {
 	return b.String()
 }
 
-// reportsFailure answers whether a workflow needs to raise its own alarm. A
-// scheduled run has no audience: nobody typed it and nobody is waiting on
+// reportsFailure answers whether a workflow needs to raise its own alarm.
+//
+// A scheduled run has no audience: nobody typed it and nobody is waiting on
 // it, so a red run is a red icon on a page nobody opens. One instance failed
 // every morning for eight days that way, and the first person to look found
 // it by listing runs on a hunch.
 //
-// A dispatched run has the person who dispatched it, so it reports nothing
-// and files nothing.
+// A repository_dispatch run has no audience either, and that is easy to get
+// wrong. Somebody caused it, so it looks attended - but they caused it from
+// another repo. A member push that fans out to a workspace pipeline is read
+// by a person watching the member's own checks, not the workspace's, and a
+// consumer filing an admission request never sees the register's run list at
+// all.
+//
+// What is left is a push to this repo and a workflow_dispatch somebody
+// typed. Both have a person already looking at this repo's checks, so they
+// file nothing.
 func reportsFailure(w WorkflowSpec) bool {
-	return w.Cron != ""
+	return w.Cron != "" || len(w.Events) > 0
 }
 
 // writeFailureReport renders the step that opens an issue when the run
@@ -143,14 +157,14 @@ func writeFailureReport(b *strings.Builder, w WorkflowSpec) {
         if: failure()
         env:
           GH_TOKEN: ${{ github.token }}
-          TITLE: "scheduled %s is failing"
+          TITLE: "%s is failing"
         run: |
           open=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "$TITLE in:title" --json number --jq length)
           if [ "$open" -gt 0 ]; then
             echo "an issue is already open for this; not filing another"
             exit 0
           fi
-          gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID failed. Nobody is watching a scheduled run, so it says so here. Close this once a run goes green; a failure after that files a new one."
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID failed. Nothing else reports this run, so it reports itself. Close this once a run goes green; a failure after that files a new one."
 `, w.Name)
 }
 

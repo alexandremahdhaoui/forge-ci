@@ -13,9 +13,11 @@ name: request
 on:
   repository_dispatch:
     types: [admission-request]
+  workflow_dispatch: {}
 
 permissions:
   contents: write
+  issues: write
 
 jobs:
   file:
@@ -54,3 +56,16 @@ jobs:
             ${REQUESTER:+--requester "$REQUESTER"} \
             --reason "$REASON" \
             "$ECOSYSTEM:$PACKAGE"
+
+      - name: Say that the run failed
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TITLE: "request is failing"
+        run: |
+          open=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "$TITLE in:title" --json number --jq length)
+          if [ "$open" -gt 0 ]; then
+            echo "an issue is already open for this; not filing another"
+            exit 0
+          fi
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID failed. Nothing else reports this run, so it reports itself. Close this once a run goes green; a failure after that files a new one."

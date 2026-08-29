@@ -635,7 +635,41 @@ func TestOnlyAScheduledWorkflowRaisesItsOwnAlarm(t *testing.T) {
 	assert.Contains(t, scheduled, "GH_TOKEN: ${{ github.token }}",
 		"reporting a failure must not need a secret somebody has to remember to seal")
 
+	// A repository_dispatch run looks attended and is not: somebody caused
+	// it from another repo, and they are watching that repo's checks. This
+	// was gated on cron alone until a second workspace needed a
+	// member-pushed pipeline and the hole showed.
 	dispatched := byName["request"]
-	assert.NotContains(t, dispatched, "Say that the run failed",
-		"a dispatched run has the person who dispatched it")
+	assert.Contains(t, dispatched, "- name: Say that the run failed",
+		"a run somebody triggered from another repo has no audience here")
+	assert.Contains(t, dispatched, "issues: write")
+
+	// A push to this repo, or a workflow_dispatch somebody typed, has a
+	// person already looking at these checks.
+	assert.NotContains(t, byName["propagate"], "Say that the run failed",
+		"a tag push here is watched by whoever pushed the tag")
+}
+
+// TestEveryGeneratedWorkflowCanBeFiredByHand pins the trigger that makes a
+// workflow testable.
+//
+// A workflow only a schedule or another repo can fire cannot be run by the
+// person who just changed it. They push the change and wait, which is how one
+// of these went eight days without completing a run: nobody could try it, so
+// nobody did.
+func TestEveryGeneratedWorkflowCanBeFiredByHand(t *testing.T) {
+	t.Parallel()
+
+	files, err := workflowcontroller.RenderAll(registerSpec())
+	require.NoError(t, err)
+
+	for _, f := range files {
+		if !strings.Contains(f.Content, "schedule:") &&
+			!strings.Contains(f.Content, "repository_dispatch:") {
+			continue
+		}
+
+		assert.Containsf(t, f.Content, "workflow_dispatch: {}",
+			"%s can only be fired by something other than a person, so nobody can test it", f.Name)
+	}
 }
