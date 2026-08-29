@@ -250,6 +250,17 @@ func expandAssets(root string, uploads []string, spec map[string]any) ([]string,
 	return out, nil
 }
 
+// resolveUpload places one upload against the root. An artifact record may
+// already carry an absolute path, in which case the root says nothing about
+// it.
+func resolveUpload(root, upload string) string {
+	if filepath.IsAbs(upload) {
+		return upload
+	}
+
+	return filepath.Join(root, upload)
+}
+
 // stageAssets resolves the uploads against the root, digests each one, and
 // writes the distribution index beside them in a staging dir. The index is
 // built from the measured digests, never from claims.
@@ -258,9 +269,20 @@ func stageAssets(root string, plan artifactcontroller.Plan, uploads []string, re
 	digests := make([]artifactcontroller.UploadDigest, 0, len(uploads))
 
 	for _, upload := range uploads {
-		path := upload
-		if !filepath.IsAbs(path) {
-			path = filepath.Join(root, path)
+		// Absolute, not merely joined. gh runs in <root>/<releaseIn>, one
+		// level below the root these paths are joined from, so a path that
+		// is still relative here resolves against the wrong directory and
+		// the release fails on "no matches found" for a file that is on
+		// disk. Joining is not enough on its own: filepath.Join("." , x)
+		// is a clean relative path and looks correct right up to the point
+		// something else supplies the working directory.
+		//
+		// The driver absolutises the root already. This does not trust
+		// that, because the cost is one syscall and the failure it
+		// prevents lands after the tags are cut.
+		path, err := filepath.Abs(resolveUpload(root, upload))
+		if err != nil {
+			return nil, fmt.Errorf("resolving upload %s: %w", upload, err)
 		}
 
 		digest, size, err := releaseadapter.DigestFile(path)

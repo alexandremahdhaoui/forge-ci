@@ -13,6 +13,7 @@ import (
 	"github.com/alexandremahdhaoui/forge-ci/internal/driver/clidriver"
 	"github.com/alexandremahdhaoui/forge-ci/internal/mocks/clidrivermock"
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
+	"github.com/alexandremahdhaoui/forge-ci/pkg/config"
 	"github.com/alexandremahdhaoui/forge/pkg/forge"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -399,4 +400,55 @@ func TestGraphPropagatesAnError(t *testing.T) {
 	err := clidriver.New(&bytes.Buffer{}, r).
 		Run(context.Background(), []string{"graph", "--config", write(t, minimal)})
 	require.ErrorIs(t, err, errBoom)
+}
+
+// The root reaches every engine as spec["root"]. The release engine builds
+// two things from it that only agree while it is absolute: the directory gh
+// runs in, <root>/<releaseIn>, and the asset paths gh is asked to upload.
+//
+// With --root . both joins look clean and mean different places, because gh
+// runs one level down. A release then fails on "no matches found" for a file
+// that is on disk - at the last step, after the build and publish stages
+// passed and the tags are already cut.
+//
+// --root . is the form the operator runbook prints, so this was reachable by
+// following the documentation. Deriving the root from the config file
+// already absolutised it; an explicit one took the other branch.
+func TestTheRootReachesTheEnginesAbsolute(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "forge-ci.yaml")
+	require.NoError(t, os.WriteFile(cfgPath, []byte(minimal), 0o600))
+
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(dir))
+
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+
+	for name, args := range map[string][]string{
+		"a dot root":      {"apply", "--config", "forge-ci.yaml", "--root", "."},
+		"a relative root": {"apply", "--config", "forge-ci.yaml", "--root", "./"},
+		"no root at all":  {"apply", "--config", "forge-ci.yaml"},
+		"an absolute root": {
+			"apply", "--config", "forge-ci.yaml", "--root", dir,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var seen string
+
+			r := clidrivermock.NewMockReconciler(t)
+			r.EXPECT().Apply(mock.Anything, mock.Anything, mock.Anything).
+				RunAndReturn(func(_ context.Context, _ config.Pipeline, root string) (reconcilecontroller.Report, error) {
+					seen = root
+
+					return passingReport(), nil
+				}).Once()
+
+			var out bytes.Buffer
+
+			require.NoError(t, clidriver.New(&out, r).Run(context.Background(), args))
+			require.True(t, filepath.IsAbs(seen),
+				"engines join paths against this and gh runs one level down; got %q", seen)
+		})
+	}
 }

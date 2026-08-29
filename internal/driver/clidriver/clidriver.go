@@ -120,6 +120,21 @@ func (d *Driver) load(verb string, args []string) (config.Pipeline, string, erro
 		return config.Pipeline{}, "", err
 	}
 
+	// The root is absolute from here on, whichever way it arrived. It
+	// reaches every engine as spec["root"], and the release engine builds
+	// two things from it that only agree while it is absolute: the
+	// directory gh runs in, and the asset paths gh is asked to upload.
+	//
+	// With --root . both joins look clean and mean different places. gh
+	// runs in <root>/<releaseIn>, one level down, so a relative asset path
+	// joined from the same root resolves against THAT directory instead of
+	// the workspace root, and a release fails on "no matches found" for a
+	// file that is sitting on disk. It fails at the last step, after the
+	// build and publish stages have passed and the tags are already cut.
+	//
+	// Deriving the root from the config file already absolutised it. An
+	// explicit one took the other branch and stayed relative, which is the
+	// form the operator runbook tells people to type.
 	if *root == "" {
 		abs, err := filepath.Abs(*path)
 		if err != nil {
@@ -129,7 +144,12 @@ func (d *Driver) load(verb string, args []string) (config.Pipeline, string, erro
 		*root = filepath.Dir(abs)
 	}
 
-	return p, *root, nil
+	abs, err := filepath.Abs(*root)
+	if err != nil {
+		return config.Pipeline{}, "", fmt.Errorf("resolving %s: %w", *root, err)
+	}
+
+	return p, abs, nil
 }
 
 func (d *Driver) reportOf(
