@@ -17,7 +17,7 @@ An uncommitted edit counts as a move, which is what you want on a laptop.
 
 | Tool | Does |
 |---|---|
-| `declare` | Report the resources this trigger needs. It needs none. |
+| `declare` | Report the workflows that make the watch list true. None without spec.notify. |
 | `poll` | Fingerprint the watched repos and compare with spec.previous. |
 
 ## By hand
@@ -33,11 +33,12 @@ echo '{"spec":{"watch":["../my-repo"],"previous":""}}' \
 engines:
   - alias: my-trigger
     type: trigger
-    engine: "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-trigger-watch@v0.1.4"
+    engine: "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-trigger-watch@v0.1.5"
     manager: local
     spec:
       watch: <list of string>
       previous: <string>
+      notify: <object>
 ```
 
 ## Worth knowing

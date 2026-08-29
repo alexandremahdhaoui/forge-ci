@@ -1,6 +1,6 @@
 name: ci-trigger-watch
 port: trigger
-version: v0.1.4
+version: v0.1.5
 tagline: Fingerprint the watched repos and say whether they moved.
 why: 'It is stateless. It reports a fingerprint and compares it to the one you hand it,
 
@@ -10,7 +10,7 @@ why: 'It is stateless. It reports a fingerprint and compares it to the one you h
   An uncommitted edit counts as a move, which is what you want on a laptop.'
 tools:
 - name: declare
-  does: Report the resources this trigger needs. It needs none.
+  does: Report the workflows that make the watch list true. None without spec.notify.
 - name: poll
   does: Fingerprint the watched repos and compare with spec.previous.
 example:
@@ -28,3 +28,12 @@ spec:
   type: string
   required: false
   means: The last fingerprint. Omit it and the first look counts as changed.
+- key: notify
+  type: object
+  required: false
+  means: 'Declare the workflow that makes a watched repo report its own pushes. Nothing
+    on GitHub starts a workflow in one repo when another moves, so a watched repo has
+    to send a repository_dispatch and something has to put that workflow there. Omit
+    this key and the engine declares nothing, which is what it did before. Keys: owner,
+    factory, eventType and secret are required; workflow defaults to notify, branch
+    to main, and fromEnv to the secret name.'

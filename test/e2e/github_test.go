@@ -124,9 +124,14 @@ engines:
   - alias: on-change
     type: trigger
     engine: "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-trigger-watch@v0.1.0"
-    manager: local
+    manager: github
     spec:
       watch: ["` + filepath.Join(root, "demo-repo") + `"]
+      notify:
+        owner: acme
+        factory: demo-factory
+        eventType: member-pushed
+        secret: FORGE_CI_DISPATCH_TOKEN
   - alias: all-pass
     type: promotion
     engine: "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-promotion-all@v0.1.0"
@@ -157,6 +162,8 @@ stages:
 func TestTheGitHubSurfaceIsProvisionedAndConverged(t *testing.T) {
 	fake, srv := newGHFake(t)
 	t.Setenv("GITHUB_TOKEN", "pat-under-test")
+	t.Setenv("FORGE_CI_GITHUB_TOKEN", "pat-under-test")
+	t.Setenv("FORGE_CI_DISPATCH_TOKEN", "dispatch-pat-under-test")
 
 	root, statePath := workspace(t, "true")
 	require.NoError(t, os.WriteFile(filepath.Join(root, "forge-ci.yaml"),
@@ -182,6 +189,19 @@ func TestTheGitHubSurfaceIsProvisionedAndConverged(t *testing.T) {
 	require.Contains(t, fake.secrets, "FORGE_CI_GITHUB_TOKEN")
 	require.Contains(t, fake.enabled, "release.yaml")
 	require.Contains(t, fake.enabled, "ci-runner.yaml")
+
+	// The watch list provisioned its own notify workflow: the same list
+	// that decides what counts as a move now also puts the workflow that
+	// reports one into every watched repo.
+	notifyFile := filepath.Join(root, "demo-repo", ".github", "workflows", "notify.yaml")
+	require.FileExists(t, notifyFile)
+	require.Contains(t, fake.secrets, "FORGE_CI_DISPATCH_TOKEN")
+	require.Contains(t, fake.enabled, "notify.yaml")
+
+	notify, err := os.ReadFile(notifyFile)
+	require.NoError(t, err)
+	require.Contains(t, string(notify), "gh api repos/acme/demo-factory/dispatches")
+	require.Contains(t, string(notify), "event_type=member-pushed")
 
 	ownership, err := os.ReadFile(filepath.Join(root, "manager-github.json"))
 	require.NoError(t, err)

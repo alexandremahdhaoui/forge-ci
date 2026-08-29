@@ -364,3 +364,60 @@ func TestAContainerReleaseWithNothingToPublishFails(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "no container artifact was built")
 }
+
+// The wire is where the types are really checked. Declare returns a nested
+// object inside every resource spec, and a nested object is exactly the shape
+// that has broken over MCP before.
+func TestTheWatchTriggerDeclaresItsNotifyWorkflowsOverMCP(t *testing.T) {
+	var out citypes.DeclareOutput
+
+	err := caller().Call(context.Background(),
+		"forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-trigger-watch@v0.1.0",
+		"declare",
+		map[string]any{"spec": map[string]any{
+			"watch": []any{"one", "two"},
+			"notify": map[string]any{
+				"owner":     "an-owner",
+				"factory":   "a-factory",
+				"eventType": "member-pushed",
+				"secret":    "A_TOKEN",
+			},
+		}}, &out)
+	require.NoError(t, err)
+
+	kinds := map[string]string{}
+	for _, r := range out.Resources {
+		kinds[r.Name] = r.Kind
+	}
+
+	require.Equal(t, map[string]string{
+		"one/.github/workflows/notify.yaml": "file-content",
+		"an-owner/one/A_TOKEN":              "actions-secret",
+		"an-owner/one/notify.yaml":          "workflow-enabled",
+		"two/.github/workflows/notify.yaml": "file-content",
+		"an-owner/two/A_TOKEN":              "actions-secret",
+		"an-owner/two/notify.yaml":          "workflow-enabled",
+	}, kinds)
+
+	for _, r := range out.Resources {
+		if r.Name != "one/.github/workflows/notify.yaml" {
+			continue
+		}
+
+		content, ok := r.Spec["content"].(string)
+		require.True(t, ok, "content must survive the wire as a string")
+		require.Contains(t, content, "gh api repos/an-owner/a-factory/dispatches")
+		require.Contains(t, content, "${{ secrets.A_TOKEN }}")
+	}
+}
+
+func TestTheWatchTriggerDeclaresNothingWithoutANotifyBlockOverMCP(t *testing.T) {
+	var out citypes.DeclareOutput
+
+	err := caller().Call(context.Background(),
+		"forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-trigger-watch@v0.1.0",
+		"declare",
+		map[string]any{"spec": map[string]any{"watch": []any{"one"}}}, &out)
+	require.NoError(t, err)
+	require.Empty(t, out.Resources)
+}

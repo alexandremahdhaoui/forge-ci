@@ -287,8 +287,8 @@ func (c *Controller) Declare(raw map[string]any) (citypes.DeclareOutput, error) 
 		}
 
 		resources = append(resources, citypes.Resource{
-			Kind: managercontroller.KindActionsSecret,
-			Name: spec.Repo + "/" + s.Name,
+			Kind:          managercontroller.KindActionsSecret,
+			Name:          spec.Repo + "/" + s.Name,
 			BootstrapOnly: true,
 			Spec:          map[string]any{"repo": spec.Repo, "secret": s.Name, "fromEnv": s.FromEnv},
 		})

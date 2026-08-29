@@ -23,8 +23,27 @@ func New(git gitadapter.Git) *Controller {
 	return &Controller{git: git}
 }
 
-func (c *Controller) Declare(map[string]any) (citypes.DeclareOutput, error) {
-	return citypes.DeclareOutput{Resources: []citypes.Resource{}}, nil
+func (c *Controller) Declare(spec map[string]any) (citypes.DeclareOutput, error) {
+	notify, err := parseNotify(spec)
+	if err != nil {
+		return citypes.DeclareOutput{}, err
+	}
+
+	if notify == nil {
+		return citypes.DeclareOutput{Resources: []citypes.Resource{}}, nil
+	}
+
+	watched, err := watchList(spec)
+	if err != nil {
+		return citypes.DeclareOutput{}, err
+	}
+
+	resources, err := notifyResources(watched, notify)
+	if err != nil {
+		return citypes.DeclareOutput{}, err
+	}
+
+	return citypes.DeclareOutput{Resources: resources}, nil
 }
 
 func (c *Controller) Poll(ctx context.Context, spec map[string]any) (citypes.TriggerOutput, error) {
