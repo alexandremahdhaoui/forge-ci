@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
@@ -30,13 +29,15 @@ var semver = regexp.MustCompile(`^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-
 // the decision is testable and the engine only has to carry it out.
 type Plan struct {
 	Version string
+
+	// TagName is the one tag every member carries and the release is created
+	// under: the version, with the factory's prefix in front of it when it
+	// has one. One number for the whole workspace, so a consumer who knows
+	// the version of one member knows the version of all of them.
+	TagName string
+
 	Tags    []Tag
 	Uploads []string
-
-	// DistTag names the aggregated release: one per revision, carrying every
-	// upload plus the index that maps the revision to their digests. The
-	// register/revision is one thing - built together, released together.
-	DistTag string
 }
 
 // Tag is one repo to tag at one commit.
@@ -57,35 +58,6 @@ func (c *Controller) Declare(_ map[string]any) (citypes.DeclareOutput, error) {
 	return citypes.DeclareOutput{Resources: []citypes.Resource{}}, nil
 }
 
-// NextVersion is the version after the highest tag already released. A
-// workspace that has never released starts at v0.1.0.
-//
-// The bump is the patch. A minor or a major is a claim about what changed, and
-// nothing here can read that off a diff, so those are named by hand and this
-// only moves the number nobody has an opinion about.
-func NextVersion(previous string) (string, error) {
-	if strings.TrimSpace(previous) == "" {
-		return "v0.1.0", nil
-	}
-
-	m := semver.FindStringSubmatch(previous)
-	if m == nil {
-		return "", fmt.Errorf("%w: %q", ErrPrevious, previous)
-	}
-
-	// A prerelease is released as the version it was a candidate for.
-	if m[4] != "" {
-		return fmt.Sprintf("v%s.%s.%s", m[1], m[2], m[3]), nil
-	}
-
-	patch, err := strconv.Atoi(m[3])
-	if err != nil {
-		return "", fmt.Errorf("%w: %q", ErrPrevious, previous)
-	}
-
-	return fmt.Sprintf("v%s.%s.%d", m[1], m[2], patch+1), nil
-}
-
 // Plan decides what to publish. A revision that was never proven, or one minted
 // over uncommitted work, is refused rather than released.
 func (c *Controller) Plan(in citypes.ArtifactInput) (Plan, error) {
@@ -103,9 +75,9 @@ func (c *Controller) Plan(in citypes.ArtifactInput) (Plan, error) {
 
 	plan := Plan{
 		Version: in.Version,
+		TagName: TagName(in.TagPrefix, in.Version),
 		Tags:    []Tag{},
 		Uploads: []string{},
-		DistTag: "dist-" + in.Revision,
 	}
 
 	names := make([]string, 0, len(in.Repos))

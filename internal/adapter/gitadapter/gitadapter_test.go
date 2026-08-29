@@ -202,14 +202,55 @@ func TestStagedIsTrueWhenTheIndexHoldsAnything(t *testing.T) {
 	require.False(t, clean)
 }
 
-// The same rule as releaseadapter's: git sorts every tag, and a tag the
-// version rule cannot read is not a previous version.
+// git sorts every tag a repo carries, and a repo that predates this pipeline
+// carries tags this pipeline cannot read.
 func TestLatestTagSkipsWhatTheVersionRuleCannotRead(t *testing.T) {
 	r := execadaptermock.NewMockRunner(t)
-	r.EXPECT().Run(mock.Anything, "/w/a", "git", "tag", "--sort=-v:refname").
+	r.EXPECT().Run(mock.Anything, "/w/a", "git", "tag", "--sort=-v:refname", "--list", "v[0-9]*").
 		Return(ok("v1.2\nwip\nv0.44.4\nv0.44.3\n"), nil).Once()
 
-	got, err := gitadapter.New(r).LatestTag(context.Background(), "/w/a")
+	got, err := gitadapter.New(r).LatestTag(context.Background(), "/w/a", "")
 	require.NoError(t, err)
 	require.Equal(t, "v0.44.4", got)
+}
+
+// A prefix is a namespace. Reading another prefix's tag as this line's
+// previous version is how two factories sharing one repo take turns
+// overwriting each other, so the prefix is stripped and a tag without it is
+// not this line's history.
+func TestLatestTagReadsOnlyItsOwnPrefix(t *testing.T) {
+	r := execadaptermock.NewMockRunner(t)
+	r.EXPECT().Run(mock.Anything, "/w/a", "git", "tag", "--sort=-v:refname", "--list", "forge-v[0-9]*").
+		Return(ok("forge-v0.50.0\nforge-v0.49.0\n"), nil).Once()
+
+	got, err := gitadapter.New(r).LatestTag(context.Background(), "/w/a", "forge")
+	require.NoError(t, err)
+	require.Equal(t, "v0.50.0", got, "the prefix is a namespace, not part of the version")
+}
+
+// SubjectsSince is what the semantic strategy reads. A tag the repo does not
+// carry answers the whole history, because a member joining a line that
+// already exists brings all of itself with it.
+func TestSubjectsSinceReadsTheWholeHistoryWhenTheTagIsUnknown(t *testing.T) {
+	r := execadaptermock.NewMockRunner(t)
+	r.EXPECT().Run(mock.Anything, "/w/a", "git", "tag", "--list", "v0.49.0").
+		Return(ok(""), nil).Once()
+	r.EXPECT().Run(mock.Anything, "/w/a", "git", "log", "--no-merges", "--format=%s").
+		Return(ok("feat: one\nfix: two\n"), nil).Once()
+
+	got, err := gitadapter.New(r).SubjectsSince(context.Background(), "/w/a", "v0.49.0")
+	require.NoError(t, err)
+	require.Equal(t, []string{"feat: one", "fix: two"}, got)
+}
+
+func TestSubjectsSinceReadsTheRangeWhenTheTagIsKnown(t *testing.T) {
+	r := execadaptermock.NewMockRunner(t)
+	r.EXPECT().Run(mock.Anything, "/w/a", "git", "tag", "--list", "v0.49.0").
+		Return(ok("v0.49.0\n"), nil).Once()
+	r.EXPECT().Run(mock.Anything, "/w/a", "git", "log", "--no-merges", "--format=%s", "v0.49.0..HEAD").
+		Return(ok("feat: only the new one\n"), nil).Once()
+
+	got, err := gitadapter.New(r).SubjectsSince(context.Background(), "/w/a", "v0.49.0")
+	require.NoError(t, err)
+	require.Equal(t, []string{"feat: only the new one"}, got)
 }

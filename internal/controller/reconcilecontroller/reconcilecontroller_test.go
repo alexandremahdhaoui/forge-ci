@@ -17,12 +17,31 @@ import (
 
 var errBoom = errors.New("boom")
 
-func gitAt(t *testing.T, sha string) *gitadaptermock.MockGit {
+// noRepoGit is a git nobody asks a commit of. Every apply still derives a
+// version, so a tag line must answer even when the pipeline has no repos.
+func noRepoGit(t *testing.T) *gitadaptermock.MockGit {
 	t.Helper()
+
+	git := gitadaptermock.NewMockGit(t)
+	git.EXPECT().LatestTag(mock.Anything, mock.Anything, mock.Anything).Return("", nil).Maybe()
+
+	return git
+}
+
+// gitAt is a checkout at one commit. previous is the version line the release
+// reads back, and defaults to none, which is a workspace that never released.
+func gitAt(t *testing.T, sha string, previous ...string) *gitadaptermock.MockGit {
+	t.Helper()
+
+	last := ""
+	if len(previous) > 0 {
+		last = previous[0]
+	}
 
 	git := gitadaptermock.NewMockGit(t)
 	git.EXPECT().HeadSHA(mock.Anything, mock.Anything).Return(sha, nil).Maybe()
 	git.EXPECT().WorktreeHash(mock.Anything, mock.Anything).Return("", nil).Maybe()
+	git.EXPECT().LatestTag(mock.Anything, mock.Anything, mock.Anything).Return(last, nil).Maybe()
 
 	return git
 }
@@ -433,7 +452,7 @@ func TestAPipelineWithNoReposStillResolvesARevision(t *testing.T) {
 	p := pipeline(stage("build", substage("default", []string{"self"})))
 	p.Repos = nil
 
-	report, err := reconcilecontroller.New(f.caller(), gitadaptermock.NewMockGit(t), clock()).
+	report, err := reconcilecontroller.New(f.caller(), noRepoGit(t), clock()).
 		Apply(context.Background(), p, "/work")
 	require.NoError(t, err)
 	require.NotEmpty(t, report.Revision.ID)
@@ -473,7 +492,7 @@ func TestAnUncommittedChangeIsANewRevisionAndReruns(t *testing.T) {
 	f := newFakeEngines(t)
 	p := pipeline(stage("build", substage("default", []string{"build"})))
 
-	clean := gitadaptermock.NewMockGit(t)
+	clean := noRepoGit(t)
 	clean.EXPECT().HeadSHA(mock.Anything, mock.Anything).Return("abc", nil).Maybe()
 	clean.EXPECT().WorktreeHash(mock.Anything, mock.Anything).Return("", nil).Maybe()
 
@@ -483,7 +502,7 @@ func TestAnUncommittedChangeIsANewRevisionAndReruns(t *testing.T) {
 	require.NotContains(t, first.Revision.ID, "-dirty")
 	require.Equal(t, 1, f.counted(call{uriCompute, "run"}))
 
-	dirty := gitadaptermock.NewMockGit(t)
+	dirty := noRepoGit(t)
 	dirty.EXPECT().HeadSHA(mock.Anything, mock.Anything).Return("abc", nil).Maybe()
 	dirty.EXPECT().WorktreeHash(mock.Anything, mock.Anything).Return("wt1", nil).Maybe()
 
@@ -503,7 +522,7 @@ func TestEditingAgainIsAnotherRevision(t *testing.T) {
 	ids := map[string]bool{}
 
 	for _, worktree := range []string{"wt1", "wt2", "wt3"} {
-		git := gitadaptermock.NewMockGit(t)
+		git := noRepoGit(t)
 		git.EXPECT().HeadSHA(mock.Anything, mock.Anything).Return("abc", nil).Maybe()
 		git.EXPECT().WorktreeHash(mock.Anything, mock.Anything).Return(worktree, nil).Maybe()
 
@@ -634,21 +653,23 @@ func TestAStageAfterTheMintingOneStillSeesTheRevision(t *testing.T) {
 
 func TestAStageThatDeclaresAReleasePublishesWhatItProved(t *testing.T) {
 	f := newFakeEngines(t)
-	c := reconcilecontroller.New(f.caller(), gitAt(t, "abc123"), clock())
+
+	git := gitAt(t, "abc123", "v0.1.9")
+
+	c := reconcilecontroller.New(f.caller(), git, clock())
 
 	p := pipeline(releasingStage("build", substage("default", []string{"build"})))
-	p.Version = "v0.2.0"
 
 	report, err := c.Apply(context.Background(), p, "/work")
 	require.NoError(t, err)
 
 	require.Len(t, report.Released, 1)
 	require.True(t, report.Released[0].Published)
-	require.Equal(t, "https://example.com/releases/v0.2.0", report.Released[0].URL)
+	require.Equal(t, "https://example.com/releases/v0.1.10", report.Released[0].URL)
 
 	require.Len(t, f.published, 1)
 	require.Equal(t, report.Revision.ID, f.published[0].Revision)
-	require.Equal(t, "v0.2.0", f.published[0].Version)
+	require.Equal(t, "v0.1.10", f.published[0].Version)
 	require.Equal(t, "abc123", f.published[0].Repos["golden-rust"])
 	require.Equal(t, "/work", f.published[0].Spec["root"],
 		"the engine is told where the repos are")
@@ -661,7 +682,6 @@ func TestAFailedStagePublishesNothing(t *testing.T) {
 	c := reconcilecontroller.New(f.caller(), gitAt(t, "abc123"), clock())
 
 	p := pipeline(releasingStage("build", substage("default", []string{"build"})))
-	p.Version = "v0.2.0"
 
 	report, err := c.Apply(context.Background(), p, "/work")
 	require.NoError(t, err)
@@ -684,43 +704,112 @@ func TestAStageWithNoReleasePublishesNothing(t *testing.T) {
 	require.Empty(t, f.published)
 }
 
-func TestAPipelineWithNoVersionGetsTheNextPatch(t *testing.T) {
+// The default strategy moves the patch. A minor or a major is a claim about
+// what changed, and the default reads no diff, so it moves the only number
+// nobody has an opinion about.
+func TestTheDefaultStrategyMovesThePatch(t *testing.T) {
 	f := newFakeEngines(t)
 
-	git := gitAt(t, "abc123")
-	git.EXPECT().LatestTag(mock.Anything, "/work").Return("v0.2.4", nil).Maybe()
+	git := gitAt(t, "abc123", "v0.2.4")
+
+	c := reconcilecontroller.New(f.caller(), git, clock())
+
+	report, err := c.Apply(context.Background(),
+		pipeline(releasingStage("build", substage("default", []string{"build"}))), "/work")
+	require.NoError(t, err)
+	require.Len(t, f.published, 1)
+	require.Equal(t, "v0.2.5", f.published[0].Version)
+	require.True(t, report.Minted)
+}
+
+func TestTheMinorStrategyMovesTheMinor(t *testing.T) {
+	f := newFakeEngines(t)
+
+	git := gitAt(t, "abc123", "v0.2.4")
 
 	c := reconcilecontroller.New(f.caller(), git, clock())
 
 	p := pipeline(releasingStage("build", substage("default", []string{"build"})))
-
-	report, err := c.Apply(context.Background(), p, "/work")
-	require.NoError(t, err)
-	require.Len(t, f.published, 1)
-	require.Equal(t, "v0.2.5", f.published[0].Version,
-		"nothing here can read a minor or a major off a diff, so it moves the patch")
-	require.True(t, report.Minted)
-}
-
-func TestAPipelineThatNamesAVersionIsTakenAtItsWord(t *testing.T) {
-	f := newFakeEngines(t)
-	c := reconcilecontroller.New(f.caller(), gitAt(t, "abc123"), clock())
-
-	p := pipeline(releasingStage("build", substage("default", []string{"build"})))
-	p.Version = "v2.0.0"
+	p.Versioning.Strategy = config.StrategyMinor
 
 	_, err := c.Apply(context.Background(), p, "/work")
 	require.NoError(t, err)
-	require.Equal(t, "v2.0.0", f.published[0].Version)
+	require.Equal(t, "v0.3.0", f.published[0].Version)
+}
+
+// The semantic strategy reads EVERY member's subjects, because a factory
+// releases its members together: a breaking change in any one of them is
+// breaking for the number they all carry.
+func TestTheSemanticStrategyReadsEveryMember(t *testing.T) {
+	f := newFakeEngines(t)
+
+	git := gitAt(t, "abc123", "v0.2.4")
+	git.EXPECT().SubjectsSince(mock.Anything, "/work/golden-rust", "v0.2.4").
+		Return([]string{"fix: a small thing"}, nil).Once()
+	git.EXPECT().SubjectsSince(mock.Anything, "/work/golden-go", "v0.2.4").
+		Return([]string{"feat: a new door"}, nil).Once()
+
+	c := reconcilecontroller.New(f.caller(), git, clock())
+
+	p := pipeline(releasingStage("build", substage("default", []string{"build"})))
+	p.Repos = append(p.Repos, config.Repo{Name: "golden-go", URL: "https://example.com/golden-go"})
+	p.Versioning.Strategy = config.StrategySemantic
+	p.Versioning.Semantic = config.Semantic{
+		Minor:  []string{"feat:"},
+		Patch:  []string{"fix:"},
+		Ignore: []string{"docs:"},
+	}
+
+	_, err := c.Apply(context.Background(), p, "/work")
+	require.NoError(t, err)
+	require.Equal(t, "v0.3.0", f.published[0].Version,
+		"the highest claim any member makes decides the one number all of them carry")
+}
+
+// A cap holds a factory that is not ready for v1. A bump that would cross it
+// drops one level, so the factory keeps releasing rather than stopping.
+func TestACapClampsTheBumpInsteadOfStoppingTheRelease(t *testing.T) {
+	f := newFakeEngines(t)
+
+	git := gitAt(t, "abc123", "v0.49.0")
+	git.EXPECT().SubjectsSince(mock.Anything, mock.Anything, "v0.49.0").
+		Return([]string{"feat!: everything moved"}, nil).Maybe()
+
+	c := reconcilecontroller.New(f.caller(), git, clock())
+
+	p := pipeline(releasingStage("build", substage("default", []string{"build"})))
+	p.Versioning.Strategy = config.StrategySemantic
+	p.Versioning.Cap = "v0"
+	p.Versioning.Semantic = config.Semantic{Major: []string{"!:"}, Minor: []string{"feat:"}}
+
+	_, err := c.Apply(context.Background(), p, "/work")
+	require.NoError(t, err)
+	require.Equal(t, "v0.50.0", f.published[0].Version,
+		"a major under a v0 cap drops to a minor rather than refusing to release")
+}
+
+// The prefix reaches the engine so the engine can name the tag, and only the
+// tag: the version stays the version.
+func TestTheTagPrefixReachesTheEngine(t *testing.T) {
+	f := newFakeEngines(t)
+
+	git := gitAt(t, "abc123", "v0.49.0")
+	git.EXPECT().LatestTag(mock.Anything, "/work", "forge").Return("v0.49.0", nil).Maybe()
+
+	c := reconcilecontroller.New(f.caller(), git, clock())
+
+	p := pipeline(releasingStage("build", substage("default", []string{"build"})))
+	p.Versioning.TagPrefix = "forge"
+
+	_, err := c.Apply(context.Background(), p, "/work")
+	require.NoError(t, err)
+	require.Equal(t, "v0.49.1", f.published[0].Version)
+	require.Equal(t, "forge", f.published[0].TagPrefix)
 }
 
 func TestAWorkspaceThatNeverReleasedStartsAtTheFirstVersion(t *testing.T) {
 	f := newFakeEngines(t)
-
-	git := gitAt(t, "abc123")
-	git.EXPECT().LatestTag(mock.Anything, mock.Anything).Return("", nil).Maybe()
-
-	c := reconcilecontroller.New(f.caller(), git, clock())
+	c := reconcilecontroller.New(f.caller(), gitAt(t, "abc123"), clock())
 
 	_, err := c.Apply(context.Background(),
 		pipeline(releasingStage("build", substage("default", []string{"build"}))), "/work")

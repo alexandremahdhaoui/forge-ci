@@ -87,79 +87,37 @@ func TestAFailureToRunIsReported(t *testing.T) {
 	require.ErrorIs(t, err, assert.AnError)
 }
 
-func TestLatestTagAnswersTheHighestOrEmpty(t *testing.T) {
+// TagAt is the only tag question a release engine gets to ask. There is no
+// LatestTag any more: the version is decided by the core, and an engine that
+// reads a tag line to compute one is the second authority that put every
+// member of the workspace on a version line of its own.
+func TestTagAtAnswersWhereTheTagPoints(t *testing.T) {
 	t.Parallel()
 
 	runner := execadaptermock.NewMockRunner(t)
-	runner.EXPECT().Run(mock.Anything, "/w/a", "git", "tag", "--sort=-v:refname").
-		Return(execadapter.Result{Stdout: "v0.44.4\nv0.44.3\n"}, nil).Once()
+	runner.EXPECT().Run(mock.Anything, "/w/a", "git", "tag", "--list", "v0.50.0").
+		Return(execadapter.Result{Stdout: "v0.50.0\n"}, nil).Once()
+	runner.EXPECT().Run(mock.Anything, "/w/a", "git", "rev-list", "-n", "1", "v0.50.0").
+		Return(execadapter.Result{Stdout: "abc123\n"}, nil).Once()
 
-	tag, err := releaseadapter.New(runner).LatestTag(t.Context(), "/w/a")
+	sha, found, err := releaseadapter.New(runner).TagAt(t.Context(), "/w/a", "v0.50.0")
 	require.NoError(t, err)
-	require.Equal(t, "v0.44.4", tag)
+	require.True(t, found)
+	require.Equal(t, "abc123", sha,
+		"an annotated tag's own object is not the commit, so rev-list is what answers")
+}
 
-	runner2 := execadaptermock.NewMockRunner(t)
-	runner2.EXPECT().Run(mock.Anything, "/w/b", "git", "tag", "--sort=-v:refname").
+// A repo that does not carry the tag is the ordinary case, not a failure: it
+// is what a member's first release under a version looks like.
+func TestTagAtOnARepoWithoutTheTagIsNotAnError(t *testing.T) {
+	t.Parallel()
+
+	runner := execadaptermock.NewMockRunner(t)
+	runner.EXPECT().Run(mock.Anything, "/w/a", "git", "tag", "--list", "v0.50.0").
 		Return(execadapter.Result{Stdout: "\n"}, nil).Once()
 
-	tag, err = releaseadapter.New(runner2).LatestTag(t.Context(), "/w/b")
+	sha, found, err := releaseadapter.New(runner).TagAt(t.Context(), "/w/a", "v0.50.0")
 	require.NoError(t, err)
-	require.Empty(t, tag, "a never-tagged repo starts fresh")
-}
-
-// A commit some tag already points at is a member already released: a
-// re-run of the same revision must not stack a second tag on it.
-func TestTaggedAtSpotsAnAlreadyReleasedCommit(t *testing.T) {
-	t.Parallel()
-
-	runner := execadaptermock.NewMockRunner(t)
-	runner.EXPECT().Run(mock.Anything, "/w/a", "git", "tag", "--points-at", "abc123").
-		Return(execadapter.Result{Stdout: "v0.44.4\n"}, nil).Once()
-
-	released, err := releaseadapter.New(runner).TaggedAt(t.Context(), "/w/a", "abc123")
-	require.NoError(t, err)
-	require.True(t, released)
-
-	runner2 := execadaptermock.NewMockRunner(t)
-	runner2.EXPECT().Run(mock.Anything, "/w/a", "git", "tag", "--points-at", "def456").
-		Return(execadapter.Result{Stdout: ""}, nil).Once()
-
-	released, err = releaseadapter.New(runner2).TaggedAt(t.Context(), "/w/a", "def456")
-	require.NoError(t, err)
-	require.False(t, released)
-}
-
-// git sorts every tag a repo carries, and a repo that predates this pipeline
-// carries tags this pipeline cannot read. One of them sorting above the
-// release line was returned as the previous version, the version rule
-// rejected it as "not a semver tag", and publish reported that as machinery
-// failure - so nothing was tagged or released, for any member.
-func TestLatestTagSkipsWhatTheVersionRuleCannotRead(t *testing.T) {
-	t.Parallel()
-
-	for name, tc := range map[string]struct {
-		tags string
-		want string
-	}{
-		"a two-part legacy tag":   {"v1.2\nv0.44.4\nv0.44.3\n", "v0.44.4"},
-		"a word":                  {"wip\nv0.44.4\n", "v0.44.4"},
-		"build metadata":          {"v1.0.0+build\nv0.44.4\n", "v0.44.4"},
-		"a bare number":           {"2\nv0.44.4\n", "v0.44.4"},
-		"a prerelease is a tag":   {"v1.0.0-rc.1\nv0.44.4\n", "v1.0.0-rc.1"},
-		"nothing readable at all": {"v1.2\nwip\n", ""},
-	} {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			runner := execadaptermock.NewMockRunner(t)
-			runner.EXPECT().Run(mock.Anything, "/w/a", "git", "tag", "--sort=-v:refname").
-				Return(execadapter.Result{Stdout: tc.tags}, nil).Once()
-
-			tag, err := releaseadapter.New(runner).LatestTag(t.Context(), "/w/a")
-			require.NoError(t, err)
-			// Nothing readable is the same as never tagged: the next
-			// version starts fresh rather than aborting the release.
-			require.Equal(t, tc.want, tag)
-		})
-	}
+	require.False(t, found)
+	require.Empty(t, sha)
 }

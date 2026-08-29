@@ -52,8 +52,14 @@ type StageReport struct {
 
 type Report struct {
 	Revision citypes.Revision `json:"revision"`
-	Actions  []string         `json:"actions"`
-	Stages   []StageReport    `json:"stages"`
+
+	// Version is the one number this apply would release under, derived
+	// before the first stage so the build stamp and the release tag cannot
+	// disagree.
+	Version string `json:"version,omitempty"`
+
+	Actions []string      `json:"actions"`
+	Stages  []StageReport `json:"stages"`
 
 	// Minted says the revision reached state. A revision nobody minted was
 	// never proven, so nothing downstream may act on it.
@@ -106,10 +112,20 @@ func (c *Controller) Apply(ctx context.Context, p config.Pipeline, root string) 
 		return Report{}, err
 	}
 
-	report := Report{Revision: revision, Actions: actions}
+	// The version is derived ONCE, before any stage runs, and carried from
+	// here. The build stamp and the release tag are then the same number by
+	// construction rather than by two computations agreeing: a binary that
+	// reports a different version from the release it shipped in is a lie
+	// the operator acts on.
+	version, err := c.releaseVersion(ctx, p, index, root)
+	if err != nil {
+		return Report{}, err
+	}
+
+	report := Report{Revision: revision, Version: version, Actions: actions}
 
 	for _, stage := range p.Stages {
-		stageReport, err := c.applyStage(ctx, p, index, stage, revision, root)
+		stageReport, err := c.applyStage(ctx, p, index, stage, revision, version, root)
 		if err != nil {
 			return Report{}, err
 		}
@@ -129,7 +145,7 @@ func (c *Controller) Apply(ctx context.Context, p config.Pipeline, root string) 
 		}
 
 		if stage.Release != "" {
-			released, err := c.release(ctx, p, index, stage, revision, root, report.Stages)
+			released, err := c.release(ctx, p, index, stage, revision, version, root, report.Stages)
 			if err != nil {
 				return Report{}, err
 			}
@@ -149,6 +165,7 @@ func (c *Controller) release(
 	index engineIndex,
 	stage config.Stage,
 	revision citypes.Revision,
+	version string,
 	root string,
 	stages []StageReport,
 ) (citypes.ArtifactOutput, error) {
@@ -166,14 +183,10 @@ func (c *Controller) release(
 		spec["root"] = root
 	}
 
-	version, err := c.releaseVersion(ctx, p, root, spec)
-	if err != nil {
-		return citypes.ArtifactOutput{}, err
-	}
-
 	in := citypes.ArtifactInput{
 		Revision:  revision.ID,
 		Version:   version,
+		TagPrefix: p.Versioning.TagPrefix,
 		Repos:     revision.Repos,
 		Artifacts: runArtifacts(stages),
 		Spec:      spec,
@@ -207,38 +220,105 @@ func runArtifacts(stages []StageReport) []forge.Artifact {
 	return out
 }
 
-// releaseVersion is what the release publishes under. A pipeline that names
-// one is taken at its word, because a minor or a major is a claim about what
-// changed and nothing here can read that off a diff. A pipeline that names
-// none gets the patch after the highest tag already released, starting at
-// v0.1.0 - read in the repo the release is created in when the engine names
-// one, because a workspace root is not a repo and carries no tags.
+// releaseVersion is the one number the whole factory is released under. It is
+// derived here and nowhere else: there is no field to type a version into, so
+// a number can never be re-pointed at a release that already exists, and no
+// engine downstream may compute one of its own.
+//
+// It runs before the first stage, because the build stamp and the release tag
+// have to be the same number and a build cannot wait for a release to decide.
+//
+// A pipeline that releases nothing gets no version. There is no line to read:
+// a workspace root is not a repo and carries no tags, and asking it for one
+// fails outright rather than answering empty. Builds then stamp what they
+// always did.
 func (c *Controller) releaseVersion(
 	ctx context.Context,
 	p config.Pipeline,
+	index engineIndex,
 	root string,
-	engineSpec map[string]any,
 ) (string, error) {
-	if strings.TrimSpace(p.Version) != "" {
-		return p.Version, nil
+	home, releases := releaseHome(p, index, root)
+	if !releases {
+		return "", nil
 	}
 
-	tagDir := root
-	if home, _ := engineSpec["releaseIn"].(string); home != "" {
-		tagDir = filepath.Join(root, home)
-	}
-
-	previous, err := c.git.LatestTag(ctx, tagDir)
+	previous, err := c.git.LatestTag(ctx, home, p.Versioning.TagPrefix)
 	if err != nil {
 		return "", fmt.Errorf("reading the last released version: %w", err)
 	}
 
-	next, err := artifactcontroller.NextVersion(previous)
+	level, err := c.bumpLevel(ctx, p, root, previous)
+	if err != nil {
+		return "", err
+	}
+
+	next, err := artifactcontroller.Bump(previous, level, p.Versioning.Cap)
 	if err != nil {
 		return "", fmt.Errorf("deciding the next version: %w", err)
 	}
 
 	return next, nil
+}
+
+// releaseHome is the repo the version line lives in: the one the release is
+// created in, which the artifact engine names in releaseIn because a
+// workspace root is not a repo. It reports whether this pipeline releases at
+// all; one that does not has no line and needs no version.
+func releaseHome(p config.Pipeline, index engineIndex, root string) (string, bool) {
+	for _, stage := range p.Stages {
+		if stage.Release == "" {
+			continue
+		}
+
+		engine, err := index.require(stage.Release, config.PortArtifact)
+		if err != nil {
+			continue
+		}
+
+		if home, _ := engine.Spec["releaseIn"].(string); home != "" {
+			return filepath.Join(root, home), true
+		}
+
+		return root, true
+	}
+
+	return "", false
+}
+
+// bumpLevel is how far the release moves. The semantic strategy reads every
+// member's commit subjects since the last release, because a factory releases
+// its members together and a breaking change in any one of them is breaking
+// for the number they all carry.
+func (c *Controller) bumpLevel(
+	ctx context.Context,
+	p config.Pipeline,
+	root string,
+	previous string,
+) (artifactcontroller.Level, error) {
+	switch p.Versioning.Strategy {
+	case config.StrategyMinor:
+		return artifactcontroller.LevelMinor, nil
+
+	case config.StrategySemantic:
+		tag := artifactcontroller.TagName(p.Versioning.TagPrefix, previous)
+
+		subjects := []string{}
+
+		for _, repo := range p.Repos {
+			got, err := c.git.SubjectsSince(ctx, filepath.Join(root, repo.Name), tag)
+			if err != nil {
+				return 0, fmt.Errorf("reading what changed in %q: %w", repo.Name, err)
+			}
+
+			subjects = append(subjects, got...)
+		}
+
+		return artifactcontroller.HighestLevel(p.Versioning.Semantic, subjects), nil
+
+	default:
+		return artifactcontroller.LevelPatch, nil
+	}
 }
 
 // mint records the revision as proven. Writing it twice is harmless, because
@@ -253,6 +333,7 @@ func (c *Controller) applyStage(
 	index engineIndex,
 	stage config.Stage,
 	revision citypes.Revision,
+	version string,
 	root string,
 ) (StageReport, error) {
 	report := StageReport{Name: stage.Name, Runs: make([]citypes.Run, len(stage.Substages))}
@@ -267,7 +348,7 @@ func (c *Controller) applyStage(
 		go func() {
 			defer wg.Done()
 
-			run, err := c.applySubstage(ctx, p, index, stage, sub, revision, root)
+			run, err := c.applySubstage(ctx, p, index, stage, sub, revision, version, root)
 			report.Runs[i] = run
 			failures[i] = err
 		}()
@@ -299,6 +380,7 @@ func (c *Controller) applySubstage(
 	stage config.Stage,
 	sub config.Substage,
 	revision citypes.Revision,
+	version string,
 	root string,
 ) (citypes.Run, error) {
 	key := runKey(revision.ID, stage.Name, sub.Name)
@@ -321,6 +403,7 @@ func (c *Controller) applySubstage(
 
 	out, err := c.run(ctx, engine, citypes.RunInput{
 		Revision: revision.ID,
+		Version:  version,
 		Stage:    stage.Name,
 		Substage: sub.Name,
 		Targets:  index.targets(p, sub.Targets),

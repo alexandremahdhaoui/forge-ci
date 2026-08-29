@@ -180,8 +180,10 @@ func TestAGreenBuildReleasesTheAggregatedDistribution(t *testing.T) {
 
 	revision := revisionID(t, statePath)
 
-	// One aggregated release per revision, in the repo the spec named.
-	require.Equal(t, "dist-"+revision, fake.releases["owner/demo-repo"])
+	// One aggregated release per version, in the repo the spec named, under
+	// the same tag the members carry. The revision is still recorded, in the
+	// index below, so a release still says which tuple it was proven from.
+	require.Equal(t, "v0.1.0", fake.releases["owner/demo-repo"])
 
 	// The member is tagged with the semver the pipeline decided.
 	tags := mustRun(t, origin, "git", "tag")
@@ -198,7 +200,7 @@ func TestAGreenBuildReleasesTheAggregatedDistribution(t *testing.T) {
 	var index artifactcontroller.Index
 	require.NoError(t, json.Unmarshal(rawIndex, &index))
 	require.Equal(t, revision, index.Revision)
-	require.Equal(t, "dist-"+revision, index.Release.Tag)
+	require.Equal(t, "v0.1.0", index.Release.Tag)
 	require.Len(t, index.Tools, 2)
 	require.Equal(t, "demo-tool", index.Tools[0].Name)
 
@@ -245,12 +247,14 @@ func TestADirtyTreeNeverReleases(t *testing.T) {
 	require.Empty(t, fake.releases, "nothing may publish from a dirty tree")
 }
 
-// A member that carries release history from before this pipeline existed
-// keeps its own version line: the release must not mint one shared number
-// from the releaseIn repo and stamp it onto members that already own those
-// tags. Live case: forge carried v0.1.0..v0.44.4 and the first dist-release
-// died trying to re-tag v0.1.0.
-func TestAPreTaggedMemberKeepsItsOwnVersionLine(t *testing.T) {
+// A repo that carries release history from before this pipeline existed
+// continues that line rather than starting over. Live case: forge carried
+// v0.1.0..v0.44.4 and the first release died trying to re-tag v0.1.0.
+//
+// The line lives in the repo the release is created in, and every member is
+// tagged with the one number read off it. That is the decision: one workspace,
+// one version, so a consumer who knows one member's version knows all of them.
+func TestAPreTaggedLineContinuesRatherThanStartingOver(t *testing.T) {
 	fake := newReleaseFake(t)
 
 	root := t.TempDir()
@@ -274,6 +278,11 @@ func TestAPreTaggedMemberKeepsItsOwnVersionLine(t *testing.T) {
 	mustRun(t, repo, "git", "tag", "-m", "v0.1.0", "v0.1.0")
 	mustRun(t, repo, "git", "tag", "-m", "v0.44.4", "v0.44.4")
 
+	// A tag from another factory's line sits alongside them. It must not be
+	// read as this line's history: with no prefix configured, only the plain
+	// semver line counts, so the next version is v0.44.5 and not v9.0.1.
+	mustRun(t, repo, "git", "tag", "-m", "other-v9.0.0", "other-v9.0.0")
+
 	// The head moves past the tagged commit, so the release tags fresh work.
 	require.NoError(t, os.WriteFile(filepath.Join(repo, "README.md"), []byte("two"), 0o600))
 	mustRun(t, repo, "git", "add", ".")
@@ -290,12 +299,13 @@ func TestAPreTaggedMemberKeepsItsOwnVersionLine(t *testing.T) {
 	out := mustRun(t, root, "forge-ci", "apply", "--config", "forge-ci.yaml", "--root", ".")
 	require.Contains(t, out, "released")
 
-	// The member's own line continues: v0.44.4 bumps to v0.44.5. Nothing
-	// tries to reuse v0.1.0.
+	// The line continues: v0.44.4 bumps to v0.44.5. Nothing tries to reuse
+	// v0.1.0, and the other factory's v9.0.0 is not this line's history.
 	tags := mustRun(t, origin, "git", "tag")
 	require.Contains(t, tags, "v0.44.5")
+	require.NotContains(t, tags, "v9.0.1")
 	require.NotContains(t, mustRun(t, repo, "git", "tag", "--points-at", "HEAD"), "v0.1.0")
 
-	revision := revisionID(t, statePath)
-	require.Equal(t, "dist-"+revision, fake.releases["owner/demo-repo"])
+	// The release carries that same number. One workspace, one version.
+	require.Equal(t, "v0.44.5", fake.releases["owner/demo-repo"])
 }

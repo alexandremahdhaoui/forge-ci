@@ -120,3 +120,103 @@ func TestAReleasingStageNeedsNoVersionOnThePipeline(t *testing.T) {
 	}.Validate()
 	require.NoError(t, err)
 }
+
+// Empty is the default and it is what every factory uses. A pipeline that
+// names no versioning at all behaves exactly as it did before the field
+// existed.
+func TestNoVersioningAtAllIsValid(t *testing.T) {
+	t.Parallel()
+
+	require.NoError(t, base().Validate())
+}
+
+func TestVersioningRejectsWhatItCannotActOn(t *testing.T) {
+	t.Parallel()
+
+	for name, tc := range map[string]struct {
+		set  func(*config.Pipeline)
+		want string
+	}{
+		"a strategy nobody implements": {
+			func(p *config.Pipeline) { p.Versioning.Strategy = "bump-everything" },
+			"strategy \"bump-everything\" is not one of",
+		},
+		"a cap that is a full semver": {
+			func(p *config.Pipeline) { p.Versioning.Cap = "v0.50.0" },
+			"must be a major or a major.minor",
+		},
+		"a cap with no v": {
+			func(p *config.Pipeline) { p.Versioning.Cap = "0.50" },
+			"must be a major or a major.minor",
+		},
+		"a prefix that is not kebab-case": {
+			func(p *config.Pipeline) { p.Versioning.TagPrefix = "Forge Toolchain" },
+			"must be lowercase kebab-case",
+		},
+		"an unmatched level nobody scores": {
+			func(p *config.Pipeline) {
+				p.Versioning.Strategy = config.StrategySemantic
+				p.Versioning.Semantic.Unmatched = "huge"
+			},
+			"must be major, minor, patch or ignore",
+		},
+		"a vocabulary nothing reads": {
+			func(p *config.Pipeline) {
+				p.Versioning.Strategy = config.StrategyPatch
+				p.Versioning.Semantic.Minor = []string{"feat:"}
+			},
+			"semantic is set but strategy is not semantic",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			p := base()
+			tc.set(&p)
+
+			err := p.Validate()
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tc.want)
+		})
+	}
+}
+
+func TestEveryStrategyAndCapShapeIsAccepted(t *testing.T) {
+	t.Parallel()
+
+	for _, v := range []config.Versioning{
+		{Strategy: config.StrategyPatch},
+		{Strategy: config.StrategyMinor},
+		{Strategy: config.StrategySemantic, Semantic: config.Semantic{Minor: []string{"feat:"}}},
+		{Cap: "v0"},
+		{Cap: "v0.50"},
+		{TagPrefix: "forge"},
+		{TagPrefix: "forge-self"},
+	} {
+		p := base()
+		p.Versioning = v
+		require.NoError(t, p.Validate(), "%+v", v)
+	}
+}
+
+// There is no door to type a version into. A version is derived or it is
+// nothing, so it can never be re-pointed at a release that already exists.
+func TestThereIsNoVersionFieldToTypeInto(t *testing.T) {
+	t.Parallel()
+
+	_, err := config.Parse([]byte(`
+name: demo
+version: v9.9.9
+state: st
+managers: [{alias: local, engine: "forge://m"}]
+engines:
+  - {alias: st, type: state, engine: "forge://x", manager: local}
+  - {alias: here, type: compute, engine: "forge://x", manager: local}
+targets: [{alias: t, forge: test-all}]
+stages:
+  - name: prod
+    substages: [{name: default, engine: here, manager: local, targets: [t]}]
+`))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "version")
+}

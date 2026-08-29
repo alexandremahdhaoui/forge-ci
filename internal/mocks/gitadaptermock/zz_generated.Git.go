@@ -416,8 +416,8 @@ func (_c *MockGit_IsRepo_Call) RunAndReturn(run func(ctx context.Context, dir st
 }
 
 // LatestTag provides a mock function for the type MockGit
-func (_mock *MockGit) LatestTag(ctx context.Context, dir string) (string, error) {
-	ret := _mock.Called(ctx, dir)
+func (_mock *MockGit) LatestTag(ctx context.Context, dir string, prefix string) (string, error) {
+	ret := _mock.Called(ctx, dir, prefix)
 
 	if len(ret) == 0 {
 		panic("no return value specified for LatestTag")
@@ -425,16 +425,16 @@ func (_mock *MockGit) LatestTag(ctx context.Context, dir string) (string, error)
 
 	var r0 string
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (string, error)); ok {
-		return returnFunc(ctx, dir)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) (string, error)); ok {
+		return returnFunc(ctx, dir, prefix)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string) string); ok {
-		r0 = returnFunc(ctx, dir)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) string); ok {
+		r0 = returnFunc(ctx, dir, prefix)
 	} else {
 		r0 = ret.Get(0).(string)
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
-		r1 = returnFunc(ctx, dir)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string) error); ok {
+		r1 = returnFunc(ctx, dir, prefix)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -449,11 +449,12 @@ type MockGit_LatestTag_Call struct {
 // LatestTag is a helper method to define mock.On call
 //   - ctx context.Context
 //   - dir string
-func (_e *MockGit_Expecter) LatestTag(ctx any, dir any) *MockGit_LatestTag_Call {
-	return &MockGit_LatestTag_Call{Call: _e.mock.On("LatestTag", ctx, dir)}
+//   - prefix string
+func (_e *MockGit_Expecter) LatestTag(ctx any, dir any, prefix any) *MockGit_LatestTag_Call {
+	return &MockGit_LatestTag_Call{Call: _e.mock.On("LatestTag", ctx, dir, prefix)}
 }
 
-func (_c *MockGit_LatestTag_Call) Run(run func(ctx context.Context, dir string)) *MockGit_LatestTag_Call {
+func (_c *MockGit_LatestTag_Call) Run(run func(ctx context.Context, dir string, prefix string)) *MockGit_LatestTag_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -463,9 +464,14 @@ func (_c *MockGit_LatestTag_Call) Run(run func(ctx context.Context, dir string))
 		if args[1] != nil {
 			arg1 = args[1].(string)
 		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
 		run(
 			arg0,
 			arg1,
+			arg2,
 		)
 	})
 	return _c
@@ -476,7 +482,7 @@ func (_c *MockGit_LatestTag_Call) Return(s string, err error) *MockGit_LatestTag
 	return _c
 }
 
-func (_c *MockGit_LatestTag_Call) RunAndReturn(run func(ctx context.Context, dir string) (string, error)) *MockGit_LatestTag_Call {
+func (_c *MockGit_LatestTag_Call) RunAndReturn(run func(ctx context.Context, dir string, prefix string) (string, error)) *MockGit_LatestTag_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -615,6 +621,80 @@ func (_c *MockGit_Staged_Call) Return(b bool, err error) *MockGit_Staged_Call {
 }
 
 func (_c *MockGit_Staged_Call) RunAndReturn(run func(ctx context.Context, dir string) (bool, error)) *MockGit_Staged_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SubjectsSince provides a mock function for the type MockGit
+func (_mock *MockGit) SubjectsSince(ctx context.Context, dir string, tag string) ([]string, error) {
+	ret := _mock.Called(ctx, dir, tag)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SubjectsSince")
+	}
+
+	var r0 []string
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) ([]string, error)); ok {
+		return returnFunc(ctx, dir, tag)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) []string); ok {
+		r0 = returnFunc(ctx, dir, tag)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]string)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string) error); ok {
+		r1 = returnFunc(ctx, dir, tag)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockGit_SubjectsSince_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SubjectsSince'
+type MockGit_SubjectsSince_Call struct {
+	*mock.Call
+}
+
+// SubjectsSince is a helper method to define mock.On call
+//   - ctx context.Context
+//   - dir string
+//   - tag string
+func (_e *MockGit_Expecter) SubjectsSince(ctx any, dir any, tag any) *MockGit_SubjectsSince_Call {
+	return &MockGit_SubjectsSince_Call{Call: _e.mock.On("SubjectsSince", ctx, dir, tag)}
+}
+
+func (_c *MockGit_SubjectsSince_Call) Run(run func(ctx context.Context, dir string, tag string)) *MockGit_SubjectsSince_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *MockGit_SubjectsSince_Call) Return(strings []string, err error) *MockGit_SubjectsSince_Call {
+	_c.Call.Return(strings, err)
+	return _c
+}
+
+func (_c *MockGit_SubjectsSince_Call) RunAndReturn(run func(ctx context.Context, dir string, tag string) ([]string, error)) *MockGit_SubjectsSince_Call {
 	_c.Call.Return(run)
 	return _c
 }

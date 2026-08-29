@@ -20,7 +20,8 @@ type Git interface {
 	HeadSHA(ctx context.Context, dir string) (string, error)
 	RemoteSHA(ctx context.Context, url, ref string) (string, error)
 	Staged(ctx context.Context, dir string) (bool, error)
-	LatestTag(ctx context.Context, dir string) (string, error)
+	LatestTag(ctx context.Context, dir, prefix string) (string, error)
+	SubjectsSince(ctx context.Context, dir, tag string) ([]string, error)
 	WorktreeHash(ctx context.Context, dir string) (string, error)
 }
 
@@ -156,26 +157,80 @@ func (g *CLI) WorktreeHash(ctx context.Context, dir string) (string, error) {
 	return hex.EncodeToString(sum[:])[:12], nil
 }
 
-// LatestTag is the highest semver tag a checkout carries. A repo with no tag
-// answers empty rather than failing, because a workspace that has never
-// released has nothing to report.
-func (g *CLI) LatestTag(ctx context.Context, dir string) (string, error) {
-	res, err := g.run(ctx, dir, "listing tags", "tag", "--sort=-v:refname")
+// LatestTag is the highest version this prefix's line carries, without the
+// prefix. A repo with no tag on the line answers empty rather than failing,
+// because a workspace that has never released has nothing to report.
+//
+// The prefix is a namespace. Reading a tag from another prefix would make two
+// factories that share a repo take turns overwriting each other's line, so a
+// tag that does not carry this prefix is not this line's history and is
+// skipped.
+func (g *CLI) LatestTag(ctx context.Context, dir, prefix string) (string, error) {
+	pattern := "v[0-9]*"
+	if prefix != "" {
+		pattern = prefix + "-v[0-9]*"
+	}
+
+	res, err := g.run(ctx, dir, "listing tags", "tag", "--sort=-v:refname", "--list", pattern)
 	if err != nil {
 		return "", err
 	}
 
 	for _, line := range strings.Split(res.Stdout, "\n") {
+		tag := strings.TrimSpace(line)
+
+		if prefix != "" {
+			rest, ok := strings.CutPrefix(tag, prefix+"-")
+			if !ok {
+				continue
+			}
+
+			tag = rest
+		}
+
 		// Only a tag the version rule can read. git sorts every tag it
 		// has, so one legacy tag sorting above the release line - "v1.2",
 		// "wip" - was returned as the previous version, and the whole
 		// release then failed on "not a semver tag", for every member.
 		// A repo that carries release history from before this pipeline
 		// existed is exactly the case this has to survive.
-		if tag := strings.TrimSpace(line); semverTag.MatchString(tag) {
+		if semverTag.MatchString(tag) {
 			return tag, nil
 		}
 	}
 
 	return "", nil
+}
+
+// SubjectsSince is every commit subject a checkout gained after tag. A tag the
+// repo does not carry answers the whole history, which is the right answer for
+// a member joining a line that already exists: all of it is new to that line.
+func (g *CLI) SubjectsSince(ctx context.Context, dir, tag string) ([]string, error) {
+	args := []string{"log", "--no-merges", "--format=%s"}
+
+	if strings.TrimSpace(tag) != "" {
+		known, err := g.run(ctx, dir, "reading tag", "tag", "--list", tag)
+		if err != nil {
+			return nil, err
+		}
+
+		if strings.TrimSpace(known.Stdout) != "" {
+			args = append(args, tag+"..HEAD")
+		}
+	}
+
+	res, err := g.run(ctx, dir, "reading commit subjects", args...)
+	if err != nil {
+		return nil, err
+	}
+
+	out := []string{}
+
+	for _, line := range strings.Split(res.Stdout, "\n") {
+		if s := strings.TrimSpace(line); s != "" {
+			out = append(out, s)
+		}
+	}
+
+	return out, nil
 }

@@ -16,6 +16,7 @@ The question an engine answers. The list is closed.
 |---|---|
 | `alias` | Lowercase kebab-case identifier. |
 | `artifactStorePath` | Where forge-ci records its own artifacts. |
+| `cap` | The ceiling the bump may not cross, inclusive. "v0" holds the major at 0; "v0.50" holds major and minor. A bump that would cross it drops one level and retries, so a factory that is not ready for v1 keeps releasing rather than stopping. A full semver is refused: a cap on the patch would stop the only bump that always works. |
 | `engineURI` | Only forge:// and alias:// resolve. Anything else is a hard error, matching forge. |
 | `engines` | Named engine instances. An engine implements one port. It declares the resources it needs and never names a manager kind. |
 | `forge` | Arguments passed to forge. For example "test-all". |
@@ -32,13 +33,17 @@ The question an engine answers. The list is closed.
 | `ref` | Branch to track. |
 | `release` | Alias of an engine whose type is artifact. It runs after the stage advances, so nothing is published for a build that did not pass. |
 | `repos` | The repos that form a revision. Optional. One repo is valid. A pipeline with no repos still runs, and its revision is the pipeline file itself. |
+| `semantic` | The vocabulary the semantic strategy reads commit subjects with. It is a vocabulary and not a standard: a team writes the prefixes it actually uses, emoji included. Ignored by the other strategies. |
 | `spec` | Manager specific configuration. Validated by the manager. |
 | `stages` | Ordered phases. A revision moves through them left to right. There is no dependency graph. Order is list order. |
 | `state` | Alias of the engine whose type is state. |
+| `strategy` | Which number moves. Absent means bump-patch-version. |
 | `substages` | Independent units inside a stage. They run at the same time. |
+| `tagPrefix` | Goes in front of the semver, joined with a dash. Absent means no prefix, which is what every factory does: v0.50.0. Set it only when one repo is released by more than one factory, so the two lines do not read each other's tags. |
 | `targets` | Named units of work. A target names a forge target or a forge-ci verb. This is the only place a forge target appears. |
 | `triggers` | Aliases of engines whose type is trigger. |
-| `version` | The semver tag a release publishes under. Required by a stage that declares a release, and ignored otherwise. |
+| `unmatched` | What a subject no list claims scores. Absent means patch. Set it to ignore to make the vocabulary exhaustive. |
+| `versioning` | How the one number this factory releases under is derived. Every member is tagged with it, so a workspace has one version line rather than one per repo. There is no field to type a version into: a version is derived or it is nothing, so it can never be re-pointed at a release that already exists. |
 
 See [architecture.md](architecture.md) for how they fit together, and
 [decisions.md](decisions.md) for why.

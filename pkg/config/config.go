@@ -34,16 +34,59 @@ var (
 )
 
 type Pipeline struct {
-	Name              string    `json:"name"`
-	Version           string    `json:"version,omitempty"`
-	ArtifactStorePath string    `json:"artifactStorePath,omitempty"`
-	Repos             []Repo    `json:"repos,omitempty"`
-	Managers          []Manager `json:"managers,omitempty"`
-	Engines           []Engine  `json:"engines"`
-	State             string    `json:"state"`
-	Triggers          []string  `json:"triggers,omitempty"`
-	Targets           []Target  `json:"targets,omitempty"`
-	Stages            []Stage   `json:"stages"`
+	Name string `json:"name"`
+	// Versioning decides the one number every member is released under.
+	// There is no field to type a version into, on purpose: a version is
+	// derived or it is nothing, so it can never be re-typed onto a release
+	// that already exists.
+	Versioning        Versioning `json:"versioning,omitempty"`
+	ArtifactStorePath string     `json:"artifactStorePath,omitempty"`
+	Repos             []Repo     `json:"repos,omitempty"`
+	Managers          []Manager  `json:"managers,omitempty"`
+	Engines           []Engine   `json:"engines"`
+	State             string     `json:"state"`
+	Triggers          []string   `json:"triggers,omitempty"`
+	Targets           []Target   `json:"targets,omitempty"`
+	Stages            []Stage    `json:"stages"`
+}
+
+// Versioning is how one release number is derived for a whole factory. Every
+// member is tagged with that number, so a workspace has one version line
+// rather than one per repo.
+type Versioning struct {
+	// TagPrefix goes in front of the semver, with a dash. Empty means no
+	// prefix, which is what every factory does today: v0.50.0. Set it only
+	// when one repo is released by more than one factory, so the two lines
+	// do not read each other's tags: "forge" gives forge-v0.50.0.
+	TagPrefix string `json:"tagPrefix,omitempty"`
+
+	// Strategy picks the bump. Empty means bump-patch-version.
+	Strategy string `json:"strategy,omitempty"`
+
+	// Cap is the ceiling the bump may not cross, inclusive. "v0" holds the
+	// major at 0; "v0.50" holds major and minor. A bump that would cross it
+	// drops one level and retries, so a factory that is not ready for v1
+	// keeps releasing rather than stopping.
+	Cap string `json:"cap,omitempty"`
+
+	// Semantic is the vocabulary the semantic strategy reads commit
+	// subjects with. It is ignored by the other strategies.
+	Semantic Semantic `json:"semantic,omitempty"`
+}
+
+// Semantic is the vocabulary, not a standard. A team writes the prefixes it
+// actually uses, emoji included, and nothing here assumes conventional
+// commits.
+type Semantic struct {
+	Major  []string `json:"major,omitempty"`
+	Minor  []string `json:"minor,omitempty"`
+	Patch  []string `json:"patch,omitempty"`
+	Ignore []string `json:"ignore,omitempty"`
+
+	// Unmatched is the level a subject scores when no list claims it.
+	// Empty means patch. Set it to "ignore" to make the vocabulary
+	// exhaustive, so an unrecognised subject releases nothing.
+	Unmatched string `json:"unmatched,omitempty"`
 }
 
 type Repo struct {
@@ -113,6 +156,10 @@ func (p Pipeline) Validate() error {
 
 	if strings.TrimSpace(p.Name) == "" {
 		add("name is required")
+	}
+
+	for _, msg := range p.Versioning.problems() {
+		add("versioning: %s", msg)
 	}
 
 	repos := map[string]bool{}
@@ -305,4 +352,72 @@ func (p Pipeline) Validate() error {
 	}
 
 	return fmt.Errorf("invalid pipeline:\n  %s", strings.Join(errs, "\n  "))
+}
+
+// The strategies. A pipeline that names none bumps the patch, which is what
+// every factory did before this field existed.
+const (
+	StrategyPatch    = "bump-patch-version"
+	StrategyMinor    = "bump-minor-version"
+	StrategySemantic = "semantic"
+)
+
+var strategies = map[string]bool{
+	StrategyPatch:    true,
+	StrategyMinor:    true,
+	StrategySemantic: true,
+}
+
+// levels are what Semantic.Unmatched may name. "ignore" makes the vocabulary
+// exhaustive: a subject nothing claims releases nothing.
+var levels = map[string]bool{
+	"major":  true,
+	"minor":  true,
+	"patch":  true,
+	"ignore": true,
+}
+
+// capPattern is a ceiling, not a version: "v0" or "v0.50". A full semver is
+// refused because a cap on the patch would stop the only bump that always
+// works, and a factory that cannot bump is a factory that cannot release.
+var capPattern = regexp.MustCompile(`^v(0|[1-9]\d*)(\.(0|[1-9]\d*))?$`)
+
+// tagPrefixPattern keeps a prefix to something a tag can carry and a shell
+// can type. It joins the semver with a dash: "forge" -> forge-v0.50.0.
+var tagPrefixPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+
+func (v Versioning) problems() []string {
+	var out []string
+
+	if v.TagPrefix != "" && !tagPrefixPattern.MatchString(v.TagPrefix) {
+		out = append(out, fmt.Sprintf("tagPrefix %q must be lowercase kebab-case", v.TagPrefix))
+	}
+
+	if v.Strategy != "" && !strategies[v.Strategy] {
+		out = append(out, fmt.Sprintf(
+			"strategy %q is not one of %s, %s, %s",
+			v.Strategy, StrategyPatch, StrategyMinor, StrategySemantic))
+	}
+
+	if v.Cap != "" && !capPattern.MatchString(v.Cap) {
+		out = append(out, fmt.Sprintf("cap %q must be a major or a major.minor, like v0 or v0.50", v.Cap))
+	}
+
+	if v.Semantic.Unmatched != "" && !levels[v.Semantic.Unmatched] {
+		out = append(out, fmt.Sprintf(
+			"semantic.unmatched %q must be major, minor, patch or ignore", v.Semantic.Unmatched))
+	}
+
+	// A vocabulary nothing reads is a vocabulary somebody wrote expecting it
+	// to work. Say so rather than ignoring it.
+	if v.Strategy != StrategySemantic && !v.Semantic.empty() {
+		out = append(out, "semantic is set but strategy is not "+StrategySemantic)
+	}
+
+	return out
+}
+
+func (s Semantic) empty() bool {
+	return len(s.Major) == 0 && len(s.Minor) == 0 && len(s.Patch) == 0 &&
+		len(s.Ignore) == 0 && s.Unmatched == ""
 }

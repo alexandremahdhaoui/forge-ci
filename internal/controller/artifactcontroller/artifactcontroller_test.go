@@ -92,9 +92,10 @@ func TestPlanUploadsOnlyWhatTravels(t *testing.T) {
 		"a platform-named binary uploads once; a host build, an image and a generated file never travel")
 }
 
-// The aggregated release is one per revision: everything built together is
-// released together, under a tag no semver fan-out matches.
-func TestPlanNamesTheAggregatedDistTag(t *testing.T) {
+// The aggregated release carries the version, not the revision. Everything
+// built together is released together, under the one number every member is
+// tagged with, so a consumer who knows one member's version knows all of them.
+func TestPlanReleasesUnderTheVersionAndNotTheRevision(t *testing.T) {
 	t.Parallel()
 
 	plan, err := artifactcontroller.New().Plan(citypes.ArtifactInput{
@@ -102,7 +103,25 @@ func TestPlanNamesTheAggregatedDistTag(t *testing.T) {
 		Version:  "v0.2.0",
 	})
 	require.NoError(t, err)
-	assert.Equal(t, "dist-abc123def456", plan.DistTag)
+	assert.Equal(t, "v0.2.0", plan.TagName)
+	assert.NotContains(t, plan.TagName, "dist-",
+		"a dist prefix was a second name for one release, and nobody could pin it")
+}
+
+// A prefix is a namespace for the case where one repo is released by more
+// than one factory. It is empty by default, so a factory that never meets
+// that case sees plain semver.
+func TestPlanPrefixesTheTagWhenTheFactoryNamesOne(t *testing.T) {
+	t.Parallel()
+
+	plan, err := artifactcontroller.New().Plan(citypes.ArtifactInput{
+		Revision:  "abc123def456",
+		Version:   "v0.2.0",
+		TagPrefix: "forge",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "forge-v0.2.0", plan.TagName)
+	assert.Equal(t, "v0.2.0", plan.Version, "the version is the version; the prefix is only in the tag")
 }
 
 func TestDeclareOwnsNothing(t *testing.T) {
@@ -111,46 +130,6 @@ func TestDeclareOwnsNothing(t *testing.T) {
 	out, err := artifactcontroller.New().Declare(nil)
 	require.NoError(t, err)
 	assert.Empty(t, out.Resources, "a release writes to someone else's system")
-}
-
-func TestNextVersionStartsAtTheFirstRelease(t *testing.T) {
-	t.Parallel()
-
-	got, err := artifactcontroller.NextVersion("")
-	require.NoError(t, err)
-	assert.Equal(t, "v0.1.0", got, "a workspace that never released starts here")
-}
-
-func TestNextVersionBumpsThePatch(t *testing.T) {
-	t.Parallel()
-
-	for previous, want := range map[string]string{
-		"v0.1.0":  "v0.1.1",
-		"v0.1.9":  "v0.1.10",
-		"v1.2.3":  "v1.2.4",
-		"v0.44.2": "v0.44.3",
-	} {
-		got, err := artifactcontroller.NextVersion(previous)
-		require.NoError(t, err, previous)
-		assert.Equal(t, want, got, previous)
-	}
-}
-
-func TestAPrereleaseIsReleasedAsWhatItWasACandidateFor(t *testing.T) {
-	t.Parallel()
-
-	got, err := artifactcontroller.NextVersion("v1.0.0-rc.1")
-	require.NoError(t, err)
-	assert.Equal(t, "v1.0.0", got)
-}
-
-func TestNextVersionRefusesSomethingThatIsNotAVersion(t *testing.T) {
-	t.Parallel()
-
-	for _, previous := range []string{"latest", "1.2.3", "v1.2", "v1.2.3.4"} {
-		_, err := artifactcontroller.NextVersion(previous)
-		require.ErrorIs(t, err, artifactcontroller.ErrPrevious, previous)
-	}
 }
 
 // Two repos that each build a command of the same name would upload one

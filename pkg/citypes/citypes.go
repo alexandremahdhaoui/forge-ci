@@ -60,7 +60,12 @@ type Target struct {
 }
 
 type RunInput struct {
-	Revision string            `json:"revision"`
+	Revision string `json:"revision"`
+	// Version is the number this apply would release under, derived before
+	// the first stage. A compute target stamps it into what it builds, so a
+	// binary reports the release it shipped in rather than the nearest tag
+	// its own repo happens to carry.
+	Version  string            `json:"version,omitempty"`
 	Stage    string            `json:"stage"`
 	Substage string            `json:"substage"`
 	Targets  []Target          `json:"targets"`
@@ -108,8 +113,14 @@ type PromotionOutput struct {
 // proven, the version is what to call it, and the artifacts are what forge
 // already built.
 type ArtifactInput struct {
-	Revision  string            `json:"revision" jsonschema:"The revision being released"`
-	Version   string            `json:"version" jsonschema:"The semver tag to publish under"`
+	Revision string `json:"revision" jsonschema:"The revision being released"`
+	// Version is decided by the core and by nothing else. An engine that
+	// computes its own is a second authority, and two authorities are how
+	// every member of a workspace drifted onto its own version line.
+	Version string `json:"version" jsonschema:"The semver tag to publish under"`
+	// TagPrefix namespaces the tag when one repo is released by more than
+	// one factory. Empty is the default and means the tag is the version.
+	TagPrefix string            `json:"tagPrefix,omitempty" jsonschema:"Namespace in front of the tag, empty for none"`
 	Repos     map[string]string `json:"repos,omitempty" jsonschema:"Repo name to commit SHA"`
 	Artifacts []forge.Artifact  `json:"artifacts,omitempty" jsonschema:"What forge built"`
 	Spec      map[string]any    `json:"spec,omitempty" jsonschema:"Engine specific configuration"`

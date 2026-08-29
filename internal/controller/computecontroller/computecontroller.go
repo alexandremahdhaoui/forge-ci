@@ -50,10 +50,16 @@ func (c *Controller) Run(ctx context.Context, in citypes.RunInput) (citypes.RunO
 	started := c.now()
 	out := citypes.RunOutput{Status: citypes.StatusPassed}
 
-	// The revision reaches every target as an environment variable, so an
-	// instance's build can stamp the tuple it was proven with - the release
-	// side keys the distribution on the same id.
+	// The revision and the version both reach every target as environment
+	// variables. The revision is the tuple a build was proven with, and the
+	// release side keys the distribution on the same id. The version is the
+	// number the release will carry, decided before any stage ran, so a
+	// binary stamps the release it ships in rather than the nearest tag its
+	// own repo happens to hold.
 	env := map[string]string{"FORGE_CI_REVISION": in.Revision}
+	if in.Version != "" {
+		env["FORGE_CI_VERSION"] = in.Version
+	}
 
 	for _, target := range in.Targets {
 		binary, expanded, err := CommandFor(target, in.Params)

@@ -190,6 +190,12 @@ test:
       command: sh
       args: ["hack/unwired.sh"]
 
+  - name: one-version-authority
+    runner: forge://generic-test-runner
+    spec:
+      command: sh
+      args: ["hack/one-version-authority.sh"]
+
   - name: architecture
     runner: forge://generic-test-runner
     spec:

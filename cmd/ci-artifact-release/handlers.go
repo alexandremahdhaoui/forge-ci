@@ -143,34 +143,35 @@ func publish(
 
 	out := citypes.ArtifactOutput{Tagged: []string{}}
 
-	// Each member is tagged on ITS OWN version line: one shared number
-	// breaks the moment a member carries history from before this
-	// pipeline existed. A commit some tag already points at is a member
-	// already released - a re-run stacks nothing on it.
+	// Every member carries the SAME tag, and this engine computes no part of
+	// it. The version arrives decided; deriving one here per member is what
+	// put every repo on a version line of its own, so the arithmetic lives
+	// in the core and nowhere else.
 	for _, tag := range plan.Tags {
 		dir := root + "/" + tag.Repo
 
-		released, err := publisher.TaggedAt(ctx, dir, tag.SHA)
+		at, found, err := publisher.TagAt(ctx, dir, plan.TagName)
 		if err != nil {
 			return out, fmt.Errorf("releasing %s: %w", tag.Repo, err)
 		}
 
-		if released {
-			continue
+		if found {
+			// Same commit: this member is already released at this
+			// version and a re-run stacks nothing on it.
+			if at == tag.SHA {
+				continue
+			}
+
+			// Different commit: the version is being re-pointed, which
+			// changes what a consumer already pinned. Refuse it and
+			// name both commits rather than moving the tag.
+			return out, fmt.Errorf(
+				"releasing %s: %s already points at %s, not %s, and a tag is never moved",
+				tag.Repo, plan.TagName, at, tag.SHA)
 		}
 
-		previous, err := publisher.LatestTag(ctx, dir)
-		if err != nil {
-			return out, fmt.Errorf("releasing %s: %w", tag.Repo, err)
-		}
-
-		version, err := artifactcontroller.NextVersion(previous)
-		if err != nil {
-			return out, fmt.Errorf("releasing %s: %w", tag.Repo, err)
-		}
-
-		if err := publisher.Tag(ctx, dir, version, tag.SHA); err != nil {
-			return out, fmt.Errorf("releasing %s: %w", version, err)
+		if err := publisher.Tag(ctx, dir, plan.TagName, tag.SHA); err != nil {
+			return out, fmt.Errorf("releasing %s: %w", plan.TagName, err)
 		}
 
 		out.Tagged = append(out.Tagged, tag.Repo)
@@ -186,10 +187,11 @@ func publish(
 		return out, fmt.Errorf("releasing %s: %w", plan.Version, err)
 	}
 
-	// One aggregated release per revision: every binary the runs built plus
-	// the index that pins their digests, under the dist tag - the
-	// register/revision is one thing, built together and released together.
-	url, err := publisher.Release(ctx, filepath.Join(root, home), plan.DistTag, assets)
+	// One aggregated release per version: every binary the runs built plus
+	// the index that pins their digests, under the same tag the members
+	// carry - the workspace is one thing, built together and released
+	// together, under one number.
+	url, err := publisher.Release(ctx, filepath.Join(root, home), plan.TagName, assets)
 	if err != nil {
 		return out, fmt.Errorf("releasing %s: %w", plan.Version, err)
 	}
@@ -296,7 +298,7 @@ func stageAssets(root string, plan artifactcontroller.Plan, uploads []string, re
 
 	index, err := artifactcontroller.BuildIndex(
 		revision, time.Now().UTC().Format(time.RFC3339),
-		artifactcontroller.Release{Tag: plan.DistTag}, digests)
+		artifactcontroller.Release{Tag: plan.TagName}, digests)
 	if err != nil {
 		return nil, err
 	}

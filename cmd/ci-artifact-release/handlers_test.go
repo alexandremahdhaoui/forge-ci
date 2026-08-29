@@ -31,7 +31,7 @@ func TestAssetsResolveAbsolutelyWhateverTheRootLooksLike(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "forge-self-factory"), 0o750))
 
 	upload := filepath.Join("forge-ci", "build", "bin", "ci-artifact-release_linux_amd64")
-	plan := artifactcontroller.Plan{Version: "v0.1.1", DistTag: "dist-abc"}
+	plan := artifactcontroller.Plan{Version: "v0.1.1", TagName: "v0.1.1"}
 
 	cwd, err := os.Getwd()
 	require.NoError(t, err)
