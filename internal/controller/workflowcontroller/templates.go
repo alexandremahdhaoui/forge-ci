@@ -125,7 +125,7 @@ func renderCommand(spec Spec, w WorkflowSpec) string {
 		// so a put is the only convergence there is, and a put needs the
 		// value. Without this the secret reaches the checkout step and
 		// nothing else, and every apply died on "environment variable
-		// WORKSPACE_TOKEN is empty" - advice written for an operator's
+		// FACTORY_TOKEN is empty" - advice written for an operator's
 		// laptop, printed inside a runner where there is no .envrc to fix.
 		if w.Secret != "" {
 			fmt.Fprintf(&b, "          %s: ${{ secrets.%s }}\n", w.Secret, w.Secret)

@@ -107,13 +107,13 @@ engines:
         bootstrapCommand: "true"
         toolchainScript: "true"
       secrets:
-        - name: WORKSPACE_TOKEN
+        - name: FACTORY_TOKEN
       workflows:
         - name: release
           kind: release
       runner:
         name: ci-runner
-        secret: WORKSPACE_TOKEN
+        secret: FACTORY_TOKEN
         pollIntervalSeconds: 1
   - alias: ci-state
     type: state
@@ -179,13 +179,13 @@ func TestTheGitHubSurfaceIsProvisionedAndConverged(t *testing.T) {
 	runnerFile := filepath.Join(root, "demo-repo", ".github", "workflows", "ci-runner.yaml")
 	require.FileExists(t, releaseFile)
 	require.FileExists(t, runnerFile)
-	require.Contains(t, fake.secrets, "WORKSPACE_TOKEN")
+	require.Contains(t, fake.secrets, "FACTORY_TOKEN")
 	require.Contains(t, fake.enabled, "release.yaml")
 	require.Contains(t, fake.enabled, "ci-runner.yaml")
 
 	ownership, err := os.ReadFile(filepath.Join(root, "manager-github.json"))
 	require.NoError(t, err)
-	require.Contains(t, string(ownership), "actions-secret/acme/demo-repo/WORKSPACE_TOKEN")
+	require.Contains(t, string(ownership), "actions-secret/acme/demo-repo/FACTORY_TOKEN")
 
 	// The remote substage ran through the dispatched runner and passed.
 	// Two revisions exist: the dirty one bootstrap recorded before the

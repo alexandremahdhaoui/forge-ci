@@ -14,7 +14,7 @@ tools:
   does: Realize every declared GitHub resource and return who owns it.
 example:
   tool: reconcile
-  input: '{"manager":"github","resources":[{"kind":"actions-secret","name":"o/r/WORKSPACE_TOKEN","spec":{"repo":"o/r","secret":"WORKSPACE_TOKEN"}}]}'
+  input: '{"manager":"github","resources":[{"kind":"actions-secret","name":"o/r/FACTORY_TOKEN","spec":{"repo":"o/r","secret":"FACTORY_TOKEN"}}]}'
 notes: 'It knows three kinds. `file-content` converges a file on the local
 
   checkout to the declared content - drift included, unlike the local manager''s

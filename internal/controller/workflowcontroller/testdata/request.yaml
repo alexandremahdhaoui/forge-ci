@@ -4,7 +4,7 @@
 # A request is untrusted input whoever files it and however it arrives.
 #
 # UNEXERCISED: written where Actions cannot run. It needs the same
-# WORKSPACE_TOKEN as intake. A consumer fires it with:
+# FACTORY_TOKEN as intake. A consumer fires it with:
 #
 #   forge-register add go:github.com/x/pkg --reason "..." \
 #     --dispatch <owner>/golden-register
@@ -29,7 +29,7 @@ jobs:
 
       - name: Check out the workspace around this repo
         run: |
-          git config --global url."https://x-access-token:${{ secrets.WORKSPACE_TOKEN }}@github.com/".insteadOf "git@github.com:"
+          git config --global url."https://x-access-token:${{ secrets.FACTORY_TOKEN }}@github.com/".insteadOf "git@github.com:"
           go run github.com/alexandremahdhaoui/forge-factory/cmd/forge-factory@7d34e3e bootstrap git@github.com:alexandremahdhaoui/golden-factory.git .
 
       - name: Install the toolchain from the workspace
@@ -42,7 +42,7 @@ jobs:
 
       - name: File the request
         env:
-          WORKSPACE_TOKEN: ${{ secrets.WORKSPACE_TOKEN }}
+          FACTORY_TOKEN: ${{ secrets.FACTORY_TOKEN }}
           ECOSYSTEM: ${{ github.event.client_payload.ecosystem }}
           PACKAGE: ${{ github.event.client_payload.package }}
           TRACK: ${{ github.event.client_payload.track }}

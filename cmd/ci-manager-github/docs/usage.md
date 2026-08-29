@@ -22,7 +22,7 @@ nothing clicked and nothing scripted.
 ## By hand
 
 ```sh
-echo '{"manager":"github","resources":[{"kind":"actions-secret","name":"o/r/WORKSPACE_TOKEN","spec":{"repo":"o/r","secret":"WORKSPACE_TOKEN"}}]}' \
+echo '{"manager":"github","resources":[{"kind":"actions-secret","name":"o/r/FACTORY_TOKEN","spec":{"repo":"o/r","secret":"FACTORY_TOKEN"}}]}' \
   | ci-manager-github reconcile
 ```
 

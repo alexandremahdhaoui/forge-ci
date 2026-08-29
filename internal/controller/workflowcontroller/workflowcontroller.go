@@ -289,10 +289,6 @@ func (c *Controller) Declare(raw map[string]any) (citypes.DeclareOutput, error) 
 		resources = append(resources, citypes.Resource{
 			Kind: managercontroller.KindActionsSecret,
 			Name: spec.Repo + "/" + s.Name,
-			// Only a bootstrap seals this. A run has no business holding
-			// the rights to rewrite the secrets it runs under, and the
-			// platform agrees: a workflow's own token is excluded from the
-			// secrets API entirely, whatever permissions: declares.
 			BootstrapOnly: true,
 			Spec:          map[string]any{"repo": spec.Repo, "secret": s.Name, "fromEnv": s.FromEnv},
 		})
@@ -302,14 +298,7 @@ func (c *Controller) Declare(raw map[string]any) (citypes.DeclareOutput, error) 
 		resources = append(resources, citypes.Resource{
 			Kind: managercontroller.KindWorkflowEnabled,
 			Name: spec.Repo + "/" + f.Name + ".yaml",
-			// Provisioning, like the secret. Enabling a workflow is an
-			// administrative act on the repo, and the platform gates it the
-			// same way: a run's own token is refused whatever permissions:
-			// declares. Leaving it to the bootstrap means an apply makes no
-			// privileged call at all, so a pipeline run needs no admin
-			// credential to exist.
-			BootstrapOnly: true,
-			Spec:          map[string]any{"repo": spec.Repo, "workflow": f.Name + ".yaml"},
+			Spec: map[string]any{"repo": spec.Repo, "workflow": f.Name + ".yaml"},
 		})
 	}
 

@@ -80,7 +80,7 @@ func TestGitHubRealizerSealsASecret(t *testing.T) {
 	r, api := githubRealizer(t)
 	api.EXPECT().PublicKey(mock.Anything, "o/r").
 		Return("k1", base64.StdEncoding.EncodeToString(pub[:]), nil)
-	api.EXPECT().PutSecret(mock.Anything, "o/r", "WORKSPACE_TOKEN", "k1", mock.Anything).
+	api.EXPECT().PutSecret(mock.Anything, "o/r", "FACTORY_TOKEN", "k1", mock.Anything).
 		RunAndReturn(func(_ context.Context, _, _, _ string, sealedB64 string) error {
 			raw, err := base64.StdEncoding.DecodeString(sealedB64)
 			require.NoError(t, err)
@@ -94,11 +94,11 @@ func TestGitHubRealizerSealsASecret(t *testing.T) {
 
 	action, err := r.Realize(citypes.Resource{
 		Kind: managercontroller.KindActionsSecret,
-		Name: "o/r/WORKSPACE_TOKEN",
-		Spec: map[string]any{"repo": "o/r", "secret": "WORKSPACE_TOKEN", "fromEnv": "TEST_SECRET_SOURCE"},
+		Name: "o/r/FACTORY_TOKEN",
+		Spec: map[string]any{"repo": "o/r", "secret": "FACTORY_TOKEN", "fromEnv": "TEST_SECRET_SOURCE"},
 	})
 	require.NoError(t, err)
-	assert.Equal(t, "sealed secret WORKSPACE_TOKEN on o/r from $TEST_SECRET_SOURCE", action)
+	assert.Equal(t, "sealed secret FACTORY_TOKEN on o/r from $TEST_SECRET_SOURCE", action)
 }
 
 func TestGitHubRealizerRefusesAnEmptySecretSource(t *testing.T) {
@@ -226,8 +226,8 @@ func TestA403OnTheSecretsAPINamesTheRealCause(t *testing.T) {
 
 	_, err := r.Realize(citypes.Resource{
 		Kind: managercontroller.KindActionsSecret,
-		Name: "owner/repo/WORKSPACE_TOKEN",
-		Spec: map[string]any{"repo": "owner/repo", "secret": "WORKSPACE_TOKEN", "fromEnv": "A_PAT"},
+		Name: "owner/repo/FACTORY_TOKEN",
+		Spec: map[string]any{"repo": "owner/repo", "secret": "FACTORY_TOKEN", "fromEnv": "A_PAT"},
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "can never manage repository secrets")

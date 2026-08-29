@@ -24,7 +24,7 @@ hand-edited workflow drifts back to what the spec says.
 ## By hand
 
 ```sh
-echo '{"spec":{"repo":"o/r","runner":{"name":"ci-runner","secret":"WORKSPACE_TOKEN"}}}' \
+echo '{"spec":{"repo":"o/r","runner":{"name":"ci-runner","secret":"FACTORY_TOKEN"}}}' \
   | ci-compute-github declare
 ```
 

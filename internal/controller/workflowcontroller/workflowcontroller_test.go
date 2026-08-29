@@ -42,7 +42,7 @@ echo "$HOME/go/bin" >> "$GITHUB_PATH"
 `,
 		},
 		Secrets: []workflowcontroller.SecretSpec{
-			{Name: "WORKSPACE_TOKEN", FromEnv: "WORKSPACE_TOKEN"},
+			{Name: "FACTORY_TOKEN", FromEnv: "FACTORY_TOKEN"},
 			{Name: "DISPATCH_TOKEN", FromEnv: "DISPATCH_TOKEN"},
 		},
 		Workflows: []workflowcontroller.WorkflowSpec{
@@ -52,12 +52,12 @@ echo "$HOME/go/bin" >> "$GITHUB_PATH"
 # snapshot re-evaluates every track and raises any advisory that is due.
 #
 # UNEXERCISED: written where Actions cannot run. It needs one secret,
-# WORKSPACE_TOKEN - a token that can read every workspace member and push
+# FACTORY_TOKEN - a token that can read every workspace member and push
 # to this repo - because the pipeline builds the whole playground
 # workspace around this checkout.
 `,
 				Cron: "17 5 * * *", Job: "apply", StepName: "Run the register pipeline",
-				Secret: "WORKSPACE_TOKEN", Push: true,
+				Secret: "FACTORY_TOKEN", Push: true,
 				Command: "cd golden-register\ntouch .envrc\nforge-ci apply --config forge-ci.yaml --root ..\n",
 			},
 			{
@@ -68,13 +68,13 @@ echo "$HOME/go/bin" >> "$GITHUB_PATH"
 # A request is untrusted input whoever files it and however it arrives.
 #
 # UNEXERCISED: written where Actions cannot run. It needs the same
-# WORKSPACE_TOKEN as intake. A consumer fires it with:
+# FACTORY_TOKEN as intake. A consumer fires it with:
 #
 #   forge-register add go:github.com/x/pkg --reason "..." \
 #     --dispatch <owner>/golden-register
 `,
 				Events: []string{"admission-request"}, Job: "file", StepName: "File the request",
-				Secret:     "WORKSPACE_TOKEN",
+				Secret:     "FACTORY_TOKEN",
 				PayloadEnv: []string{"ecosystem", "package", "track", "version", "requester", "reason"},
 				Command: `cd golden-register
 forge-register add \
@@ -99,7 +99,7 @@ forge-register add \
 			},
 			{Name: "release", Kind: workflowcontroller.KindRelease},
 		},
-		Runner: workflowcontroller.RunnerSpec{Name: "ci-runner", Secret: "WORKSPACE_TOKEN"},
+		Runner: workflowcontroller.RunnerSpec{Name: "ci-runner", Secret: "FACTORY_TOKEN"},
 	}
 }
 
@@ -206,7 +206,7 @@ func TestDeclareEmitsEveryGitHubResource(t *testing.T) {
 	c := workflowcontroller.New(nil, nil, nil)
 
 	spec := specMap(t)
-	spec["secrets"] = []any{map[string]any{"name": "WORKSPACE_TOKEN"}}
+	spec["secrets"] = []any{map[string]any{"name": "FACTORY_TOKEN"}}
 	spec["workflows"] = []any{map[string]any{"name": "release", "kind": "release"}}
 
 	out, err := c.Declare(spec)
@@ -220,7 +220,7 @@ func TestDeclareEmitsEveryGitHubResource(t *testing.T) {
 	assert.Equal(t, []string{
 		"file-content/r/.github/workflows/release.yaml",
 		"file-content/r/.github/workflows/ci-runner.yaml",
-		"actions-secret/o/r/WORKSPACE_TOKEN",
+		"actions-secret/o/r/FACTORY_TOKEN",
 		"workflow-enabled/o/r/release.yaml",
 		"workflow-enabled/o/r/ci-runner.yaml",
 	}, ids)
@@ -229,21 +229,15 @@ func TestDeclareEmitsEveryGitHubResource(t *testing.T) {
 		require.NotNilf(t, r.Spec, "%s must carry a non-nil spec over the wire", r.ID())
 	}
 
-	// Which of these an apply may touch. Both API-backed kinds are
-	// administrative acts on the repo, and the platform refuses a run's own
-	// token for either, whatever permissions: declares. Leaving both to the
-	// bootstrap is what lets a pipeline run hold no admin credential at all.
-	//
-	// The file is the opposite case and must stay reconciled: change the
-	// spec and the next apply converges the workflow on the checkout.
 	byID := map[string]bool{}
 	for _, r := range out.Resources {
 		byID[r.ID()] = r.BootstrapOnly
 	}
 
-	assert.True(t, byID["actions-secret/o/r/WORKSPACE_TOKEN"], "a credential is written, not converged")
-	assert.True(t, byID["workflow-enabled/o/r/release.yaml"], "enabling a workflow is an admin act")
-	assert.True(t, byID["workflow-enabled/o/r/ci-runner.yaml"])
+	assert.True(t, byID["actions-secret/o/r/FACTORY_TOKEN"], "a credential is written, not converged")
+	assert.False(t, byID["workflow-enabled/o/r/release.yaml"],
+		"a workflow the spec adds or renames must take effect on the next apply")
+	assert.False(t, byID["workflow-enabled/o/r/ci-runner.yaml"])
 	assert.False(t, byID["file-content/r/.github/workflows/release.yaml"],
 		"a workflow file must follow its engine, drift included")
 }
@@ -758,7 +752,7 @@ func TestAWorkflowThatPublishesNothingCarriesNoToken(t *testing.T) {
 // a sealed Actions secret is realized by PUTTING it: the API is write-only,
 // so a put is the only convergence there is, and a put needs the value. The
 // secret reached the checkout step's git config and nothing else, so every
-// run died on "environment variable WORKSPACE_TOKEN is empty" - advice
+// run died on "environment variable FACTORY_TOKEN is empty" - advice
 // written for an operator's laptop, printed inside a runner that has no
 // .envrc to fix.
 func TestTheWorkflowSecretReachesTheCommandAndNotOnlyTheCheckout(t *testing.T) {
@@ -771,7 +765,7 @@ func TestTheWorkflowSecretReachesTheCommandAndNotOnlyTheCheckout(t *testing.T) {
 			Name:    "pipeline",
 			Kind:    "command",
 			Events:  []string{"member-pushed"},
-			Secret:  "WORKSPACE_TOKEN",
+			Secret:  "FACTORY_TOKEN",
 			Command: "forge-ci apply --config forge-ci.yaml --root .",
 		}},
 	})
@@ -779,9 +773,9 @@ func TestTheWorkflowSecretReachesTheCommandAndNotOnlyTheCheckout(t *testing.T) {
 
 	got := rendered[0].Content
 
-	assert.Contains(t, got, "WORKSPACE_TOKEN: ${{ secrets.WORKSPACE_TOKEN }}",
+	assert.Contains(t, got, "FACTORY_TOKEN: ${{ secrets.FACTORY_TOKEN }}",
 		"the apply re-seals this secret, so it needs the value")
-	assert.Contains(t, got, "x-access-token:${{ secrets.WORKSPACE_TOKEN }}",
+	assert.Contains(t, got, "x-access-token:${{ secrets.FACTORY_TOKEN }}",
 		"the checkout still gets it too")
 }
 
@@ -801,5 +795,5 @@ func TestAWorkflowWithNoSecretCarriesNoSecretEnv(t *testing.T) {
 		}},
 	})
 	require.NoError(t, err)
-	assert.NotContains(t, rendered[0].Content, "secrets.WORKSPACE_TOKEN")
+	assert.NotContains(t, rendered[0].Content, "secrets.FACTORY_TOKEN")
 }
