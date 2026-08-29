@@ -43,7 +43,7 @@ echo "$HOME/go/bin" >> "$GITHUB_PATH"
 		},
 		Secrets: []workflowcontroller.SecretSpec{
 			{Name: "FACTORY_TOKEN", FromEnv: "FACTORY_TOKEN"},
-			{Name: "DISPATCH_TOKEN", FromEnv: "DISPATCH_TOKEN"},
+			{Name: "FACTORY_TOKEN", FromEnv: "FACTORY_TOKEN"},
 		},
 		Workflows: []workflowcontroller.WorkflowSpec{
 			{
@@ -91,10 +91,10 @@ forge-register add \
 # pipelines re-sync against it instead of waiting for a human.
 #
 # UNEXERCISED: written where Actions cannot run. It needs one secret,
-# DISPATCH_TOKEN - a token that can send repository_dispatch to the
+# FACTORY_TOKEN - a token that can send repository_dispatch to the
 # consumer repos named below.
 `,
-				TagPattern: "v*", Secret: "DISPATCH_TOKEN", EventType: "register-tag",
+				TagPattern: "v*", Secret: "FACTORY_TOKEN", EventType: "register-tag",
 				Consumers: []string{"golden-factory", "golden-register-consumer"},
 			},
 			{Name: "release", Kind: workflowcontroller.KindRelease},
