@@ -1,7 +1,7 @@
 github.com/alexandremahdhaoui/forge v0.43.0 h1:P0jyvGIBYKDcW7NzmFCANn2Y8QroHC3ARrCUVQN6S9k=
 github.com/alexandremahdhaoui/forge v0.43.0/go.mod h1:c9PnYitwa6l8XlH0yxwhDrbkYAUnIVgDqDgn3neC8Cc=
-github.com/alexandremahdhaoui/forge-revision-spec v0.3.1 h1:oeZ3x4iyMDFpaKDA7A5uo+yPZTTpcJaEOEbfoE8kC1k=
-github.com/alexandremahdhaoui/forge-revision-spec v0.3.1/go.mod h1:C8BKLmitpU8UEd0EvQGFIkbiHEiGFvvox1RyfzuwjXc=
+github.com/alexandremahdhaoui/forge-revision-spec v0.3.0 h1:bQQf+W6sjEc7cP0rXwSVb9Lw3qtMjllj9jQBPRXLRKA=
+github.com/alexandremahdhaoui/forge-revision-spec v0.3.0/go.mod h1:J/43RYdyF91Ah0u2MIvj/0ueuK7+ObZSAysABJvCyNM=
 github.com/golang-jwt/jwt/v5 v5.3.1 h1:kYf81DTWFe7t+1VvL7eS+jKFVWaUnK9cB1qbwn63YCY=
 github.com/golang-jwt/jwt/v5 v5.3.1/go.mod h1:fxCRLWMO43lRc8nhHWY6LGqRcf+1gQWArsqaEUEa5bE=
 github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=
