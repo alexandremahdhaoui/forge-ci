@@ -18,7 +18,7 @@ tools:
   does: Dispatch the runner workflow with a unique marker and the target script, correlate by the marker in the run name, and poll to conclusion.
 example:
   tool: declare
-  input: '{"spec":{"repo":"o/r","runner":{"name":"ci-runner","secret":"FACTORY_TOKEN"}}}'
+  input: '{"spec":{"repo":"o/r","runner":{"name":"ci-runner","secret":"FORGE_CI_GITHUB_TOKEN"}}}'
 notes: 'A remote run that concludes red is a run with status failed, never an
 
   error: an error means the machinery broke. The dispatched script is built

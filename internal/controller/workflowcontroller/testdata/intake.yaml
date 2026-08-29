@@ -2,7 +2,7 @@
 # snapshot re-evaluates every track and raises any advisory that is due.
 #
 # UNEXERCISED: written where Actions cannot run. It needs one secret,
-# FACTORY_TOKEN - a token that can read every workspace member and push
+# FORGE_CI_GITHUB_TOKEN - a token that can read every workspace member and push
 # to this repo - because the pipeline builds the whole playground
 # workspace around this checkout.
 name: intake
@@ -26,7 +26,7 @@ jobs:
 
       - name: Check out the workspace around this repo
         run: |
-          git config --global url."https://x-access-token:${{ secrets.FACTORY_TOKEN }}@github.com/".insteadOf "git@github.com:"
+          git config --global url."https://x-access-token:${{ secrets.FORGE_CI_GITHUB_TOKEN }}@github.com/".insteadOf "git@github.com:"
           go run github.com/alexandremahdhaoui/forge-factory/cmd/forge-factory@7d34e3e bootstrap git@github.com:alexandremahdhaoui/golden-factory.git .
 
       - name: Install the toolchain from the workspace
@@ -39,7 +39,7 @@ jobs:
 
       - name: Run the register pipeline
         env:
-          FACTORY_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          FORGE_CI_GITHUB_TOKEN: ${{ secrets.FORGE_CI_GITHUB_TOKEN }}
         run: |
           cd golden-register
           touch .envrc

@@ -116,8 +116,8 @@ func TestTheGitHubManagerRealizesEveryKindOverMCP(t *testing.T) {
 			Resources: []citypes.Resource{
 				{Kind: "file-content", Name: file, Spec: map[string]any{"content": "on: push\n"}},
 				{
-					Kind: "actions-secret", Name: "o/r/FACTORY_TOKEN",
-					Spec: map[string]any{"repo": "o/r", "secret": "FACTORY_TOKEN"},
+					Kind: "actions-secret", Name: "o/r/FORGE_CI_GITHUB_TOKEN",
+					Spec: map[string]any{"repo": "o/r", "secret": "FORGE_CI_GITHUB_TOKEN"},
 				},
 				{
 					Kind: "workflow-enabled", Name: "o/r/intake.yaml",
@@ -129,7 +129,7 @@ func TestTheGitHubManagerRealizesEveryKindOverMCP(t *testing.T) {
 
 	require.FileExists(t, file)
 	require.Len(t, out.Owned, 3)
-	require.Equal(t, "pat-under-test", fake.open(t, fake.secrets["FACTORY_TOKEN"]),
+	require.Equal(t, "pat-under-test", fake.open(t, fake.secrets["FORGE_CI_GITHUB_TOKEN"]),
 		"the sealed secret must decrypt to the token the environment carried")
 	require.Equal(t, []string{"intake.yaml"}, fake.enabled)
 }
@@ -143,9 +143,9 @@ func TestTheGitHubComputeDeclaresItsSurfaceOverMCP(t *testing.T) {
 			"workspace": map[string]any{
 				"bootstrapCommand": "true", "toolchainScript": "true\n",
 			},
-			"secrets":   []any{map[string]any{"name": "FACTORY_TOKEN"}},
+			"secrets":   []any{map[string]any{"name": "FORGE_CI_GITHUB_TOKEN"}},
 			"workflows": []any{map[string]any{"name": "release", "kind": "release"}},
-			"runner":    map[string]any{"name": "ci-runner", "secret": "FACTORY_TOKEN"},
+			"runner":    map[string]any{"name": "ci-runner", "secret": "FORGE_CI_GITHUB_TOKEN"},
 		}}, &out)
 	require.NoError(t, err)
 
@@ -158,7 +158,7 @@ func TestTheGitHubComputeDeclaresItsSurfaceOverMCP(t *testing.T) {
 	require.Equal(t, []string{
 		"file-content/r/.github/workflows/release.yaml",
 		"file-content/r/.github/workflows/ci-runner.yaml",
-		"actions-secret/o/r/FACTORY_TOKEN",
+		"actions-secret/o/r/FORGE_CI_GITHUB_TOKEN",
 		"workflow-enabled/o/r/release.yaml",
 		"workflow-enabled/o/r/ci-runner.yaml",
 	}, ids)

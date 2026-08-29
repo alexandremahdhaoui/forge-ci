@@ -828,7 +828,7 @@ func TestAWorkspaceThatNeverReleasedStartsAtTheFirstVersion(t *testing.T) {
 func TestOnlyABootstrapTellsTheManagerItMayWriteCredentials(t *testing.T) {
 	secret := citypes.Resource{
 		Kind:          "actions-secret",
-		Name:          "owner/repo/FACTORY_TOKEN",
+		Name:          "owner/repo/FORGE_CI_GITHUB_TOKEN",
 		BootstrapOnly: true,
 	}
 	file := citypes.Resource{Kind: "file-content", Name: ".github/workflows/pipeline.yaml"}
