@@ -228,6 +228,24 @@ func TestDeclareEmitsEveryGitHubResource(t *testing.T) {
 	for _, r := range out.Resources {
 		require.NotNilf(t, r.Spec, "%s must carry a non-nil spec over the wire", r.ID())
 	}
+
+	// Which of these an apply may touch. Both API-backed kinds are
+	// administrative acts on the repo, and the platform refuses a run's own
+	// token for either, whatever permissions: declares. Leaving both to the
+	// bootstrap is what lets a pipeline run hold no admin credential at all.
+	//
+	// The file is the opposite case and must stay reconciled: change the
+	// spec and the next apply converges the workflow on the checkout.
+	byID := map[string]bool{}
+	for _, r := range out.Resources {
+		byID[r.ID()] = r.BootstrapOnly
+	}
+
+	assert.True(t, byID["actions-secret/o/r/WORKSPACE_TOKEN"], "a credential is written, not converged")
+	assert.True(t, byID["workflow-enabled/o/r/release.yaml"], "enabling a workflow is an admin act")
+	assert.True(t, byID["workflow-enabled/o/r/ci-runner.yaml"])
+	assert.False(t, byID["file-content/r/.github/workflows/release.yaml"],
+		"a workflow file must follow its engine, drift included")
 }
 
 // fakeClock advances only when the controller sleeps, so a poll loop
