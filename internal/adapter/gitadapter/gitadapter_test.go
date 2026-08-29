@@ -122,6 +122,7 @@ func TestCommitSuppliesAnIdentityWhenTheHostHasNone(t *testing.T) {
 		"-c", "user.name=Alexandre Mahdhaoui",
 		"-c", "user.email=alexandre.mahdhaoui@gmail.com",
 		"-c", "commit.gpgsign=false",
+		"-c", "tag.gpgsign=false",
 		"commit", "-m", "ci: x").
 		Return(ok(""), nil).Once()
 

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/execadapter"
+	"github.com/alexandremahdhaoui/forge-ci/internal/gitident"
 )
 
 // Publisher puts a release where people can fetch it.
@@ -66,7 +67,13 @@ func (g *GH) Tag(ctx context.Context, dir, tag, sha string) error {
 	// Annotated, with the tag as its message: a lightweight tag dies with
 	// "no tag message" on a machine whose global config signs tags, while an
 	// annotated tag works signed and unsigned alike.
-	if _, err := g.run(ctx, dir, "tagging "+tag, "git", "tag", "-m", tag, tag, sha); err != nil {
+	//
+	// An annotated tag is an object git writes, so it needs a committer
+	// identity exactly as a commit does, and a runner has none. gitident is
+	// shared with gitadapter because this same defect shipped in both.
+	args := append(gitident.Args(ctx, g.runner, dir), "tag", "-m", tag, tag, sha)
+
+	if _, err := g.run(ctx, dir, "tagging "+tag, "git", args...); err != nil {
 		return err
 	}
 

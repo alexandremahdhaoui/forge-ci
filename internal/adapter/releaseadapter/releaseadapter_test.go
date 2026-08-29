@@ -1,9 +1,13 @@
 package releaseadapter_test
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/execadapter"
+	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/gitadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/releaseadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/mocks/execadaptermock"
 	"github.com/stretchr/testify/assert"
@@ -17,6 +21,8 @@ func TestTagPointsAVersionAtACommitAndPushes(t *testing.T) {
 	runner := execadaptermock.NewMockRunner(t)
 	runner.EXPECT().Run(mock.Anything, "/w/a", "git", "tag", "--list", "v0.2.0").
 		Return(execadapter.Result{}, nil).Once()
+	runner.EXPECT().Run(mock.Anything, "/w/a", "git", "var", "GIT_COMMITTER_IDENT").
+		Return(execadapter.Result{Stdout: "A Dev <dev@example.com> 1 +0000\n"}, nil).Once()
 	// Annotated with a message: a lightweight tag fails with "no tag
 	// message" wherever the machine's git config signs tags.
 	runner.EXPECT().Run(mock.Anything, "/w/a", "git", "tag", "-m", "v0.2.0", "v0.2.0", "abc123").
@@ -120,4 +126,69 @@ func TestTagAtOnARepoWithoutTheTagIsNotAnError(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, found)
 	require.Empty(t, sha)
+}
+
+// The test that catches this class, and the only shape that can. Every mocked
+// case above passes against a Tag with no identity handling, because what
+// failed was real git writing a real object. An annotated tag is an object,
+// so it needs a committer exactly as a commit does.
+//
+// Live case: forge-self-factory run 33281063209 died here with "fatal: empty
+// ident name" one stage after the same defect was fixed in gitadapter.
+func TestTagWorksOnAHostWithNoGitIdentityAtAll(t *testing.T) {
+	dir := t.TempDir()
+
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
+
+	// Unset, not empty: git reads an empty GIT_COMMITTER_NAME as an identity
+	// of "", and the environment beats -c, so only an absent one can be
+	// overridden. Absent is the state a runner is in.
+	for _, k := range []string{
+		"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL",
+		"GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL",
+	} {
+		t.Setenv(k, "")
+		require.NoError(t, os.Unsetenv(k))
+	}
+
+	exec := execadapter.New()
+	ctx := context.Background()
+
+	run := func(args ...string) execadapter.Result {
+		t.Helper()
+
+		res, err := exec.Run(ctx, dir, "git", args...)
+		require.NoError(t, err)
+
+		return res
+	}
+
+	require.Zero(t, run("init", "-q").ExitCode)
+
+	// A commit to tag. gitadapter carries the identity for this half.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "a"), []byte("a\n"), 0o600))
+	require.Zero(t, run("add", "a").ExitCode)
+	require.NoError(t, gitadapter.New(exec).Commit(ctx, dir, "seed"))
+
+	sha, err := gitadapter.New(exec).HeadSHA(ctx, dir)
+	require.NoError(t, err)
+
+	// Prove the premise before proving the fix: a bare annotated tag fails
+	// here, so a passing test cannot be passing for the wrong reason.
+	bare := run("tag", "-m", "v0.0.1", "v0.0.1", sha)
+	require.NotZero(t, bare.ExitCode, "a bare annotated tag must fail with no identity")
+	require.Contains(t, bare.Stderr, "ident")
+
+	// Tag pushes, and there is no remote here. The tag object is what this
+	// test is about, so assert the object exists whatever the push did.
+	_ = releaseadapter.New(exec).Tag(ctx, dir, "v0.2.0", sha)
+
+	listed := run("tag", "--list", "v0.2.0")
+	require.Zero(t, listed.ExitCode)
+	require.Contains(t, listed.Stdout, "v0.2.0", "the annotated tag must exist with no ambient identity")
+
+	tagger := run("for-each-ref", "--format=%(taggername) %(taggeremail)", "refs/tags/v0.2.0")
+	require.Contains(t, tagger.Stdout, "alexandre.mahdhaoui@gmail.com")
 }

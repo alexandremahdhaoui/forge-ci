@@ -212,6 +212,15 @@ test:
       command: sh
       args: ["hack/architecture.sh"]
 
+  # Two adapters wrote git objects with no committer identity and shipped
+  # broken, one stage apart, because they shared no code. This gate is what
+  # makes a third one impossible.
+  - name: git-identity
+    runner: forge://generic-test-runner
+    spec:
+      command: sh
+      args: ["hack/git-identity.sh"]
+
   - name: docs
     runner: forge://generic-test-runner
     spec:
