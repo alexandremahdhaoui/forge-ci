@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -233,4 +234,41 @@ func TestA403OnTheSecretsAPINamesTheRealCause(t *testing.T) {
 	require.Contains(t, err.Error(), "can never manage repository secrets")
 	require.Contains(t, err.Error(), "spec.tokenEnv",
 		"the message must name the knob that fixes it")
+}
+
+// The 403 half of the same condition. This is the one the live bootstrap
+// hit: the realizer tolerated only ErrNotFound, so a first bootstrap died on
+// its first repo with seven still to provision.
+func TestGitHubRealizerEnableIsPendingWhenTheWorkflowIsNotActiveYet(t *testing.T) {
+	t.Parallel()
+
+	r, api := githubRealizer(t)
+	api.EXPECT().EnableWorkflow(mock.Anything, "o/r", "fresh.yaml").
+		Return(fmt.Errorf("%w: not active", githubadapter.ErrInactive))
+
+	action, err := r.Realize(citypes.Resource{
+		Kind: managercontroller.KindWorkflowEnabled,
+		Name: "o/r/fresh.yaml",
+		Spec: map[string]any{"repo": "o/r", "workflow": "fresh.yaml"},
+	})
+	require.NoError(t, err)
+	assert.Contains(t, action, "not on the remote yet")
+}
+
+// A denied token must still stop the run. Tolerating every 403 would turn a
+// credential problem into a pipeline that provisions nothing and says it
+// worked.
+func TestGitHubRealizerEnableStillFailsOnARealDenial(t *testing.T) {
+	t.Parallel()
+
+	r, api := githubRealizer(t)
+	api.EXPECT().EnableWorkflow(mock.Anything, "o/r", "denied.yaml").
+		Return(errors.New("status 403: Resource not accessible by personal access token"))
+
+	_, err := r.Realize(citypes.Resource{
+		Kind: managercontroller.KindWorkflowEnabled,
+		Name: "o/r/denied.yaml",
+		Spec: map[string]any{"repo": "o/r", "workflow": "denied.yaml"},
+	})
+	require.ErrorContains(t, err, "status 403")
 }

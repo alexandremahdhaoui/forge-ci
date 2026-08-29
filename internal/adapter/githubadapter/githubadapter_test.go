@@ -164,3 +164,36 @@ func TestNotFoundAndErrors(t *testing.T) {
 	require.ErrorContains(t, err, "status 403")
 	require.ErrorContains(t, err, "not accessible")
 }
+
+// A workflow file written but not yet pushed to the default branch is 403
+// "not active", not 404. That is the answer a first bootstrap actually gets,
+// and reading it as a hard failure killed the run on its first repo.
+func TestAnInactiveWorkflowIsItsOwnErrorAndNotAPermissionDenial(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+
+		if r.URL.Path == "/repos/o/r/actions/workflows/fresh.yaml/enable" {
+			_, _ = w.Write([]byte(`{"message":"Unable to enable a workflow that is not active."}`))
+
+			return
+		}
+
+		_, _ = w.Write([]byte(`{"message":"Resource not accessible by personal access token"}`))
+	}))
+	defer srv.Close()
+
+	c := githubadapter.New(nil, srv.URL, "tok")
+
+	err := c.EnableWorkflow(t.Context(), "o/r", "fresh.yaml")
+	require.ErrorIs(t, err, githubadapter.ErrInactive)
+	require.ErrorContains(t, err, "not active")
+
+	// The same status with a different body is a real denial and must stay
+	// fatal. 403 alone cannot tell the two apart, so the body decides.
+	err = c.EnableWorkflow(t.Context(), "o/r", "denied.yaml")
+	require.NotErrorIs(t, err, githubadapter.ErrInactive)
+	require.NotErrorIs(t, err, githubadapter.ErrNotFound)
+	require.ErrorContains(t, err, "status 403")
+}

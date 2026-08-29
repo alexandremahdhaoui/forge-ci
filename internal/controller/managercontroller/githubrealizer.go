@@ -158,10 +158,16 @@ func (r GitHubRealizer) realizeSecret(res citypes.Resource) (string, error) {
 	return fmt.Sprintf("sealed secret %s on %s from $%s", secret, repo, fromEnv), nil
 }
 
-// realizeEnable enables the workflow by file name. A 404 means the file
-// has never been pushed - the very first bootstrap runs before the
-// pipeline's push delivers it - so it reports pending instead of failing,
-// and a later reconcile completes it.
+// realizeEnable enables the workflow by file name. A file the pipeline has
+// written but not yet pushed cannot be enabled, and the very first bootstrap
+// always meets that state, so it reports pending instead of failing and a
+// later reconcile completes it.
+//
+// GitHub says so two different ways. A file it has never seen is 404. A file
+// it knows but that is not on the default branch is 403 "not active", which
+// is the answer a first bootstrap actually gets - tolerating only the 404
+// killed the run on its first repo. A real permission denial is 403 as well
+// and stays fatal; the adapter separates them.
 func (r GitHubRealizer) realizeEnable(res citypes.Resource) (string, error) {
 	repo, _ := res.Spec["repo"].(string)
 	workflow, _ := res.Spec["workflow"].(string)
@@ -171,7 +177,7 @@ func (r GitHubRealizer) realizeEnable(res citypes.Resource) (string, error) {
 	}
 
 	err := r.api.EnableWorkflow(r.ctx, repo, workflow)
-	if errors.Is(err, githubadapter.ErrNotFound) {
+	if errors.Is(err, githubadapter.ErrNotFound) || errors.Is(err, githubadapter.ErrInactive) {
 		return fmt.Sprintf("workflow %s not on the remote yet; enabled on a later reconcile", workflow), nil
 	}
 

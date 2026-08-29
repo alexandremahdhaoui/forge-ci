@@ -55,6 +55,19 @@ type RunInfo struct {
 // ErrNotFound marks a 404: the thing is not on the remote (yet).
 var ErrNotFound = errors.New("not found on the remote")
 
+// ErrInactive marks the other answer GitHub gives for a workflow file that
+// is not on the default branch yet: 403 with "not active" in the body. It is
+// the same condition as ErrNotFound and a different status, and the status
+// alone cannot tell it apart from a real permission denial - a denied token
+// is 403 too. So the body is the only discriminator there is.
+var ErrInactive = errors.New("on the remote but not active yet")
+
+// inactiveMarker is what GitHub says: "Unable to enable a workflow that is
+// not active." Matching a message is brittle and it is the only signal the
+// API gives, so a change in wording turns a tolerated state back into a hard
+// failure rather than into a silent pass.
+const inactiveMarker = "not active"
+
 // Client is the HTTP implementation.
 type Client struct {
 	client *http.Client
@@ -242,8 +255,13 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any) error
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		excerpt, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		excerpt = bytes.TrimSpace(excerpt)
 
-		return fmt.Errorf("status %d: %s", resp.StatusCode, bytes.TrimSpace(excerpt))
+		if resp.StatusCode == http.StatusForbidden && bytes.Contains(excerpt, []byte(inactiveMarker)) {
+			return fmt.Errorf("%w: %s", ErrInactive, excerpt)
+		}
+
+		return fmt.Errorf("status %d: %s", resp.StatusCode, excerpt)
 	}
 
 	if out == nil {
