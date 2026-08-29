@@ -32,7 +32,9 @@ func NewHandlers() Handlers {
 func toReconcileInput(in ReconcileInput) citypes.ReconcileInput {
 	resources := make([]citypes.Resource, 0, len(in.Resources))
 	for _, r := range in.Resources {
-		resources = append(resources, citypes.Resource{Kind: r.Kind, Name: r.Name, Spec: r.Spec})
+		resources = append(resources, citypes.Resource{
+			Kind: r.Kind, Name: r.Name, BootstrapOnly: r.BootstrapOnly, Spec: r.Spec,
+		})
 	}
 
 	owned := make([]citypes.Ownership, 0, len(in.Owned))
@@ -44,6 +46,7 @@ func toReconcileInput(in ReconcileInput) citypes.ReconcileInput {
 		Manager:   in.Manager,
 		Resources: resources,
 		Owned:     owned,
+		Bootstrap: in.Bootstrap,
 		Spec:      in.Spec,
 	}
 }

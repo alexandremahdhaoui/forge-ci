@@ -45,7 +45,9 @@ func fromResources(in []citypes.Resource) []Resource {
 	out := make([]Resource, 0, len(in))
 
 	for _, r := range in {
-		out = append(out, Resource{Kind: r.Kind, Name: r.Name, Spec: r.Spec})
+		out = append(out, Resource{
+			Kind: r.Kind, Name: r.Name, BootstrapOnly: r.BootstrapOnly, Spec: r.Spec,
+		})
 	}
 
 	return out

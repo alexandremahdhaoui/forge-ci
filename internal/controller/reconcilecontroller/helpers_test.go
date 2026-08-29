@@ -42,6 +42,13 @@ type fakeEngines struct {
 	gateStatus citypes.Status
 	promote    *citypes.PromotionOutput
 	failOn     map[call]error
+
+	// declared is what every engine answers declare with; realized records
+	// the resource ids a manager was handed, and bootstrapped records the
+	// flag it was handed them with.
+	declared     []citypes.Resource
+	realized     []string
+	bootstrapped bool
 }
 
 func newFakeEngines(t *testing.T) *fakeEngines {
@@ -80,14 +87,26 @@ func (f *fakeEngines) dispatch(_ context.Context, uri, tool string, in, out any)
 
 	switch {
 	case tool == "declare":
-		return assign(out, citypes.DeclareOutput{Resources: []citypes.Resource{}})
+		f.mu.Lock()
+		declared := append([]citypes.Resource{}, f.declared...)
+		f.mu.Unlock()
+
+		return assign(out, citypes.DeclareOutput{Resources: declared})
 	case tool == "reconcile":
 		var input citypes.ReconcileInput
 		require.NoError(f.t, remarshal(in, &input))
 
+		f.mu.Lock()
+		f.bootstrapped = f.bootstrapped || input.Bootstrap
+		f.mu.Unlock()
+
 		owned := make([]citypes.Ownership, 0, len(input.Resources))
 		for _, r := range input.Resources {
 			owned = append(owned, citypes.Ownership{Resource: r.ID(), Manager: input.Manager})
+
+			f.mu.Lock()
+			f.realized = append(f.realized, r.ID())
+			f.mu.Unlock()
 		}
 
 		return assign(out, citypes.ReconcileOutput{Owned: owned, Actions: []string{"reconciled"}})

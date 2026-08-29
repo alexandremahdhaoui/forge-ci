@@ -16,9 +16,15 @@ const (
 )
 
 type Resource struct {
-	Kind string         `json:"kind" jsonschema:"Resource kind, for example directory or table"`
-	Name string         `json:"name" jsonschema:"Unique name within the kind"`
-	Spec map[string]any `json:"spec,omitempty" jsonschema:"Kind specific properties"`
+	Kind string `json:"kind" jsonschema:"Resource kind, for example directory or table"`
+	Name string `json:"name" jsonschema:"Unique name within the kind"`
+	// BootstrapOnly marks a resource an apply must not touch. A credential
+	// cannot be converged: it is written blind, because nothing can be read
+	// back to compare against, so reconciling one is only writing it again -
+	// and doing that on every run means every run must hold the rights to
+	// rewrite it. Only a bootstrap is responsible for credentials.
+	BootstrapOnly bool           `json:"bootstrapOnly,omitempty" jsonschema:"Realized by a bootstrap and never by an apply"`
+	Spec          map[string]any `json:"spec,omitempty" jsonschema:"Kind specific properties"`
 }
 
 func (r Resource) ID() string {
@@ -35,9 +41,14 @@ type DeclareOutput struct {
 }
 
 type ReconcileInput struct {
-	Manager   string         `json:"manager"`
-	Resources []Resource     `json:"resources"`
-	Owned     []Ownership    `json:"owned,omitempty"`
+	Manager   string      `json:"manager"`
+	Resources []Resource  `json:"resources"`
+	Owned     []Ownership `json:"owned,omitempty"`
+	// Bootstrap says whether this is the provisioning ceremony. A resource
+	// marked BootstrapOnly is handed over either way - ownership is what
+	// stops another manager claiming it - but it is realized only when this
+	// is true.
+	Bootstrap bool           `json:"bootstrap,omitempty"`
 	Spec      map[string]any `json:"spec,omitempty"`
 }
 

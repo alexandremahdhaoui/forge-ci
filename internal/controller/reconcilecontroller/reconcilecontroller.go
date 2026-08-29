@@ -98,7 +98,9 @@ func New(caller engineadapter.Caller, git gitadapter.Git, now func() time.Time) 
 func (c *Controller) Apply(ctx context.Context, p config.Pipeline, root string) (Report, error) {
 	index := newIndex(p)
 
-	actions, err := c.reconcileResources(ctx, p, index, root)
+	// false: an apply converges what can be converged and leaves credentials
+	// alone. Only a bootstrap is responsible for those.
+	actions, err := c.reconcileResources(ctx, p, index, root, false)
 	if err != nil {
 		return Report{}, err
 	}
@@ -502,11 +504,21 @@ func (c *Controller) promote(
 	return out.Advance, out.Reason, nil
 }
 
+// reconcileResources realizes what every engine declares. bootstrap says
+// whether this is the provisioning ceremony: when it is not, a resource the
+// declaring engine marked bootstrapOnly is left alone.
+//
+// That is not an optimisation. A credential is written blind - nothing can
+// be read back to compare against - so reconciling one is only writing it
+// again, and a run that did so would have to hold the rights to rewrite the
+// secrets it runs under. The platform draws the same line: a workflow's own
+// token is excluded from the secrets API whatever its permissions say.
 func (c *Controller) reconcileResources(
 	ctx context.Context,
 	p config.Pipeline,
 	index engineIndex,
 	root string,
+	bootstrap bool,
 ) ([]string, error) {
 	owned, err := c.readOwnership(ctx, index)
 	if err != nil {
@@ -523,6 +535,10 @@ func (c *Controller) reconcileResources(
 			return nil, fmt.Errorf("asking engine %q what it needs: %w", engine.Alias, err)
 		}
 
+		// Everything declared is handed over, bootstrapOnly included. The
+		// manager decides what to realize; dropping a resource here would
+		// drop it from the ownership record too, and that record is what
+		// stops another manager claiming it.
 		byManager[engine.Manager] = append(byManager[engine.Manager], declared.Resources...)
 	}
 
@@ -558,6 +574,7 @@ func (c *Controller) reconcileResources(
 			Manager:   alias,
 			Resources: byManager[alias],
 			Owned:     owned,
+			Bootstrap: bootstrap,
 			Spec:      spec,
 		}, &out); err != nil {
 			return nil, fmt.Errorf("manager %q: %w", alias, err)

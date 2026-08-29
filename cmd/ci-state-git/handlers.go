@@ -60,6 +60,10 @@ func fromResources(in []citypes.Resource) []Resource {
 	out := make([]Resource, 0, len(in))
 
 	for _, r := range in {
+		// No BootstrapOnly here: this engine's wire types come from
+		// forge-revision-spec, not engines.v1.yaml, and it declares
+		// directories rather than credentials. Widening a second spec for a
+		// field nothing here sets would be cost with no buyer.
 		out = append(out, Resource{Kind: r.Kind, Name: r.Name, Spec: r.Spec})
 	}
 

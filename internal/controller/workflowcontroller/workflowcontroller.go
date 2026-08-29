@@ -289,7 +289,12 @@ func (c *Controller) Declare(raw map[string]any) (citypes.DeclareOutput, error) 
 		resources = append(resources, citypes.Resource{
 			Kind: managercontroller.KindActionsSecret,
 			Name: spec.Repo + "/" + s.Name,
-			Spec: map[string]any{"repo": spec.Repo, "secret": s.Name, "fromEnv": s.FromEnv},
+			// Only a bootstrap seals this. A run has no business holding
+			// the rights to rewrite the secrets it runs under, and the
+			// platform agrees: a workflow's own token is excluded from the
+			// secrets API entirely, whatever permissions: declares.
+			BootstrapOnly: true,
+			Spec:          map[string]any{"repo": spec.Repo, "secret": s.Name, "fromEnv": s.FromEnv},
 		})
 	}
 

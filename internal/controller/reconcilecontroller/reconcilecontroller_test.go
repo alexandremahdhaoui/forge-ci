@@ -816,3 +816,48 @@ func TestAWorkspaceThatNeverReleasedStartsAtTheFirstVersion(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "v0.1.0", f.published[0].Version)
 }
+
+// TestOnlyABootstrapTellsTheManagerItMayWriteCredentials pins the flag that
+// keeps a pipeline run from holding the rights to rewrite the secrets it runs
+// under.
+//
+// The core hands over everything, bootstrapOnly included: dropping a resource
+// here would drop it from the ownership record too, and that record is what
+// stops another manager claiming it. What changes is the flag, and the
+// manager reads it.
+func TestOnlyABootstrapTellsTheManagerItMayWriteCredentials(t *testing.T) {
+	secret := citypes.Resource{
+		Kind:          "actions-secret",
+		Name:          "owner/repo/WORKSPACE_TOKEN",
+		BootstrapOnly: true,
+	}
+	file := citypes.Resource{Kind: "file-content", Name: ".github/workflows/pipeline.yaml"}
+
+	t.Run("an apply says no", func(t *testing.T) {
+		f := newFakeEngines(t)
+		f.declared = []citypes.Resource{file, secret}
+
+		_, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc123"), clock()).Apply(
+			context.Background(),
+			pipeline(stage("build", substage("default", []string{"build"}))), "/work")
+		require.NoError(t, err)
+
+		require.Contains(t, f.realized, secret.ID(),
+			"the resource still reaches the manager, so ownership survives")
+		require.False(t, f.bootstrapped,
+			"but the manager is told this is not the ceremony that writes credentials")
+	})
+
+	t.Run("a bootstrap says yes", func(t *testing.T) {
+		f := newFakeEngines(t)
+		f.declared = []citypes.Resource{file, secret}
+
+		_, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc123"), clock()).Bootstrap(
+			context.Background(),
+			pipeline(stage("build", substage("default", []string{"build"}))), "/work")
+		require.NoError(t, err)
+
+		require.True(t, f.bootstrapped,
+			"the bootstrap is the one ceremony responsible for credentials")
+	})
+}

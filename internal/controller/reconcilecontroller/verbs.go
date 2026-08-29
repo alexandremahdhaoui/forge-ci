@@ -10,7 +10,8 @@ import (
 func (c *Controller) Bootstrap(ctx context.Context, p config.Pipeline, root string) (Report, error) {
 	index := newIndex(p)
 
-	actions, err := c.reconcileResources(ctx, p, index, root)
+	// true: the bootstrap is the one ceremony that writes credentials.
+	actions, err := c.reconcileResources(ctx, p, index, root, true)
 	if err != nil {
 		return Report{}, err
 	}

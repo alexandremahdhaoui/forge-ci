@@ -225,3 +225,56 @@ func TestNoStatePathSkipsRecording(t *testing.T) {
 	})
 	require.NoError(t, err)
 }
+
+// TestABootstrapOnlyResourceIsOwnedButNotRealizedByAnApply pins the rule that
+// keeps a pipeline run from holding the rights to rewrite the secrets it runs
+// under.
+//
+// A credential cannot be converged: it is written blind, because nothing can
+// be read back to compare against, so realizing one on every run is only
+// writing it again. The platform draws the same line - a workflow's own token
+// is excluded from the secrets API whatever its permissions declare.
+//
+// Ownership is recorded either way. That record is what stops another manager
+// claiming the resource, and that is true whichever ceremony this is.
+func TestABootstrapOnlyResourceIsOwnedButNotRealizedByAnApply(t *testing.T) {
+	dir := t.TempDir()
+
+	credential := citypes.Resource{
+		Kind:          "directory",
+		Name:          filepath.Join(dir, "pretend-credential"),
+		BootstrapOnly: true,
+	}
+	ordinary := citypes.Resource{Kind: "directory", Name: filepath.Join(dir, "ordinary")}
+
+	t.Run("an apply owns it and leaves it alone", func(t *testing.T) {
+		out, err := local(t).Reconcile(citypes.ReconcileInput{
+			Manager:   "local",
+			Resources: []citypes.Resource{ordinary, credential},
+		})
+		require.NoError(t, err)
+
+		require.NoDirExists(t, credential.Name, "an apply must not write a credential")
+		require.DirExists(t, ordinary.Name, "everything else still converges")
+
+		ids := []string{}
+		for _, o := range out.Owned {
+			ids = append(ids, o.Resource)
+		}
+
+		require.Contains(t, ids, credential.ID(),
+			"ownership survives, or another manager could claim it")
+		require.Contains(t, out.Actions, "left "+credential.ID()+" alone: only a bootstrap writes it",
+			"and it says so rather than looking like it did the work")
+	})
+
+	t.Run("a bootstrap writes it", func(t *testing.T) {
+		_, err := local(t).Reconcile(citypes.ReconcileInput{
+			Manager:   "local",
+			Resources: []citypes.Resource{credential},
+			Bootstrap: true,
+		})
+		require.NoError(t, err)
+		require.DirExists(t, credential.Name)
+	})
+}

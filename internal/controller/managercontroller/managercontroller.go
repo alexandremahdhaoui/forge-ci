@@ -49,13 +49,29 @@ func (c *Controller) Reconcile(in citypes.ReconcileInput) (citypes.ReconcileOutp
 				r.ID(), ErrOwnedElsewhere, prev, in.Manager)
 		}
 
+		// Ownership is recorded either way. It is what stops another manager
+		// claiming the resource, and that is true whether or not this
+		// particular reconcile is allowed to write it.
+		out.Owned = append(out.Owned, citypes.Ownership{Resource: r.ID(), Manager: in.Manager})
+
+		// A bootstrapOnly resource cannot be converged: it is written blind,
+		// because nothing can be read back to compare against, so realizing
+		// one on every run is only writing it again - and a run that did so
+		// would have to hold the rights to rewrite it. Credentials are the
+		// case this exists for. Only a bootstrap writes them.
+		if r.BootstrapOnly && !in.Bootstrap {
+			out.Actions = append(out.Actions,
+				"left "+r.ID()+" alone: only a bootstrap writes it")
+
+			continue
+		}
+
 		action, err := c.realizer.Realize(r)
 		if err != nil {
 			return citypes.ReconcileOutput{}, fmt.Errorf("realizing %s: %w", r.ID(), err)
 		}
 
 		out.Actions = append(out.Actions, action)
-		out.Owned = append(out.Owned, citypes.Ownership{Resource: r.ID(), Manager: in.Manager})
 	}
 
 	sort.Slice(out.Owned, func(i, j int) bool { return out.Owned[i].Resource < out.Owned[j].Resource })
