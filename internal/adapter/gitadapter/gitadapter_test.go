@@ -3,6 +3,8 @@ package gitadapter_test
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/execadapter"
@@ -88,11 +90,42 @@ func TestRemoteSHAWithNoSuchRef(t *testing.T) {
 func TestAddAndCommit(t *testing.T) {
 	r := execadaptermock.NewMockRunner(t)
 	r.EXPECT().Run(mock.Anything, "/repo", "git", "add", ".").Return(ok(""), nil).Once()
+	r.EXPECT().Run(mock.Anything, "/repo", "git", "var", "GIT_COMMITTER_IDENT").
+		Return(ok("A Dev <dev@example.com> 1 +0000\n"), nil).Once()
 	r.EXPECT().Run(mock.Anything, "/repo", "git", "commit", "-m", "ci: x").Return(ok(""), nil).Once()
 
 	g := gitadapter.New(r)
 	require.NoError(t, g.Add(context.Background(), "/repo", "."))
 	require.NoError(t, g.Commit(context.Background(), "/repo", "ci: x"))
+}
+
+// A host that already names a committer keeps it, so a local run stays
+// attributed to whoever ran it rather than to the engine.
+func TestCommitLeavesAnExistingIdentityAlone(t *testing.T) {
+	r := execadaptermock.NewMockRunner(t)
+	r.EXPECT().Run(mock.Anything, "/repo", "git", "var", "GIT_COMMITTER_IDENT").
+		Return(ok("A Dev <dev@example.com> 1 +0000\n"), nil).Once()
+	r.EXPECT().Run(mock.Anything, "/repo", "git", "commit", "-m", "ci: x").
+		Return(ok(""), nil).Once()
+
+	require.NoError(t, gitadapter.New(r).Commit(context.Background(), "/repo", "ci: x"))
+}
+
+// A runner has no identity and git exits 128 on "empty ident name". The
+// engine supplies its own rather than failing, and turns signing off with it:
+// a host with no identity has no signing key either.
+func TestCommitSuppliesAnIdentityWhenTheHostHasNone(t *testing.T) {
+	r := execadaptermock.NewMockRunner(t)
+	r.EXPECT().Run(mock.Anything, "/repo", "git", "var", "GIT_COMMITTER_IDENT").
+		Return(execadapter.Result{ExitCode: 128, Stderr: "fatal: empty ident name"}, nil).Once()
+	r.EXPECT().Run(mock.Anything, "/repo", "git",
+		"-c", "user.name=Alexandre Mahdhaoui",
+		"-c", "user.email=alexandre.mahdhaoui@gmail.com",
+		"-c", "commit.gpgsign=false",
+		"commit", "-m", "ci: x").
+		Return(ok(""), nil).Once()
+
+	require.NoError(t, gitadapter.New(r).Commit(context.Background(), "/repo", "ci: x"))
 }
 
 // A state repo whose .gitignore carries an unanchored output pattern (build/
@@ -253,4 +286,64 @@ func TestSubjectsSinceReadsTheRangeWhenTheTagIsKnown(t *testing.T) {
 	got, err := gitadapter.New(r).SubjectsSince(context.Background(), "/w/a", "v0.49.0")
 	require.NoError(t, err)
 	require.Equal(t, []string{"feat: only the new one"}, got)
+}
+
+// The test that would have caught this, and the only shape that can. Every
+// mocked case above passes against a broken Commit, because the thing that
+// failed was real git reading real config. This runs real git with no
+// ambient identity anywhere - no global config, no system config, an empty
+// HOME - which is exactly the state a CI runner is in.
+//
+// Live case: seven consecutive forge-self pipeline runs died here with
+// "fatal: empty ident name", while every developer machine passed.
+func TestCommitWorksOnAHostWithNoGitIdentityAtAll(t *testing.T) {
+	dir := t.TempDir()
+
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
+
+	// Unset, not empty. A runner leaves these absent, and that distinction
+	// decides the fix: git reads an empty GIT_COMMITTER_NAME as an identity
+	// of "", and the environment beats -c, so an empty one cannot be
+	// overridden while an absent one can. t.Setenv registers the restore.
+	for _, k := range []string{
+		"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL",
+		"GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL",
+	} {
+		t.Setenv(k, "")
+		require.NoError(t, os.Unsetenv(k))
+	}
+
+	g := gitadapter.New(execadapter.New())
+	ctx := context.Background()
+
+	run := func(args ...string) {
+		t.Helper()
+
+		res, err := execadapter.New().Run(ctx, dir, "git", args...)
+		require.NoError(t, err)
+		require.Zero(t, res.ExitCode, "git %v: %s", args, res.Stderr)
+	}
+
+	run("init", "-q")
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "record.json"), []byte("{}\n"), 0o600))
+	require.NoError(t, g.Add(ctx, dir, "record.json"))
+
+	// Prove the premise before proving the fix: a bare commit here fails.
+	bare, err := execadapter.New().Run(ctx, dir, "git", "commit", "-m", "bare")
+	require.NoError(t, err)
+	require.NotZero(t, bare.ExitCode, "a bare commit must fail with no identity, or this test proves nothing")
+	require.Contains(t, bare.Stderr, "ident")
+
+	require.NoError(t, g.Commit(ctx, dir, "ci: record"))
+
+	sha, err := g.HeadSHA(ctx, dir)
+	require.NoError(t, err)
+	require.NotEmpty(t, sha)
+
+	author, err := execadapter.New().Run(ctx, dir, "log", "-1", "--format=%an <%ae>")
+	if err == nil && author.ExitCode == 0 {
+		require.Contains(t, author.Stdout, "alexandre.mahdhaoui@gmail.com")
+	}
 }

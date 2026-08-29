@@ -91,10 +91,51 @@ func (g *CLI) Add(ctx context.Context, dir, path string) error {
 	return err
 }
 
+// Identity the engine commits under when the host has none.
+//
+// No Signed-off-by trailer goes with it. That trailer is a DCO attestation, a
+// human certifying they wrote the change and may submit it. A revision record
+// is written by the tool, and asserting authorship on the tool's behalf would
+// be a claim nobody made.
+const (
+	fallbackName  = "Alexandre Mahdhaoui"
+	fallbackEmail = "alexandre.mahdhaoui@gmail.com"
+)
+
+// Commit records the staged record.
+//
+// The identity is a floor rather than an override: a host that has one keeps
+// it, so a local run stays attributed to whoever ran it, and a host with none
+// gets the engine's own instead of failing. A CI runner has none - git exits
+// 128 with "empty ident name" - and every pipeline run died there while every
+// developer machine passed, because a global identity made the gap invisible.
+//
+// Signing goes off with the fallback for the same reason it is needed: a host
+// with no identity configured has no signing key either, and an ambient
+// commit.gpgsign would turn one failure into another.
 func (g *CLI) Commit(ctx context.Context, dir, message string) error {
-	_, err := g.run(ctx, dir, "committing in "+dir, "commit", "-m", message)
+	args := []string{"commit", "-m", message}
+
+	if !g.hasIdentity(ctx, dir) {
+		args = append([]string{
+			"-c", "user.name=" + fallbackName,
+			"-c", "user.email=" + fallbackEmail,
+			"-c", "commit.gpgsign=false",
+		}, args...)
+	}
+
+	_, err := g.run(ctx, dir, "committing in "+dir, args...)
 
 	return err
+}
+
+// hasIdentity asks git whether it can name a committer at all. git var
+// resolves config, environment and defaults together, which is the same
+// answer commit itself would reach, so this cannot disagree with it.
+func (g *CLI) hasIdentity(ctx context.Context, dir string) bool {
+	res, err := g.runner.Run(ctx, dir, "git", "var", "GIT_COMMITTER_IDENT")
+
+	return err == nil && res.ExitCode == 0 && strings.TrimSpace(res.Stdout) != ""
 }
 
 // Staged reports whether anything is in the index waiting to be
