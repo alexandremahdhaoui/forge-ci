@@ -221,6 +221,15 @@ test:
       command: sh
       args: ["hack/git-identity.sh"]
 
+  # A field the wire carries and the handler forgets is a zero value at
+  # runtime, never a compile error. Both compute engines dropped the version
+  # this way and the whole v0.45.1 release shipped mis-stamped binaries.
+  - name: wire-boundary
+    runner: forge://generic-test-runner
+    spec:
+      command: sh
+      args: ["hack/wire-boundary.sh"]
+
   - name: docs
     runner: forge://generic-test-runner
     spec:

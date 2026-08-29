@@ -68,6 +68,7 @@ func toRunInput(in RunInput) citypes.RunInput {
 
 	return citypes.RunInput{
 		Revision: in.Revision,
+		Version:  in.Version,
 		Stage:    in.Stage,
 		Substage: in.Substage,
 		Targets:  targets,

@@ -421,3 +421,46 @@ func TestTheWatchTriggerDeclaresNothingWithoutANotifyBlockOverMCP(t *testing.T) 
 	require.NoError(t, err)
 	require.Empty(t, out.Resources)
 }
+
+// The version the core decided has to reach the target's environment, or a
+// binary stamps whatever tag its own repo happens to carry. It crosses the
+// wire as RunInput.version, and the hand-written mapping in each engine is
+// what turns it into an environment variable.
+//
+// Live case: both compute engines dropped it at that mapping, so every binary
+// in the v0.45.1 release was stamped v0.44.5-6-gcb456c5 by git describe while
+// the release itself was correct. A dropped field is a zero value, not a
+// compile error, which is why only the wire can catch it.
+func TestTheDecidedVersionReachesTheTargetEnvironmentOverMCP(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "seen.txt")
+
+	// A target names "forge" or "forge-ci" and nothing else, both resolved by
+	// name on PATH. So the probe is a shim called forge, ahead of the real one.
+	shimDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(shimDir, "forge"),
+		[]byte("#!/bin/sh\nprintf '%s|%s' \"$FORGE_CI_VERSION\" \"$FORGE_CI_REVISION\" > "+out+"\n"),
+		0o700))
+	t.Setenv("PATH", shimDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	var runOut citypes.RunOutput
+
+	err := caller().Call(context.Background(),
+		"forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-compute-local@v0.1.0",
+		"run",
+		citypes.RunInput{
+			Revision: "rev-abc",
+			Version:  "v9.9.9",
+			Stage:    "publish",
+			Substage: "dist",
+			Root:     dir,
+			Targets:  []citypes.Target{{Alias: "stamp", Forge: "test run stamp", In: []string{"."}}},
+			Repos:    []citypes.RepoCheckout{{Name: ".", Path: dir, SHA: "abc"}},
+		}, &runOut)
+	require.NoError(t, err)
+
+	seen, readErr := os.ReadFile(out)
+	require.NoError(t, readErr, "the target must have run: %s", runOut.Output)
+	require.Equal(t, "v9.9.9|rev-abc", string(seen),
+		"the version the core decided must reach the target, not be dropped at the engine boundary")
+}
