@@ -74,7 +74,7 @@ spec:
 - key: workspace
   type: object
   required: false
-  means: 'The checkout preamble every command workflow and the runner share: factoryRepo, placeScript, bootstrapCommand (run inside the repo checkout), toolchainScript (verbatim install block). Required once any command workflow or the runner exists.'
+  means: 'The checkout preamble every command workflow and the runner share: bootstrapCommand (one verbatim command that stands the whole workspace up in the working directory, naming its own factory), toolchainScript (verbatim install block). Required once any command workflow or the runner exists.'
 - key: secrets
   type: list
   required: false

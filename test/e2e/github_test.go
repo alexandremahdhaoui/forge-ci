@@ -104,8 +104,6 @@ engines:
       dir: demo-repo
       apiBaseURL: ` + fakeURL + `
       workspace:
-        factoryRepo: ws
-        placeScript: hack/place.sh
         bootstrapCommand: "true"
         toolchainScript: "true"
       secrets:

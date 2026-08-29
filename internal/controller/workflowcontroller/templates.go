@@ -74,7 +74,13 @@ func renderCommand(spec Spec, w WorkflowSpec) string {
 		job = "run"
 	}
 
-	fmt.Fprintf(&b, "\npermissions:\n  contents: write\n\njobs:\n  %s:\n    runs-on: ubuntu-latest\n    steps:\n", job)
+	b.WriteString("\npermissions:\n  contents: write\n")
+
+	if reportsFailure(w) {
+		b.WriteString("  issues: write\n")
+	}
+
+	fmt.Fprintf(&b, "\njobs:\n  %s:\n    runs-on: ubuntu-latest\n    steps:\n", job)
 	writeSetup(&b, spec)
 	writeWorkspaceCheckout(&b, spec, w.Secret)
 	writeToolchain(&b, spec)
@@ -103,7 +109,49 @@ func renderCommand(spec Spec, w WorkflowSpec) string {
 			spec.Dir, spec.Ref)
 	}
 
+	writeFailureReport(&b, w)
+
 	return b.String()
+}
+
+// reportsFailure answers whether a workflow needs to raise its own alarm. A
+// scheduled run has no audience: nobody typed it and nobody is waiting on
+// it, so a red run is a red icon on a page nobody opens. One instance failed
+// every morning for eight days that way, and the first person to look found
+// it by listing runs on a hunch.
+//
+// A dispatched run has the person who dispatched it, so it reports nothing
+// and files nothing.
+func reportsFailure(w WorkflowSpec) bool {
+	return w.Cron != ""
+}
+
+// writeFailureReport renders the step that opens an issue when the run
+// fails. It uses the token every job already has, so a workflow needs no new
+// secret to be able to speak.
+//
+// It dedupes on the title: a job that fails daily should leave one issue
+// open, not thirty. Reopening after a green run is deliberate too, because a
+// failure that comes back is news again.
+func writeFailureReport(b *strings.Builder, w WorkflowSpec) {
+	if !reportsFailure(w) {
+		return
+	}
+
+	fmt.Fprintf(b, `
+      - name: Say that the run failed
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TITLE: "scheduled %s is failing"
+        run: |
+          open=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "$TITLE in:title" --json number --jq length)
+          if [ "$open" -gt 0 ]; then
+            echo "an issue is already open for this; not filing another"
+            exit 0
+          fi
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID failed. Nobody is watching a scheduled run, so it says so here. Close this once a run goes green; a failure after that files a new one."
+`, w.Name)
 }
 
 // renderFanOut tells every consumer about a new tag through a
@@ -267,18 +315,24 @@ func writeSetup(b *strings.Builder, spec Spec) {
 	}
 }
 
+// writeWorkspaceCheckout renders the two things a runner needs before it has
+// a toolchain: credentials for private members, then the instance's own seed
+// command. The seed is verbatim, because forge-ci names no toolchain and no
+// bootstrap verb.
+//
+// This rendered five hand-written lines once. They cloned the factory, ran
+// its place script from the directory above it, cloned the repo a second
+// time, and passed relative paths across two directory levels. Two of those
+// lines carried bugs and every scheduled run failed for a week. The seed
+// command already stands a workspace up in one call, so the reimplementation
+// is gone rather than repaired.
 func writeWorkspaceCheckout(b *strings.Builder, spec Spec, secret string) {
-	ws := spec.Workspace
-
 	fmt.Fprintf(b, `
       - name: Check out the workspace around this repo
         run: |
           git config --global url."https://x-access-token:${{ secrets.%s }}@github.com/".insteadOf "git@github.com:"
-          git clone "git@github.com:${{ github.repository_owner }}/%s.git"
-          sh %s/%s
-          git clone "git@github.com:${{ github.repository }}.git" %s
-          (cd %s && %s)
-`, secret, ws.FactoryRepo, ws.FactoryRepo, ws.PlaceScript, spec.Dir, spec.Dir, ws.BootstrapCommand)
+`, secret)
+	writeIndented(b, spec.Workspace.BootstrapCommand)
 }
 
 // writeToolchain renders the instance's verbatim toolchain script.

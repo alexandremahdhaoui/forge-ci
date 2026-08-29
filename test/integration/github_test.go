@@ -141,7 +141,6 @@ func TestTheGitHubComputeDeclaresItsSurfaceOverMCP(t *testing.T) {
 		map[string]any{"spec": map[string]any{
 			"repo": "o/r",
 			"workspace": map[string]any{
-				"factoryRepo": "ws", "placeScript": "hack/place.sh",
 				"bootstrapCommand": "true", "toolchainScript": "true\n",
 			},
 			"secrets":   []any{map[string]any{"name": "WORKSPACE_TOKEN"}},
@@ -181,7 +180,6 @@ func TestTheGitHubComputeReportsARedRunAsFailedOverMCP(t *testing.T) {
 				"repo":       "o/r",
 				"apiBaseURL": srv.URL,
 				"workspace": map[string]any{
-					"factoryRepo": "ws", "placeScript": "hack/place.sh",
 					"bootstrapCommand": "true", "toolchainScript": "true\n",
 				},
 				"runner": map[string]any{"name": "ci-runner", "pollIntervalSeconds": 1},

@@ -58,15 +58,14 @@ type Spec struct {
 	Runner RunnerSpec `json:"runner,omitzero"`
 }
 
-// Workspace is the checkout preamble: the workspace-owning repo, its
-// place script, the command that materializes the workspace, and the
-// verbatim script that installs the toolchain. The two scripts are the
-// instance's own words - forge-ci names no toolchain.
+// Workspace is the checkout preamble: one command that stands the whole
+// workspace up from nothing, and one that installs the toolchain into it.
+// Both are the instance's own words - forge-ci names no toolchain.
 type Workspace struct {
-	FactoryRepo string `json:"factoryRepo"`
-	PlaceScript string `json:"placeScript"`
-	// BootstrapCommand runs inside the repo checkout and materializes
-	// the workspace around it.
+	// BootstrapCommand runs in the runner's working directory and leaves a
+	// complete workspace there. It names its own factory, so it is one
+	// command and not a recipe: forge-ci decides no argument, no path and
+	// no order, which is what a recipe here got wrong three times.
 	BootstrapCommand string `json:"bootstrapCommand"`
 	// ToolchainScript is the verbatim run block installing whatever the
 	// targets need.
@@ -205,9 +204,9 @@ func ParseSpec(raw map[string]any) (Spec, error) {
 
 	if needsWorkspace || s.Runner.Name != "" {
 		ws := s.Workspace
-		if ws.FactoryRepo == "" || ws.PlaceScript == "" || ws.BootstrapCommand == "" || ws.ToolchainScript == "" {
+		if ws.BootstrapCommand == "" || ws.ToolchainScript == "" {
 			return Spec{}, errors.New(
-				"workspace.factoryRepo, placeScript, bootstrapCommand and toolchainScript are required by command workflows and the runner")
+				"workspace.bootstrapCommand and toolchainScript are required by command workflows and the runner")
 		}
 	}
 

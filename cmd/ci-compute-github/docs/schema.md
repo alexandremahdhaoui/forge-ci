@@ -12,7 +12,7 @@ The `spec` block on this engine's entry in `forge-ci.yaml`.
 | `tokenEnv` | string | no | The environment variable holding the API token for the run tool. Defaults to GITHUB_TOKEN. |
 | `ref` | string | no | The branch dispatches target and pushes land on. Defaults to main. |
 | `setup` | list | no | Setup actions run first in every command workflow and the runner, each {uses, with}. The instance names its own toolchain actions; this engine renders whatever it is handed. |
-| `workspace` | object | no | The checkout preamble every command workflow and the runner share: factoryRepo, placeScript, bootstrapCommand (run inside the repo checkout), toolchainScript (verbatim install block). Required once any command workflow or the runner exists. |
+| `workspace` | object | no | The checkout preamble every command workflow and the runner share: bootstrapCommand (one verbatim command that stands the whole workspace up in the working directory, naming its own factory), toolchainScript (verbatim install block). Required once any command workflow or the runner exists. |
 | `secrets` | list | no | The Actions secrets to seal, each with name and the fromEnv variable its value is read from (default GITHUB_TOKEN). |
 | `workflows` | list | no | The owned workflows, each a kind with its parameters or verbatim content, plus an optional header comment block. |
 | `runner` | object | no | The run tool's dispatch target: name, secret, setupScript (verbatim block before the targets), pollIntervalSeconds, timeoutMinutes. Without a name the engine cannot run substages. |

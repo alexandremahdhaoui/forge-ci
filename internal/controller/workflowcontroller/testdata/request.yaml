@@ -28,10 +28,7 @@ jobs:
       - name: Check out the workspace around this repo
         run: |
           git config --global url."https://x-access-token:${{ secrets.WORKSPACE_TOKEN }}@github.com/".insteadOf "git@github.com:"
-          git clone "git@github.com:${{ github.repository_owner }}/golden-factory.git"
-          sh golden-factory/hack/place.sh
-          git clone "git@github.com:${{ github.repository }}.git" golden-register
-          (cd golden-register && go run github.com/alexandremahdhaoui/forge-factory/cmd/forge-factory@latest clone --config ../forge-factory.yaml --root ..)
+          go run github.com/alexandremahdhaoui/forge-factory/cmd/forge-factory@7d34e3e bootstrap git@github.com:alexandremahdhaoui/golden-factory.git .
 
       - name: Install the toolchain from the workspace
         run: |

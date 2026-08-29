@@ -3,6 +3,10 @@ package workflowcontroller_test
 import (
 	"context"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -29,9 +33,7 @@ func registerSpec() workflowcontroller.Spec {
 			{Uses: "actions/setup-go@v5", With: map[string]string{"go-version": "1.26"}},
 		},
 		Workspace: workflowcontroller.Workspace{
-			FactoryRepo:      "golden-factory",
-			PlaceScript:      "hack/place.sh",
-			BootstrapCommand: "go run github.com/alexandremahdhaoui/forge-factory/cmd/forge-factory@latest clone --config ../forge-factory.yaml --root ..",
+			BootstrapCommand: "go run github.com/alexandremahdhaoui/forge-factory/cmd/forge-factory@7d34e3e bootstrap git@github.com:alexandremahdhaoui/golden-factory.git .",
 			ToolchainScript: `(cd forge && go install ./cmd/forge) || go install github.com/alexandremahdhaoui/forge/cmd/forge@latest
 (cd forge-factory && go install ./cmd/...)
 (cd forge-ci && go install ./cmd/...)
@@ -168,7 +170,7 @@ func TestParseSpecDefaultsAndRefusals(t *testing.T) {
 	base := specMap(t)
 	base["workspace"] = map[string]any{}
 	_, err = workflowcontroller.ParseSpec(base)
-	require.ErrorContains(t, err, "workspace.factoryRepo, placeScript, bootstrapCommand and toolchainScript are required")
+	require.ErrorContains(t, err, "workspace.bootstrapCommand and toolchainScript are required")
 
 	_, err = workflowcontroller.ParseSpec(map[string]any{
 		"repo": "o/r", "setup": []any{map[string]any{"with": map[string]any{"a": "b"}}},
@@ -192,7 +194,6 @@ func specMap(t *testing.T) map[string]any {
 	return map[string]any{
 		"repo": "o/r",
 		"workspace": map[string]any{
-			"factoryRepo": "ws", "placeScript": "hack/place.sh",
 			"bootstrapCommand": "true", "toolchainScript": "true\n",
 		},
 		"runner": map[string]any{"name": "ci-runner", "secret": "S"},
@@ -512,4 +513,129 @@ func TestRunRefusesADirtyRevision(t *testing.T) {
 
 	_, err := c.Run(t.Context(), in)
 	require.ErrorContains(t, err, "covers uncommitted changes")
+}
+
+// TestTheRenderedCheckoutStandsUpAWorkspace executes the checkout step the
+// generator writes, instead of comparing it to a golden file.
+//
+// The goldens could not catch what shipped: they were written from the
+// generator, so a generator that renders a broken checkout renders a golden
+// that agrees with it. This ran five hand-written lines for a week, cloning
+// a factory and calling its place script from the directory above it, and
+// every scheduled run failed at the same step while both goldens stayed
+// green.
+//
+// So this drives the block. The seed command is a stand-in, because the real
+// one fetches a module, but the shape under test is the one that broke: what
+// the step assumes about the working directory, and whether anything but the
+// spec's own command decides where files land.
+func TestTheRenderedCheckoutStandsUpAWorkspace(t *testing.T) {
+	t.Parallel()
+
+	home := t.TempDir()
+	work := t.TempDir()
+
+	spec := registerSpec()
+	spec.Workspace.BootstrapCommand = "mkdir -p golden-register && touch forge-factory.yaml forge-ci.yaml"
+
+	files, err := workflowcontroller.RenderAll(spec)
+	require.NoError(t, err)
+
+	var intake string
+
+	for _, f := range files {
+		if f.Name == "intake" {
+			intake = f.Content
+		}
+	}
+
+	require.NotEmpty(t, intake)
+
+	block := checkoutBlock(t, intake)
+	require.NotEmpty(t, block, "the rendered intake must carry a checkout step")
+
+	// A runner expands every ${{ }} before sh sees the block. Stand in for
+	// that, or sh reads the braces as its own syntax and fails on the line
+	// this test is not about.
+	block = expressions.ReplaceAllString(block, "expanded")
+
+	cmd := exec.Command("sh", "-e", "-c", block)
+	cmd.Dir = work
+	cmd.Env = append(os.Environ(), "HOME="+home, "GIT_CONFIG_GLOBAL="+filepath.Join(home, ".gitconfig"))
+
+	out, err := cmd.CombinedOutput()
+	require.NoErrorf(t, err, "the checkout step must run from the working directory it is given: %s", out)
+
+	for _, want := range []string{"forge-factory.yaml", "forge-ci.yaml", "golden-register"} {
+		_, err := os.Stat(filepath.Join(work, want))
+		require.NoErrorf(t, err, "the checkout must leave %s at the working directory", want)
+	}
+}
+
+// checkoutBlock lifts the run: block of the checkout step out of a rendered
+// workflow and strips its indentation, so the test drives the same text a
+// runner would.
+func checkoutBlock(t *testing.T, workflow string) string {
+	t.Helper()
+
+	const (
+		head   = "      - name: Check out the workspace around this repo\n        run: |\n"
+		indent = "          "
+	)
+
+	start := strings.Index(workflow, head)
+	if start < 0 {
+		return ""
+	}
+
+	var b strings.Builder
+
+	for _, line := range strings.Split(workflow[start+len(head):], "\n") {
+		if line != "" && !strings.HasPrefix(line, indent) {
+			break
+		}
+
+		b.WriteString(strings.TrimPrefix(line, indent) + "\n")
+	}
+
+	return b.String()
+}
+
+// expressions matches an Actions ${{ }} expression, which a runner expands
+// before the shell ever sees it.
+var expressions = regexp.MustCompile(`\$\{\{[^}]*\}\}`)
+
+// TestOnlyAScheduledWorkflowRaisesItsOwnAlarm pins who gets a failure report.
+//
+// A scheduled run has no audience by construction, and one instance proved
+// what that costs: eight consecutive red runs over eight days, seen by
+// nobody, while the thing the schedule existed to maintain went stale. So a
+// cron workflow files an issue on itself.
+//
+// A dispatched run already has the person who dispatched it. Filing there
+// would turn a mistyped payload into repository noise.
+func TestOnlyAScheduledWorkflowRaisesItsOwnAlarm(t *testing.T) {
+	t.Parallel()
+
+	files, err := workflowcontroller.RenderAll(registerSpec())
+	require.NoError(t, err)
+
+	byName := map[string]string{}
+	for _, f := range files {
+		byName[f.Name] = f.Content
+	}
+
+	scheduled := byName["intake"]
+	assert.Contains(t, scheduled, "- name: Say that the run failed")
+	assert.Contains(t, scheduled, "if: failure()")
+	assert.Contains(t, scheduled, "issues: write",
+		"a workflow that files an issue needs the permission to file one")
+	assert.Contains(t, scheduled, `--search "$TITLE in:title"`,
+		"a job that fails daily must leave one issue open, not thirty")
+	assert.Contains(t, scheduled, "GH_TOKEN: ${{ github.token }}",
+		"reporting a failure must not need a secret somebody has to remember to seal")
+
+	dispatched := byName["request"]
+	assert.NotContains(t, dispatched, "Say that the run failed",
+		"a dispatched run has the person who dispatched it")
 }
