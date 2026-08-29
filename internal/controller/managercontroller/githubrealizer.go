@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/fsadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/githubadapter"
@@ -124,6 +125,24 @@ func (r GitHubRealizer) realizeSecret(res citypes.Resource) (string, error) {
 
 	keyID, keyB64, err := r.api.PublicKey(r.ctx, repo)
 	if err != nil {
+		// The one failure worth naming. GitHub excludes a workflow run's own
+		// injected token from the secrets API entirely - no permissions:
+		// block grants it, on purpose, so a workflow cannot use its own
+		// token to rewrite or read back the secrets it runs under. The
+		// token variable defaults to GITHUB_TOKEN, which means an operator's
+		// PAT on a laptop and that excluded token in a runner, so the same
+		// spec works in one place and 403s in the other. Three CI runs went
+		// into reading that message as a permissions problem.
+		if strings.Contains(err.Error(), "403") {
+			return "", fmt.Errorf(
+				"%w: a run's own GITHUB_TOKEN can never manage repository secrets, "+
+					"whatever permissions: says. Point this manager at a PAT with "+
+					"spec.tokenEnv on the manager; it defaults to GITHUB_TOKEN, "+
+					"which is an operator's PAT on a laptop and the excluded token "+
+					"in a runner",
+				err)
+		}
+
 		return "", err
 	}
 

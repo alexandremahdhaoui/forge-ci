@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
 	"path/filepath"
 	"testing"
 
@@ -206,4 +207,30 @@ func TestGitHubRealizerResolvesRelativeFilesAgainstTheRoot(t *testing.T) {
 
 	require.FileExists(t, filepath.Join(root, "repo/.github/workflows/ci.yaml"))
 	require.NoFileExists(t, "repo/.github/workflows/ci.yaml")
+}
+
+// TestA403OnTheSecretsAPINamesTheRealCause pins the message that would have
+// saved three CI runs.
+//
+// GitHub excludes a workflow run's own injected token from the secrets API
+// entirely, and no permissions: block grants it. The raw error says only
+// "Resource not accessible by integration", which reads exactly like a
+// permissions problem you can fix in the workflow, and is not.
+func TestA403OnTheSecretsAPINamesTheRealCause(t *testing.T) {
+	r, api := githubRealizer(t)
+
+	api.EXPECT().PublicKey(mock.Anything, "owner/repo").
+		Return("", "", errors.New(`status 403: {"message":"Resource not accessible by integration"}`)).Once()
+
+	t.Setenv("A_PAT", "value-to-seal")
+
+	_, err := r.Realize(citypes.Resource{
+		Kind: managercontroller.KindActionsSecret,
+		Name: "owner/repo/WORKSPACE_TOKEN",
+		Spec: map[string]any{"repo": "owner/repo", "secret": "WORKSPACE_TOKEN", "fromEnv": "A_PAT"},
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "can never manage repository secrets")
+	require.Contains(t, err.Error(), "spec.tokenEnv",
+		"the message must name the knob that fixes it")
 }
