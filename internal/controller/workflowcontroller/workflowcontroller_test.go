@@ -673,3 +673,62 @@ func TestEveryGeneratedWorkflowCanBeFiredByHand(t *testing.T) {
 			"%s can only be fired by something other than a person, so nobody can test it", f.Name)
 	}
 }
+
+// TestAPublishingWorkflowGetsACredentialAndThePermissionToUseIt pins the gap
+// that would have failed the first release at its last step.
+//
+// Nothing else puts a token into the environment the pipeline command runs
+// in. Engines inherit forge-ci's environment and nothing else, and the
+// secrets a bootstrap seals into Actions are sealed on the operator's laptop:
+// they put nothing into a running job. So a release engine that shells out to
+// gh, or pushes to a registry, had no credential at all, and would have found
+// that out after the build and the tags.
+func TestAPublishingWorkflowGetsACredentialAndThePermissionToUseIt(t *testing.T) {
+	t.Parallel()
+
+	rendered, err := workflowcontroller.RenderAll(workflowcontroller.Spec{
+		Dir: "workspace",
+		Ref: "main",
+		Workflows: []workflowcontroller.WorkflowSpec{{
+			Name:     "pipeline",
+			Kind:     "command",
+			Cron:     "0 * * * *",
+			Command:  "forge-ci apply --config forge-ci.yaml --root .",
+			Token:    true,
+			Packages: true,
+		}},
+	})
+	require.NoError(t, err)
+	require.Len(t, rendered, 1)
+
+	got := rendered[0].Content
+
+	assert.Contains(t, got, "GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}",
+		"the release engine has no other source of a token")
+	assert.Contains(t, got, "packages: write",
+		"a registry write needs its own permission and nothing else grants it")
+	assert.Contains(t, got, "contents: write")
+}
+
+// A workflow that publishes nothing must not carry a credential it does not
+// need. A token in an environment is a token something can read.
+func TestAWorkflowThatPublishesNothingCarriesNoToken(t *testing.T) {
+	t.Parallel()
+
+	rendered, err := workflowcontroller.RenderAll(workflowcontroller.Spec{
+		Dir: "workspace",
+		Ref: "main",
+		Workflows: []workflowcontroller.WorkflowSpec{{
+			Name:    "check",
+			Kind:    "command",
+			Cron:    "0 * * * *",
+			Command: "forge test-all",
+		}},
+	})
+	require.NoError(t, err)
+
+	got := rendered[0].Content
+
+	assert.NotContains(t, got, "GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}")
+	assert.NotContains(t, got, "packages: write")
+}

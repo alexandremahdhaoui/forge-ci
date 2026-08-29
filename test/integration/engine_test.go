@@ -4,14 +4,26 @@ package integration_test
 
 import (
 	"context"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/google/go-containerregistry/pkg/name"
+	"github.com/google/go-containerregistry/pkg/registry"
+	v1 "github.com/google/go-containerregistry/pkg/v1"
+	"github.com/google/go-containerregistry/pkg/v1/empty"
+	"github.com/google/go-containerregistry/pkg/v1/layout"
+	"github.com/google/go-containerregistry/pkg/v1/mutate"
+	"github.com/google/go-containerregistry/pkg/v1/remote"
+	"github.com/google/go-containerregistry/pkg/v1/types"
+	"github.com/stretchr/testify/require"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/engineadapter"
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
-	"github.com/stretchr/testify/require"
+	"github.com/alexandremahdhaoui/forge/pkg/forge"
 )
 
 var binDir string
@@ -242,4 +254,113 @@ func TestTheStateEngineLeavesUnrelatedDirtyFilesAlone(t *testing.T) {
 	status := gitIn("status", "--short")
 	require.Contains(t, status, "unrelated.yaml", "the operator's edit must still be uncommitted")
 	require.Contains(t, status, "untracked.txt", "the operator's new file must still be untracked")
+}
+
+// TestAContainerReleasePublishesOverTheWire runs ci-artifact-container as a
+// real MCP server against a real registry.
+//
+// The wire is where the types are really checked. A container release carries
+// an artifact list, a version and a tag prefix across it, and a field that
+// maps in process and not on the wire is exactly the class of defect this
+// suite exists for: the release engine carried tagPrefix on the wire and
+// dropped it at the boundary, and every unit test passed.
+func TestAContainerReleasePublishesOverTheWire(t *testing.T) {
+	srv := httptest.NewServer(registry.New())
+	defer srv.Close()
+
+	host := strings.TrimPrefix(srv.URL, "http://")
+
+	// The layout the build engine writes: one index over two architectures.
+	layoutPath := filepath.Join(t.TempDir(), "toolchain.oci")
+	require.NoError(t, os.MkdirAll(layoutPath, 0o750))
+
+	idx := v1.ImageIndex(empty.Index)
+	idx = mutate.IndexMediaType(idx, types.OCIImageIndex)
+
+	for _, arch := range []string{"amd64", "arm64"} {
+		cf, err := empty.Image.ConfigFile()
+		require.NoError(t, err)
+
+		cf = cf.DeepCopy()
+		cf.OS, cf.Architecture = "linux", arch
+
+		img, err := mutate.ConfigFile(empty.Image, cf)
+		require.NoError(t, err)
+
+		idx = mutate.AppendManifests(idx, mutate.IndexAddendum{
+			Add:        img,
+			Descriptor: v1.Descriptor{Platform: &v1.Platform{OS: "linux", Architecture: arch}},
+		})
+	}
+
+	_, err := layout.Write(layoutPath, idx)
+	require.NoError(t, err)
+
+	var out citypes.ArtifactOutput
+
+	err = caller().Call(context.Background(),
+		"forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-artifact-container@v0.1.0",
+		"publish",
+		citypes.ArtifactInput{
+			Revision:  "abc123def456",
+			Version:   "v0.50.0",
+			TagPrefix: "forge",
+			Artifacts: []forge.Artifact{
+				{Name: "forge", Type: "binary", Location: "build/dist/forge_linux_amd64"},
+				{Name: "toolchain", Type: "container", Location: "file://" + layoutPath},
+			},
+			Spec: map[string]any{
+				"image":      host + "/owner/forge",
+				"movingTags": []any{"latest"},
+			},
+		}, &out)
+	require.NoError(t, err)
+
+	require.True(t, out.Published)
+	require.Equal(t, host+"/owner/forge:forge-v0.50.0", out.URL,
+		"the prefix must survive the wire, or the image tag and the git tag disagree")
+	require.Equal(t, []string{
+		host + "/owner/forge:forge-v0.50.0",
+		host + "/owner/forge:latest",
+	}, out.Tagged)
+
+	// It is really in the registry, both architectures, with the revision
+	// somebody holding only the image can read back.
+	ref, err := name.ParseReference(out.URL)
+	require.NoError(t, err)
+
+	back, err := remote.Index(ref)
+	require.NoError(t, err)
+
+	manifest, err := back.IndexManifest()
+	require.NoError(t, err)
+	require.Len(t, manifest.Manifests, 2)
+
+	img, err := remote.Image(ref, remote.WithPlatform(v1.Platform{OS: "linux", Architecture: "arm64"}))
+	require.NoError(t, err)
+
+	cf, err := img.ConfigFile()
+	require.NoError(t, err)
+	require.Equal(t, "abc123def456", cf.Config.Labels["org.opencontainers.image.revision"])
+	require.Equal(t, "v0.50.0", cf.Config.Labels["org.opencontainers.image.version"])
+}
+
+// A stage that built no container fails the release rather than publishing
+// nothing quietly. A tag silently left pointing at last week's image is worse
+// than a red build: the operator reads a version number and gets something
+// else.
+func TestAContainerReleaseWithNothingToPublishFails(t *testing.T) {
+	var out citypes.ArtifactOutput
+
+	err := caller().Call(context.Background(),
+		"forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-artifact-container@v0.1.0",
+		"publish",
+		citypes.ArtifactInput{
+			Revision:  "abc123def456",
+			Version:   "v0.50.0",
+			Artifacts: []forge.Artifact{{Name: "forge", Type: "binary", Location: "x_linux_amd64"}},
+			Spec:      map[string]any{"image": "example.invalid/owner/forge"},
+		}, &out)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no container artifact was built")
 }

@@ -68,6 +68,10 @@ build:
     src: ./cmd/ci-compute-local
     engine: forge://forge-dev
 
+  - name: gen-ci-artifact-container
+    src: ./cmd/ci-artifact-container
+    engine: forge://forge-dev
+
   - name: gen-ci-artifact-release
     src: ./cmd/ci-artifact-release
     engine: forge://forge-dev
@@ -127,6 +131,12 @@ build:
 
   - name: ci-state-git
     src: ./cmd/ci-state-git
+    dest: ./build/bin
+    engine: forge://go-build
+    platforms: [linux/amd64, linux/arm64]
+
+  - name: ci-artifact-container
+    src: ./cmd/ci-artifact-container
     dest: ./build/bin
     engine: forge://go-build
     platforms: [linux/amd64, linux/arm64]

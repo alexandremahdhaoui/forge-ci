@@ -85,6 +85,13 @@ func renderCommand(spec Spec, w WorkflowSpec) string {
 		b.WriteString("  issues: write\n")
 	}
 
+	// A registry write needs its own permission. Nothing else grants it, and
+	// without it the push fails at the last step of a run that already built
+	// everything.
+	if w.Packages {
+		b.WriteString("  packages: write\n")
+	}
+
 	fmt.Fprintf(&b, "\njobs:\n  %s:\n    runs-on: ubuntu-latest\n    steps:\n", job)
 	writeSetup(&b, spec)
 	writeWorkspaceCheckout(&b, spec, w.Secret)
@@ -97,8 +104,20 @@ func renderCommand(spec Spec, w WorkflowSpec) string {
 
 	fmt.Fprintf(&b, "\n      - name: %s\n", stepName)
 
-	if len(w.PayloadEnv) > 0 {
+	// The token. NOTHING else puts one into the environment the command runs
+	// in: engines inherit forge-ci's environment and nothing else, and the
+	// secrets a bootstrap seals into Actions are sealed on the operator's
+	// laptop and put nothing into a running job. So a release engine that
+	// shells out to gh, or pushes to a registry, had no credential at all.
+	//
+	// secrets.GITHUB_TOKEN is injected by Actions. There is no secret to
+	// create, seal or rotate.
+	if len(w.PayloadEnv) > 0 || w.Token {
 		b.WriteString("        env:\n")
+
+		if w.Token {
+			b.WriteString("          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}\n")
+		}
 
 		for _, field := range w.PayloadEnv {
 			fmt.Fprintf(&b, "          %s: ${{ github.event.client_payload.%s }}\n",

@@ -104,6 +104,18 @@ type WorkflowSpec struct {
 	Command    string   `json:"command,omitempty"`
 	Push       bool     `json:"push,omitempty"`
 
+	// Token puts secrets.GITHUB_TOKEN into the step's environment. Nothing
+	// else does: engines inherit forge-ci's environment and nothing else,
+	// and the secrets a bootstrap seals into Actions are sealed on the
+	// operator's laptop and put nothing into a running job. A pipeline whose
+	// release stage reaches GitHub or a registry needs this.
+	Token bool `json:"token,omitempty"`
+
+	// Packages grants the job permission to write to the container
+	// registry. Nothing else grants it, and without it the push fails at the
+	// last step of a run that already built everything.
+	Packages bool `json:"packages,omitempty"`
+
 	// fan-out kind.
 	TagPattern string   `json:"tagPattern,omitempty"`
 	EventType  string   `json:"eventType,omitempty"`

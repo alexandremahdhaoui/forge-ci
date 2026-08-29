@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/artifactcontroller"
+	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 	"github.com/stretchr/testify/require"
 )
 
@@ -66,4 +67,35 @@ func TestAnAbsoluteUploadIgnoresTheRoot(t *testing.T) {
 	require.NoError(t, os.WriteFile(binary, []byte("x"), 0o600))
 
 	require.Equal(t, binary, resolveUpload("/somewhere/else", binary))
+}
+
+// The prefix reached the engine on the wire and was dropped at the boundary,
+// so a factory that set one would have tagged every member with the bare
+// version and collided with the other factory's line. A wire field nobody
+// maps is a field that does nothing, and nothing in the type system says so.
+func TestEveryWireFieldReachesTheController(t *testing.T) {
+	in := ArtifactInput{
+		Revision:  "abc123",
+		Version:   "v0.50.0",
+		TagPrefix: "forge",
+		Repos:     map[string]string{"golden-go": "def456"},
+		Spec:      map[string]any{"root": "."},
+	}
+
+	artifacts, err := toArtifacts(in.Artifacts)
+	require.NoError(t, err)
+
+	mapped := citypes.ArtifactInput{
+		Revision:  in.Revision,
+		Version:   in.Version,
+		TagPrefix: in.TagPrefix,
+		Repos:     in.Repos,
+		Artifacts: artifacts,
+		Spec:      in.Spec,
+	}
+
+	plan, err := artifactcontroller.New().Plan(mapped)
+	require.NoError(t, err)
+	require.Equal(t, "forge-v0.50.0", plan.TagName,
+		"the prefix must survive the wire boundary, or a factory that sets one tags the bare version")
 }

@@ -1,0 +1,19 @@
+name: ci-artifact-container
+kind: mcp-server
+version: 0.1.0
+description: Publish the container images a revision built to a registry.
+openapi:
+  specPath: ../../.forge/spec-cache/engines.v1.yaml
+generate:
+  packageName: main
+  docsBaseURL: https://raw.githubusercontent.com/alexandremahdhaoui/forge-ci/refs/heads/main
+surface:
+  tools:
+    - name: declare
+      description: Report the resources this release needs. It needs none.
+      input: DeclareInput
+      output: DeclareOutput
+    - name: publish
+      description: Push every container image the revision built, under the version.
+      input: ArtifactInput
+      output: ArtifactOutput

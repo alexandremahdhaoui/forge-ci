@@ -1,0 +1,80 @@
+name: ci-artifact-container
+port: artifact
+version: v0.1.0
+tagline: Publish the container images a revision built to a registry.
+why: 'A container is an artifact like a binary, so it is built by a build stage and
+
+  published by a release stage. This is the release half: it filters the artifacts
+
+  the runs produced down to the containers, and pushes each layout under the version
+
+  the core decided.
+
+
+  It computes no version and reads no tag line. Two authorities over one number is
+
+  how every member of a workspace drifted onto a version line of its own.'
+tools:
+- name: declare
+  does: Report the resources this release needs. It needs none.
+- name: publish
+  does: Push every container image the revision built, under the version.
+example:
+  tool: publish
+  input: '{"revision":"3dd48e96ed7e","version":"v0.50.0","artifacts":[{"name":"toolchain","type":"container","location":"file:///w/build/images/toolchain.oci"}],"spec":{"image":"ghcr.io/owner/forge"}}'
+notes: 'A dirty revision is refused. It was never proven, so publishing it ships
+
+  something nobody can reproduce.
+
+
+  What publishes: every artifact whose type is container. Filtering on the type is
+
+  what keeps a binary out of the registry and a container off the upload path. A
+
+  stage that built no container fails the release rather than publishing nothing
+
+  quietly, because a tag silently left pointing at last week''s image is worse than
+
+  a red build.
+
+
+  The tag is the version, with the factory''s prefix in front of it when it has one.
+
+  Nothing else is pinnable: spec.movingTags names convenience tags like "latest"
+
+  that point at the same index and move on every release.
+
+
+  There is no daemon, no CLI and no docker login. go-containerregistry speaks the
+
+  registry HTTP API directly and the auth handshake is part of the push, with the
+
+  token named by spec.tokenEnv - GITHUB_TOKEN by default, which GitHub Actions
+
+  injects, so there is no secret to create, seal or rotate. A job that publishes
+
+  needs permissions: packages: write.
+
+
+  With no token the requests go out anonymous rather than reading the machine''s
+
+  docker config, because an engine that silently picks up whatever credential is
+
+  lying around publishes to somewhere nobody named.'
+spec:
+- key: image
+  type: string
+  required: true
+  means: The registry repository, with NO tag. The tag is the version, which the core decides.
+- key: movingTags
+  type: list of strings
+  required: false
+  means: Convenience tags that point at the same index and move on every release, like "latest". Never something to pin.
+- key: labels
+  type: map of string to string
+  required: false
+  means: Labels written into every architecture's config. The version and the revision are written already.
+- key: tokenEnv
+  type: string
+  required: false
+  means: Environment variable holding the registry token. Defaults to GITHUB_TOKEN.

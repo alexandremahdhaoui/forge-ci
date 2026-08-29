@@ -44,6 +44,7 @@ func NewHandlers() Handlers {
 			out, err := publish(ctx, ctrl, publisherFor(in.Spec), citypes.ArtifactInput{
 				Revision:  in.Revision,
 				Version:   in.Version,
+				TagPrefix: in.TagPrefix,
 				Repos:     in.Repos,
 				Artifacts: artifacts,
 				Spec:      in.Spec,
