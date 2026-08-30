@@ -9,7 +9,6 @@ import (
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/execadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/gitadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/githubadapter"
-	"github.com/alexandremahdhaoui/forge-ci/internal/controller/notifycontroller"
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/reconcilecontroller"
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/releasecontroller"
 	"github.com/alexandremahdhaoui/forge-ci/internal/driver/clidriver"
@@ -50,7 +49,7 @@ func main() {
 	})
 }
 
-// githubFor builds the two controllers the generated workflows call, from
+// githubFor builds the controller the generated release workflow calls, from
 // the credential the command names.
 //
 // The token is read here, from the variable a flag names, and nowhere else.
@@ -58,9 +57,7 @@ func main() {
 // GH_TOKEN or GITHUB_TOKEN the host carries and cannot be pointed at the one
 // the pipeline declared.
 func githubFor(git gitadapter.Git) clidriver.GitHubFor {
-	return func(tokenEnv, apiBaseURL string) (clidriver.Publisher, clidriver.Announcer) {
-		api := githubadapter.New(nil, apiBaseURL, os.Getenv(tokenEnv))
-
-		return releasecontroller.New(git, api), notifycontroller.New(api)
+	return func(tokenEnv, apiBaseURL string) clidriver.Publisher {
+		return releasecontroller.New(git, githubadapter.New(nil, apiBaseURL, os.Getenv(tokenEnv)))
 	}
 }

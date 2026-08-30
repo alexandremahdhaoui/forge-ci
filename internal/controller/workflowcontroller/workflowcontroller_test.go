@@ -719,11 +719,11 @@ func TestOnlyAScheduledWorkflowRaisesItsOwnAlarm(t *testing.T) {
 	assert.Contains(t, scheduled, "if: failure()")
 	assert.Contains(t, scheduled, "issues: write",
 		"a workflow that files an issue needs the permission to file one")
-	assert.Contains(t, scheduled, "forge-ci report-failure",
-		"the dedupe belongs in a controller with a test, not in a shell block nothing can reach")
 	assert.NotContains(t, scheduled, "gh issue",
 		"the toolchain image carries no gh, so the step that reports a failure must not need one")
-	assert.Contains(t, scheduled, "GITHUB_TOKEN: ${{ github.token }}",
+	assert.Contains(t, scheduled, `grep -q "\"title\": *\"$TITLE\""`,
+		"a job that fails daily must leave one issue open, not thirty")
+	assert.Contains(t, scheduled, "TOKEN: ${{ github.token }}",
 		"reporting a failure must not need a secret somebody has to remember to seal")
 
 	// A repository_dispatch run looks attended and is not: somebody caused

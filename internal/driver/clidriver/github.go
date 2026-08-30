@@ -29,14 +29,12 @@ func bindCredentials(fs *flag.FlagSet) credentials {
 	}
 }
 
-func (d *Driver) clients(c credentials) (Publisher, Announcer, error) {
+func (d *Driver) publisher(c credentials) (Publisher, error) {
 	if d.github == nil {
-		return nil, nil, ErrNoGit
+		return nil, ErrNoGit
 	}
 
-	publisher, announcer := d.github(*c.tokenEnv, *c.apiBaseURL)
-
-	return publisher, announcer, nil
+	return d.github(*c.tokenEnv, *c.apiBaseURL), nil
 }
 
 // release tags one commit and publishes its release. It is what the
@@ -56,7 +54,7 @@ func (d *Driver) release(ctx context.Context, args []string) error {
 		return fmt.Errorf("parsing flags: %w", err)
 	}
 
-	publisher, _, err := d.clients(creds)
+	publisher, err := d.publisher(creds)
 	if err != nil {
 		return err
 	}
@@ -69,34 +67,3 @@ func (d *Driver) release(ctx context.Context, args []string) error {
 	return d.write(fmt.Sprintf("%s: %s %s\n", *tag, report.Reason, report.URL))
 }
 
-// reportFailure files the issue that says a run nobody was watching failed.
-//
-// The step that calls this is the only thing that can see a job which died
-// before forge-ci was alive - a missing binary, a checkout that failed - so
-// it stays a workflow step. What it no longer carries is the decision: the
-// dedupe lives in a controller with a test.
-func (d *Driver) reportFailure(ctx context.Context, args []string) error {
-	fs := flag.NewFlagSet("report-failure", flag.ContinueOnError)
-	fs.SetOutput(d.out)
-
-	repo := fs.String("repo", "", "owner/name of the repo to file the issue in")
-	title := fs.String("title", "", "issue title; an open issue with this exact title suppresses a second")
-	body := fs.String("body", "", "issue body")
-	creds := bindCredentials(fs)
-
-	if err := fs.Parse(args); err != nil {
-		return fmt.Errorf("parsing flags: %w", err)
-	}
-
-	_, announcer, err := d.clients(creds)
-	if err != nil {
-		return err
-	}
-
-	report, err := announcer.Announce(ctx, *repo, *title, *body)
-	if err != nil {
-		return err
-	}
-
-	return d.write(fmt.Sprintf("%s %s\n", report.Reason, report.URL))
-}

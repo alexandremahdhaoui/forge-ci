@@ -49,11 +49,6 @@ type API interface {
 	// UploadAsset attaches one file through the URL the release answered,
 	// which is on a different host from the API base.
 	UploadAsset(ctx context.Context, uploadURL, file string) error
-	// OpenIssueByTitle answers the open issue with exactly this title, and
-	// whether one is open at all.
-	OpenIssueByTitle(ctx context.Context, repo, title string) (Issue, bool, error)
-	// CreateIssue opens one issue.
-	CreateIssue(ctx context.Context, repo, title, body string) (Issue, error)
 }
 
 // RunInfo is the slice of a workflow run the compute engine acts on.

@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/alexandremahdhaoui/forge-ci/internal/controller/notifycontroller"
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/reconcilecontroller"
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/releasecontroller"
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
@@ -23,7 +22,7 @@ const EnvInApply = "FORGE_CI_IN_APPLY"
 
 var (
 	ErrUsage = errors.New(
-		"usage: forge-ci <bootstrap|apply|status|poll|graph|validate|release|report-failure> [flags]")
+		"usage: forge-ci <bootstrap|apply|status|poll|graph|validate|release> [flags]")
 	ErrBlocked = errors.New("the pipeline did not advance")
 	ErrRecurse = errors.New("apply cannot run inside apply")
 	ErrNoGit   = errors.New("this build was wired without a GitHub client")
@@ -43,16 +42,11 @@ type Publisher interface {
 	Publish(ctx context.Context, dir, repo, tag, sha string) (releasecontroller.Report, error)
 }
 
-// Announcer files the issue that says a run nobody was watching failed.
-type Announcer interface {
-	Announce(ctx context.Context, repo, title, body string) (notifycontroller.Report, error)
-}
-
-// GitHubFor builds the two controllers that reach GitHub. It is a function
+// GitHubFor builds the controller that reaches GitHub. It is a function
 // because the credential is named by a flag, so nothing can be constructed
 // until the flags are parsed - which is also what keeps the token out of
 // every code path that does not need one.
-type GitHubFor func(tokenEnv, apiBaseURL string) (Publisher, Announcer)
+type GitHubFor func(tokenEnv, apiBaseURL string) Publisher
 
 type Driver struct {
 	out        io.Writer
@@ -65,8 +59,8 @@ func New(out io.Writer, reconciler Reconciler) *Driver {
 	return &Driver{out: out, reconciler: reconciler}
 }
 
-// WithGitHub wires the verbs a generated workflow calls. A build without it
-// still runs every pipeline verb and refuses those two by name.
+// WithGitHub wires the verb the generated release workflow calls. A build
+// without it still runs every pipeline verb and refuses that one by name.
 func (d *Driver) WithGitHub(github GitHubFor) *Driver {
 	d.github = github
 
@@ -86,14 +80,11 @@ func (d *Driver) Run(ctx context.Context, args []string) error {
 
 	verb := args[0]
 
-	// These two act on one repo somebody named and never read a pipeline, so
-	// they are answered before the config is loaded. A generated workflow
-	// calls them from a job that has a checkout and no forge-ci.yaml.
-	switch verb {
-	case "release":
+	// release acts on one repo somebody named and never reads a pipeline, so
+	// it is answered before the config is loaded. The generated release
+	// workflow calls it from a job that has a checkout and no forge-ci.yaml.
+	if verb == "release" {
 		return d.release(ctx, args[1:])
-	case "report-failure":
-		return d.reportFailure(ctx, args[1:])
 	}
 
 	p, root, err := d.load(verb, args[1:])

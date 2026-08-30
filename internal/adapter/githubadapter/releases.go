@@ -20,13 +20,6 @@ type Release struct {
 	UploadURL string `json:"upload_url"`
 }
 
-// Issue is the slice of a GitHub issue a caller acts on.
-type Issue struct {
-	Number  int    `json:"number"`
-	Title   string `json:"title"`
-	HTMLURL string `json:"html_url"`
-}
-
 // ReleaseByTag answers the release published under a tag, and whether the
 // repo carries one. Absent is not an error: it is what a first release of a
 // tag looks like, and the caller publishes rather than failing.
@@ -84,42 +77,4 @@ func (c *Client) UploadAsset(ctx context.Context, uploadURL, file string) error 
 	}
 
 	return nil
-}
-
-// OpenIssueByTitle answers the open issue carrying exactly this title, and
-// whether one is open at all.
-//
-// The match is exact rather than a search query. GitHub's search index is
-// asynchronous, so a run that files an issue and a run ten seconds later
-// that searches for it can both see nothing and both file one. Listing open
-// issues is consistent immediately.
-func (c *Client) OpenIssueByTitle(ctx context.Context, repo, title string) (Issue, bool, error) {
-	var out []Issue
-
-	err := c.do(ctx, http.MethodGet,
-		"/repos/"+repo+"/issues?state=open&per_page=100", nil, &out)
-	if err != nil {
-		return Issue{}, false, fmt.Errorf("listing open issues in %q: %w", repo, err)
-	}
-
-	for _, issue := range out {
-		if issue.Title == title {
-			return issue, true, nil
-		}
-	}
-
-	return Issue{}, false, nil
-}
-
-// CreateIssue opens one issue and answers its URL.
-func (c *Client) CreateIssue(ctx context.Context, repo, title, body string) (Issue, error) {
-	in := map[string]any{"title": title, "body": body}
-
-	var out Issue
-
-	if err := c.do(ctx, http.MethodPost, "/repos/"+repo+"/issues", in, &out); err != nil {
-		return Issue{}, fmt.Errorf("opening an issue in %q: %w", repo, err)
-	}
-
-	return out, nil
 }

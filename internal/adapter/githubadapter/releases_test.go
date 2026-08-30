@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/githubadapter"
@@ -94,57 +93,4 @@ func TestReleaseByTagAnswersAbsentRatherThanFailing(t *testing.T) {
 		ReleaseByTag(context.Background(), "o/r", "v0.2.0")
 	require.NoError(t, err)
 	assert.False(t, found)
-}
-
-// The dedupe matches an exact title against the open issues rather than
-// asking the search index, which is asynchronous: two runs seconds apart can
-// both see nothing there and both file.
-func TestOpenIssueByTitleMatchesExactlyAndListsRatherThanSearches(t *testing.T) {
-	t.Parallel()
-
-	var gotQuery string
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotQuery = r.URL.RawQuery
-
-		fmt.Fprint(w, `[{"number":1,"title":"other is failing","html_url":"http://issues/1"},
-		                {"number":2,"title":"intake is failing","html_url":"http://issues/2"}]`)
-	}))
-	defer srv.Close()
-
-	client := githubadapter.New(nil, srv.URL, "pat")
-
-	issue, found, err := client.OpenIssueByTitle(context.Background(), "o/r", "intake is failing")
-	require.NoError(t, err)
-	require.True(t, found)
-	assert.Equal(t, 2, issue.Number)
-	assert.Contains(t, gotQuery, "state=open")
-	assert.NotContains(t, gotQuery, "search")
-
-	// A title that merely looks similar is a different failure.
-	_, found, err = client.OpenIssueByTitle(context.Background(), "o/r", "intake is fail")
-	require.NoError(t, err)
-	assert.False(t, found)
-}
-
-func TestCreateIssueSendsTitleAndBody(t *testing.T) {
-	t.Parallel()
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var in map[string]any
-
-		require.NoError(t, json.NewDecoder(r.Body).Decode(&in))
-		assert.Equal(t, "intake is failing", in["title"])
-		assert.Equal(t, "the body", in["body"])
-		assert.True(t, strings.HasPrefix(r.Header.Get("Authorization"), "Bearer "))
-
-		fmt.Fprint(w, `{"number":9,"html_url":"http://issues/9"}`)
-	}))
-	defer srv.Close()
-
-	issue, err := githubadapter.New(nil, srv.URL, "pat").
-		CreateIssue(context.Background(), "o/r", "intake is failing", "the body")
-	require.NoError(t, err)
-	assert.Equal(t, 9, issue.Number)
-	assert.Equal(t, "http://issues/9", issue.HTMLURL)
 }

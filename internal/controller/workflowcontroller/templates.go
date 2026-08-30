@@ -171,24 +171,49 @@ func renderCommand(spec Spec, w WorkflowSpec) string {
 //
 // The step is a step and not an engine because it is the only thing that can
 // see a job which died before forge-ci was alive: a missing binary, a
-// checkout that failed, a container without git. What it no longer carries
-// is the decision. The dedupe - one open issue per workflow, not thirty -
-// lives in notifycontroller with a test, and this calls it.
+// checkout that failed, a container without git. Whether it exists at all is
+// declared, in reportFailure, rather than inferred from the on-block.
+//
+// curl, and not a CLI. This runs in whatever image the job named, and the
+// toolchain image carries no gh; curl is the one client every runner and
+// every image has, and it is what the fan-out and the notify workflow
+// already use.
+//
+// It dedupes on the exact title, so a job that fails daily leaves one issue
+// open rather than thirty. A closed one does not suppress a new issue,
+// because a failure that comes back after a green run is news again.
 func writeFailureReport(b *strings.Builder, w WorkflowSpec) {
 	if !w.ReportFailure {
 		return
 	}
 
+	// Listing open issues rather than asking the search API: the search
+	// index is asynchronous, so two runs seconds apart can both find nothing
+	// and both file. A list is consistent immediately.
+	//
+	// The grep tolerates either spacing GitHub emits after the key, and
+	// TITLE goes through the environment rather than into the URL so a title
+	// with a space cannot split the request.
 	fmt.Fprintf(b, `
       - name: Say that the run failed
         if: failure()
         env:
-          GITHUB_TOKEN: ${{ github.token }}
+          TOKEN: ${{ github.token }}
+          TITLE: "%s is failing"
         run: |
-          forge-ci report-failure \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "%s is failing" \
-            --body "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID failed. Nothing else reports this run, so it reports itself. Close this once a run goes green; a failure after that files a new one."
+          open=$(curl -fsS \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/issues?state=open&per_page=100")
+          if printf '%%s' "$open" | grep -q "\"title\": *\"$TITLE\""; then
+            echo "an issue is already open for this; not filing another"
+            exit 0
+          fi
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/issues" \
+            -d "{\"title\":\"$TITLE\",\"body\":\"$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID failed. Nothing else reports this run, so it reports itself. Close this once a run goes green; a failure after that files a new one.\"}"
 `, w.Name)
 }
 

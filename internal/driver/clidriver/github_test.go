@@ -5,7 +5,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/alexandremahdhaoui/forge-ci/internal/controller/notifycontroller"
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/releasecontroller"
 	"github.com/alexandremahdhaoui/forge-ci/internal/driver/clidriver"
 	"github.com/stretchr/testify/assert"
@@ -18,9 +17,6 @@ type fakeGitHub struct {
 
 	publishArgs []string
 	report      releasecontroller.Report
-
-	announceArgs []string
-	announcement notifycontroller.Report
 }
 
 func (f *fakeGitHub) Publish(_ context.Context, dir, repo, tag, sha string) (releasecontroller.Report, error) {
@@ -29,37 +25,25 @@ func (f *fakeGitHub) Publish(_ context.Context, dir, repo, tag, sha string) (rel
 	return f.report, nil
 }
 
-func (f *fakeGitHub) Announce(_ context.Context, repo, title, body string) (notifycontroller.Report, error) {
-	f.announceArgs = []string{repo, title, body}
-
-	return f.announcement, nil
-}
-
 func (f *fakeGitHub) wire() clidriver.GitHubFor {
-	return func(tokenEnv, base string) (clidriver.Publisher, clidriver.Announcer) {
+	return func(tokenEnv, base string) clidriver.Publisher {
 		f.tokenEnv, f.base = tokenEnv, base
 
-		return f, f
+		return f
 	}
 }
 
-// Both verbs answer before any config is read. The workflow that calls them
-// has a checkout and no forge-ci.yaml, so loading one would fail on a file
-// that has no business existing there.
-func TestTheGitHubVerbsNeedNoPipelineFile(t *testing.T) {
+// release answers before any config is read. The workflow that calls it has a
+// checkout and no forge-ci.yaml, so loading one would fail on a file that has
+// no business existing there.
+func TestReleaseNeedsNoPipelineFile(t *testing.T) {
 	t.Parallel()
 
-	for _, args := range [][]string{
-		{"release", "--repo", "o/r", "--tag", "v0.2.0", "--sha", "abc"},
-		{"report-failure", "--repo", "o/r", "--title", "intake is failing"},
-	} {
-		fake := &fakeGitHub{}
-		out := &bytes.Buffer{}
+	fake := &fakeGitHub{}
 
-		err := clidriver.New(out, nil).WithGitHub(fake.wire()).
-			Run(context.Background(), args)
-		require.NoErrorf(t, err, "%v must not read a pipeline", args)
-	}
+	err := clidriver.New(&bytes.Buffer{}, nil).WithGitHub(fake.wire()).
+		Run(context.Background(), []string{"release", "--repo", "o/r", "--tag", "v0.2.0", "--sha", "abc"})
+	require.NoError(t, err)
 }
 
 func TestReleasePassesEveryFlagThrough(t *testing.T) {
@@ -85,41 +69,19 @@ func TestReleasePassesEveryFlagThrough(t *testing.T) {
 	assert.Equal(t, "http://fake", fake.base)
 }
 
-func TestReportFailurePassesEveryFlagThrough(t *testing.T) {
+func TestReleaseSaysWhenNothingIsWired(t *testing.T) {
 	t.Parallel()
 
-	fake := &fakeGitHub{announcement: notifycontroller.Report{Reason: "filed", URL: "http://issues/9"}}
-	out := &bytes.Buffer{}
-
-	err := clidriver.New(out, nil).WithGitHub(fake.wire()).Run(context.Background(),
-		[]string{"report-failure", "--repo", "o/r", "--title", "intake is failing", "--body", "run 1 failed"})
-	require.NoError(t, err)
-
-	assert.Equal(t, []string{"o/r", "intake is failing", "run 1 failed"}, fake.announceArgs)
-	assert.Contains(t, out.String(), "http://issues/9")
-
-	// Actions injects GITHUB_TOKEN into every job, so the ordinary case needs
-	// no flag and no secret anybody has to remember to seal.
-	assert.Equal(t, clidriver.DefaultTokenEnv, fake.tokenEnv)
+	err := clidriver.New(&bytes.Buffer{}, nil).Run(context.Background(), []string{"release"})
+	require.ErrorIs(t, err, clidriver.ErrNoGit)
 }
 
-func TestTheGitHubVerbsSayWhenNothingIsWired(t *testing.T) {
-	t.Parallel()
-
-	for _, args := range [][]string{{"release"}, {"report-failure"}} {
-		err := clidriver.New(&bytes.Buffer{}, nil).Run(context.Background(), args)
-		require.ErrorIsf(t, err, clidriver.ErrNoGit, "%v", args)
-	}
-}
-
-func TestTheGitHubVerbsRejectAnUnknownFlag(t *testing.T) {
+func TestReleaseRejectsAnUnknownFlag(t *testing.T) {
 	t.Parallel()
 
 	fake := &fakeGitHub{}
 
-	for _, args := range [][]string{{"release", "--nope"}, {"report-failure", "--nope"}} {
-		err := clidriver.New(&bytes.Buffer{}, nil).WithGitHub(fake.wire()).
-			Run(context.Background(), args)
-		require.Errorf(t, err, "%v", args)
-	}
+	err := clidriver.New(&bytes.Buffer{}, nil).WithGitHub(fake.wire()).
+		Run(context.Background(), []string{"release", "--nope"})
+	require.Error(t, err)
 }
