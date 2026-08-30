@@ -38,6 +38,20 @@ func (c *Controller) Reconcile(in citypes.ReconcileInput) (citypes.ReconcileOutp
 
 	out := citypes.ReconcileOutput{Owned: []citypes.Ownership{}, Actions: []string{}}
 
+	// Every resource is attempted, and the failures are reported together.
+	//
+	// Stopping at the first one made a reconcile's result depend on
+	// declaration order: one 403 on a credential left every resource after it
+	// untouched, including the files that cannot fail for a network reason at
+	// all. An operator then fixed one thing, re-ran, and met the next
+	// failure - and the local checkout stayed stale the whole time, which
+	// reads exactly like a generator that produced nothing.
+	//
+	// A malformed resource is still fatal on the spot: that is the caller
+	// handing over something that is not a resource, not a resource that
+	// could not be realized.
+	var failures []error
+
 	for _, r := range in.Resources {
 		if r.Kind == "" || r.Name == "" {
 			return citypes.ReconcileOutput{}, fmt.Errorf("reconciling: resource needs a kind and a name, got %+v", r)
@@ -68,7 +82,9 @@ func (c *Controller) Reconcile(in citypes.ReconcileInput) (citypes.ReconcileOutp
 
 		action, err := c.realizer.Realize(r)
 		if err != nil {
-			return citypes.ReconcileOutput{}, fmt.Errorf("realizing %s: %w", r.ID(), err)
+			failures = append(failures, fmt.Errorf("realizing %s: %w", r.ID(), err))
+
+			continue
 		}
 
 		out.Actions = append(out.Actions, action)
@@ -76,8 +92,16 @@ func (c *Controller) Reconcile(in citypes.ReconcileInput) (citypes.ReconcileOutp
 
 	sort.Slice(out.Owned, func(i, j int) bool { return out.Owned[i].Resource < out.Owned[j].Resource })
 
+	// Ownership is recorded for what this reconcile declared even when some
+	// of it could not be realized, which is the same rule the loop above
+	// applies: it is what stops another manager claiming the resource, and
+	// that does not depend on whether today's attempt reached the network.
 	if err := c.record(in, out); err != nil {
-		return citypes.ReconcileOutput{}, err
+		failures = append(failures, err)
+	}
+
+	if len(failures) > 0 {
+		return citypes.ReconcileOutput{}, errors.Join(failures...)
 	}
 
 	return out, nil

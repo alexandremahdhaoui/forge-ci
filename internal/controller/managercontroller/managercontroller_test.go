@@ -2,6 +2,7 @@ package managercontroller_test
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -277,4 +278,101 @@ func TestABootstrapOnlyResourceIsOwnedButNotRealizedByAnApply(t *testing.T) {
 		require.NoError(t, err)
 		require.DirExists(t, credential.Name)
 	})
+}
+
+// One failing resource must not decide the fate of the ones after it.
+//
+// Realization stopped at the first error, so a reconcile's result depended on
+// declaration order: a 403 on a credential left every later resource
+// untouched, including files that cannot fail for a network reason. The
+// operator fixed one thing, re-ran, met the next, and the checkout stayed
+// stale throughout - which is indistinguishable from a generator that
+// produced nothing.
+func TestOneFailedResourceStillConvergesTheRest(t *testing.T) {
+	t.Parallel()
+
+	realizer := &countingRealizer{
+		fail: map[string]error{"actions-secret/o/r/A_TOKEN": errBoom},
+	}
+
+	_, err := managercontroller.New(realizer, fsadapter.New()).Reconcile(citypes.ReconcileInput{
+		Manager:   "m",
+		Bootstrap: true,
+		Resources: []citypes.Resource{
+			{Kind: "file-content", Name: "first"},
+			{Kind: "actions-secret", Name: "o/r/A_TOKEN"},
+			{Kind: "file-content", Name: "after-the-failure"},
+		},
+	})
+
+	require.ErrorIs(t, err, errBoom)
+	require.Equal(t, []string{"first", "o/r/A_TOKEN", "after-the-failure"}, realizer.seen,
+		"every resource must be attempted, whatever happened to the ones before it")
+}
+
+// Two failures are two lines. Fixing one thing and re-running to discover the
+// next is how a provisioning session turns into an afternoon.
+func TestEveryFailureIsReportedTogether(t *testing.T) {
+	t.Parallel()
+
+	realizer := &countingRealizer{
+		fail: map[string]error{
+			"actions-secret/o/r/A_TOKEN":  errBoom,
+			"workflow-enabled/o/r/w.yaml": errOther,
+		},
+	}
+
+	_, err := managercontroller.New(realizer, fsadapter.New()).Reconcile(citypes.ReconcileInput{
+		Manager:   "m",
+		Bootstrap: true,
+		Resources: []citypes.Resource{
+			{Kind: "actions-secret", Name: "o/r/A_TOKEN"},
+			{Kind: "workflow-enabled", Name: "o/r/w.yaml"},
+		},
+	})
+
+	require.ErrorIs(t, err, errBoom)
+	require.ErrorIs(t, err, errOther)
+}
+
+// A resource with no kind or no name is the caller handing over something
+// that is not a resource. That is not a realization that failed, and it stays
+// fatal on the spot.
+func TestAMalformedResourceIsStillFatalImmediately(t *testing.T) {
+	t.Parallel()
+
+	realizer := &countingRealizer{}
+
+	_, err := managercontroller.New(realizer, fsadapter.New()).Reconcile(citypes.ReconcileInput{
+		Manager:   "m",
+		Resources: []citypes.Resource{{Kind: "", Name: "nameless"}, {Kind: "file-content", Name: "later"}},
+	})
+
+	require.Error(t, err)
+	require.Empty(t, realizer.seen, "nothing is realized once the input is not a resource list")
+}
+
+var (
+	errBoom  = errors.New("boom")
+	errOther = errors.New("other")
+)
+
+// countingRealizer records what it was asked to realize, and fails the
+// resource ids it was told to. It exists so a test can decide which resource
+// breaks and then assert on what happened to the ones after it.
+type countingRealizer struct {
+	seen []string
+	fail map[string]error
+}
+
+func (countingRealizer) Kind() string { return "counting" }
+
+func (c *countingRealizer) Realize(res citypes.Resource) (string, error) {
+	c.seen = append(c.seen, res.Name)
+
+	if err, ok := c.fail[res.ID()]; ok {
+		return "", err
+	}
+
+	return "realized " + res.ID(), nil
 }
