@@ -1,0 +1,58 @@
+# Scheduled security intake: run the register pipeline so a fresh OSV
+# snapshot re-evaluates every track and raises any advisory that is due.
+#
+# UNEXERCISED: written where Actions cannot run. It needs one secret,
+# FORGE_CI_GITHUB_TOKEN - a token that can read every workspace member and push
+# to this repo - because the pipeline builds the whole playground
+# workspace around this checkout.
+name: intake
+
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/an-owner/a-toolchain:v1.2.3
+    steps:
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+
+      - name: Check out the workspace around this repo
+        run: |
+          git config --global url."https://x-access-token:${{ secrets.FORGE_CI_GITHUB_TOKEN }}@github.com/".insteadOf "git@github.com:"
+          go run github.com/alexandremahdhaoui/forge-factory/cmd/forge-factory@7d34e3e bootstrap git@github.com:alexandremahdhaoui/golden-factory.git .
+
+      - name: Run the register pipeline
+        env:
+          FORGE_CI_GITHUB_TOKEN: ${{ secrets.FORGE_CI_GITHUB_TOKEN }}
+        run: |
+          cd golden-register
+          touch .envrc
+          forge-ci apply --config forge-ci.yaml --root ..
+
+      - name: Push what the pipeline wrote
+        run: |
+          cd golden-register
+          git push origin HEAD:main
+
+      - name: Say that the run failed
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TITLE: "intake is failing"
+        run: |
+          open=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "$TITLE in:title" --json number --jq length)
+          if [ "$open" -gt 0 ]; then
+            echo "an issue is already open for this; not filing another"
+            exit 0
+          fi
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID failed. Nothing else reports this run, so it reports itself. Close this once a run goes green; a failure after that files a new one."

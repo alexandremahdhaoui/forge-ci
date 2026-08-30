@@ -49,6 +49,15 @@ type Spec struct {
 	// Workspace parameterizes the checkout-and-toolchain preamble shared
 	// by every command workflow.
 	Workspace Workspace `json:"workspace,omitzero"`
+	// Container is the image every job that builds a workspace runs inside,
+	// so the tools arrive prebuilt instead of being installed per run. It
+	// replaces the toolchain install and NOT the workspace bootstrap: a
+	// container supplies tools, the members still have to be cloned.
+	//
+	// Empty keeps the runner's own machine. That is what the factory
+	// publishing the image needs: a pipeline that ran inside the image it
+	// builds could not publish a fixed one after a bad release.
+	Container string `json:"container,omitempty"`
 	// Secrets are the Actions secrets the workflows read.
 	Secrets []SecretSpec `json:"secrets,omitempty"`
 	// Workflows are the files this engine owns under .github/workflows.
@@ -216,9 +225,20 @@ func ParseSpec(raw map[string]any) (Spec, error) {
 
 	if needsWorkspace || s.Runner.Name != "" {
 		ws := s.Workspace
-		if ws.BootstrapCommand == "" || ws.ToolchainScript == "" {
+
+		// The bootstrap is never optional. A container carries tools, not a
+		// checked-out workspace, so the members still have to be cloned
+		// however the job gets its toolchain.
+		if ws.BootstrapCommand == "" {
 			return Spec{}, errors.New(
-				"workspace.bootstrapCommand and toolchainScript are required by command workflows and the runner")
+				"workspace.bootstrapCommand is required by command workflows and the runner; " +
+					"a container image supplies tools and not a workspace, so the members still need cloning")
+		}
+
+		if ws.ToolchainScript == "" && s.Container == "" {
+			return Spec{}, errors.New(
+				"workspace.toolchainScript is required unless spec.container names an image the jobs run in, " +
+					"which is what supplies the toolchain instead")
 		}
 	}
 

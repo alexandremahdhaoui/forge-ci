@@ -34,7 +34,7 @@ echo '{"spec":{"repo":"o/r","runner":{"name":"ci-runner","secret":"FORGE_CI_GITH
 engines:
   - alias: my-compute
     type: compute
-    engine: "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-compute-github@v0.1.0"
+    engine: "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-compute-github@v0.1.1"
     manager: local
     spec:
       repo: <string>
@@ -44,6 +44,7 @@ engines:
       ref: <string>
       setup: <list>
       workspace: <object>
+      container: <string>
       secrets: <list>
       workflows: <list>
       runner: <object>

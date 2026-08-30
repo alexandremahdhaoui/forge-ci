@@ -115,14 +115,70 @@ func TestRenderMatchesTheHandWrittenWorkflows(t *testing.T) {
 	}
 
 	for _, name := range []string{"intake", "request", "propagate", "release"} {
-		want, err := os.ReadFile("testdata/" + name + ".yaml")
-		require.NoError(t, err)
-		assert.Equalf(t, string(want), byName[name],
+		assertGolden(t, name, byName[name],
 			"%s must render byte-identical to the hand-written file it replaces", name)
 	}
 
 	assert.Contains(t, byName["ci-runner"], "run-name: run ${{ inputs.marker }}")
 	assert.Contains(t, byName["ci-runner"], "${{ inputs.script }}")
+}
+
+// assertGolden compares against testdata and, with UPDATE_GOLDEN set, writes
+// it instead. A deliberate change is then one environment variable and an
+// accidental one is still a failure, which is the point: these files are the
+// only thing standing between a rendering change and every consumer's CI.
+func assertGolden(t *testing.T, name, got, msg string, args ...any) {
+	t.Helper()
+
+	path := filepath.Join("testdata", name+".yaml")
+
+	if os.Getenv("UPDATE_GOLDEN") != "" {
+		require.NoError(t, os.WriteFile(path, []byte(got), 0o600))
+	}
+
+	want, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equalf(t, string(want), got, msg, args...)
+}
+
+// A job that runs inside a prebuilt toolchain image installs no toolchain,
+// and still checks the workspace out: a container carries tools, not members.
+func TestAContainerReplacesTheToolchainInstallAndNotTheCheckout(t *testing.T) {
+	t.Parallel()
+
+	spec := registerSpec()
+	spec.Container = "ghcr.io/an-owner/a-toolchain:v1.2.3"
+	spec.Workspace.ToolchainScript = ""
+
+	files, err := workflowcontroller.RenderAll(spec)
+	require.NoError(t, err)
+
+	byName := map[string]string{}
+	for _, f := range files {
+		byName[f.Name] = f.Content
+	}
+
+	assertGolden(t, "intake-container", byName["intake"],
+		"a command workflow in a container must render exactly this")
+
+	for _, name := range []string{"intake", "request", "ci-runner"} {
+		got := byName[name]
+
+		assert.Containsf(t, got,
+			"    runs-on: ubuntu-latest\n    container:\n      image: ghcr.io/an-owner/a-toolchain:v1.2.3\n    steps:\n",
+			"%s: the container block sits under the job beside runs-on and steps", name)
+		assert.NotContainsf(t, got, "Install the toolchain from the workspace",
+			"%s: the image supplies the toolchain, so the install step goes", name)
+		assert.Containsf(t, got, "Check out the workspace around this repo",
+			"%s: the checkout stays - a container carries tools and not a workspace", name)
+	}
+
+	// A fan-out curls a dispatch and a release runs gh. Neither builds a
+	// workspace, so neither needs the toolchain image.
+	for _, name := range []string{"propagate", "release"} {
+		assert.NotContainsf(t, byName[name], "container:",
+			"%s does not build a workspace, so it stays on the runner's own image", name)
+	}
 }
 
 func TestRenderHonorsAVerbatimOverride(t *testing.T) {
@@ -170,7 +226,24 @@ func TestParseSpecDefaultsAndRefusals(t *testing.T) {
 	base := specMap(t)
 	base["workspace"] = map[string]any{}
 	_, err = workflowcontroller.ParseSpec(base)
-	require.ErrorContains(t, err, "workspace.bootstrapCommand and toolchainScript are required")
+	require.ErrorContains(t, err, "workspace.bootstrapCommand is required")
+
+	// A container carries tools, not a checked-out workspace, so the
+	// bootstrap stays required however the job gets its toolchain.
+	noBootstrap := specMap(t)
+	noBootstrap["container"] = "an-image:v1"
+	noBootstrap["workspace"] = map[string]any{"toolchainScript": "true\n"}
+	_, err = workflowcontroller.ParseSpec(noBootstrap)
+	require.ErrorContains(t, err, "workspace.bootstrapCommand is required")
+	require.ErrorContains(t, err, "supplies tools and not a workspace")
+
+	// Neither a script nor an image means nothing installs the toolchain.
+	// The refusal has to name the alternative, or the reader adds a script
+	// they did not need.
+	noToolchain := specMap(t)
+	noToolchain["workspace"] = map[string]any{"bootstrapCommand": "true"}
+	_, err = workflowcontroller.ParseSpec(noToolchain)
+	require.ErrorContains(t, err, "workspace.toolchainScript is required unless spec.container")
 
 	_, err = workflowcontroller.ParseSpec(map[string]any{
 		"repo": "o/r", "setup": []any{map[string]any{"with": map[string]any{"a": "b"}}},

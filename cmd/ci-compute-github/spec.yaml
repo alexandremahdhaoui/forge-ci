@@ -1,6 +1,6 @@
 name: ci-compute-github
 port: compute
-version: v0.1.0
+version: v0.1.1
 tagline: Own the pipeline's GitHub surface and run targets on Actions.
 why: 'The workflows a pipeline runs on are part of the pipeline, so they must
 
@@ -74,7 +74,11 @@ spec:
 - key: workspace
   type: object
   required: false
-  means: 'The checkout preamble every command workflow and the runner share: bootstrapCommand (one verbatim command that stands the whole workspace up in the working directory, naming its own factory), toolchainScript (verbatim install block). Required once any command workflow or the runner exists.'
+  means: 'The checkout preamble every command workflow and the runner share: bootstrapCommand (one verbatim command that stands the whole workspace up in the working directory, naming its own factory), toolchainScript (verbatim install block). Required once any command workflow or the runner exists. bootstrapCommand is always required; toolchainScript only when spec.container is unset, because an image supplies the toolchain instead.'
+- key: container
+  type: string
+  required: false
+  means: 'The image every job that builds a workspace runs inside, so its tools arrive prebuilt and no install step is rendered. It replaces the toolchain install and not the checkout: an image carries tools, not members, so bootstrapCommand still runs. Fan-out and release jobs never take one - they build no workspace. Empty runs on the runner itself, which is what a factory that PUBLISHES an image needs: a pipeline running inside the image it builds could not publish a fixed one after a bad release.'
 - key: secrets
   type: list
   required: false

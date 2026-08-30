@@ -92,7 +92,7 @@ func renderCommand(spec Spec, w WorkflowSpec) string {
 		b.WriteString("  packages: write\n")
 	}
 
-	fmt.Fprintf(&b, "\njobs:\n  %s:\n    runs-on: ubuntu-latest\n    steps:\n", job)
+	writeRunsOn(&b, spec, job)
 	writeSetup(&b, spec)
 	writeWorkspaceCheckout(&b, spec, w.Secret)
 	writeToolchain(&b, spec)
@@ -308,12 +308,8 @@ on:
 
 permissions:
   contents: write
-
-jobs:
-  run:
-    runs-on: ubuntu-latest
-    steps:
 `, spec.Runner.Name)
+	writeRunsOn(&b, spec, "run")
 	writeSetup(&b, spec)
 	writeWorkspaceCheckout(&b, spec, spec.Runner.Secret)
 	writeToolchain(&b, spec)
@@ -380,9 +376,34 @@ func writeWorkspaceCheckout(b *strings.Builder, spec Spec, secret string) {
 	writeIndented(b, spec.Workspace.BootstrapCommand)
 }
 
+// writeRunsOn opens the jobs block and names where the job executes.
+//
+// A container image supplies the toolchain, so the install step disappears
+// with it - but not the checkout: a container carries tools and not a
+// workspace, and the members still have to be cloned. Only the two jobs that
+// build a workspace take one; a fan-out curls a dispatch and a release runs
+// gh, and both are content with whatever the runner ships.
+func writeRunsOn(b *strings.Builder, spec Spec, job string) {
+	fmt.Fprintf(b, "\njobs:\n  %s:\n    runs-on: ubuntu-latest\n", job)
+
+	if spec.Container != "" {
+		fmt.Fprintf(b, "    container:\n      image: %s\n", spec.Container)
+	}
+
+	b.WriteString("    steps:\n")
+}
+
 // writeToolchain renders the instance's verbatim toolchain script.
 // forge-ci names no toolchain; the words are the spec's.
+//
+// No script means the job's container already carries the toolchain, and the
+// step goes rather than being emitted empty: a `run: |` with nothing under it
+// is not valid YAML.
 func writeToolchain(b *strings.Builder, spec Spec) {
+	if spec.Workspace.ToolchainScript == "" {
+		return
+	}
+
 	b.WriteString(`
       - name: Install the toolchain from the workspace
         run: |
