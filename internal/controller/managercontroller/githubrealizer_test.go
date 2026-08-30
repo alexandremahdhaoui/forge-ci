@@ -21,6 +21,11 @@ import (
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 )
 
+// plain is an ordinary reconcile: it writes, and it rewrites nothing that
+// cannot be compared. Every case that is not about one of those two flags
+// uses it, so a case that names Options is a case about them.
+var plain = managercontroller.Options{}
+
 func githubRealizer(t *testing.T) (managercontroller.GitHubRealizer, *githubadaptermock.MockAPI) {
 	t.Helper()
 
@@ -40,14 +45,14 @@ func TestGitHubRealizerConvergesAFile(t *testing.T) {
 	}
 
 	// Missing: written, and that is a change.
-	action, err := r.Realize(res)
+	action, err := r.Realize(res, plain)
 	require.NoError(t, err)
 	assert.Equal(t, "converged file .github/workflows/ci.yaml", action.Text)
 	assert.True(t, action.Changed)
 
 	// Equal: kept, and nothing changed. This is what lets a second run reach
 	// the stages instead of stopping again.
-	action, err = r.Realize(res)
+	action, err = r.Realize(res, plain)
 	require.NoError(t, err)
 	assert.Equal(t, "kept file .github/workflows/ci.yaml", action.Text)
 	assert.False(t, action.Changed)
@@ -56,7 +61,7 @@ func TestGitHubRealizerConvergesAFile(t *testing.T) {
 	fs := fsadapter.New()
 	require.NoError(t, fs.WriteFile(".github/workflows/ci.yaml", []byte("edited by hand")))
 
-	action, err = r.Realize(res)
+	action, err = r.Realize(res, plain)
 	require.NoError(t, err)
 	assert.Equal(t, "converged file .github/workflows/ci.yaml", action.Text)
 	assert.True(t, action.Changed)
@@ -72,7 +77,7 @@ func TestGitHubRealizerRefusesAFileWithoutContent(t *testing.T) {
 	api := githubadaptermock.NewMockAPI(t)
 	r := managercontroller.NewGitHubRealizer(t.Context(), fsadapter.New(), api, nil, "")
 
-	_, err := r.Realize(citypes.Resource{Kind: managercontroller.KindFileContent, Name: "x"})
+	_, err := r.Realize(citypes.Resource{Kind: managercontroller.KindFileContent, Name: "x"}, plain)
 	require.ErrorContains(t, err, "spec.content is required")
 }
 
@@ -102,17 +107,37 @@ func TestGitHubRealizerSealsASecret(t *testing.T) {
 		Kind: managercontroller.KindActionsSecret,
 		Name: "o/r/FORGE_CI_GITHUB_TOKEN",
 		Spec: map[string]any{"repo": "o/r", "secret": "FORGE_CI_GITHUB_TOKEN", "fromEnv": "TEST_SECRET_SOURCE"},
-	})
+	}, plain)
 	require.NoError(t, err)
 	assert.Equal(t, "sealed secret FORGE_CI_GITHUB_TOKEN on o/r from $TEST_SECRET_SOURCE", action.Text)
 	assert.True(t, action.Changed, "the secret did not exist, so this created one")
 }
 
-// Rotating a secret that already exists is not a change worth stopping for.
-// The API never returns a value, so existence is the only state there is to
-// read back, and nothing in any checkout moved.
-func TestGitHubRealizerRotatingAnExistingSecretIsNotAChange(t *testing.T) {
-	pub, _, err := box.GenerateKey(rand.Reader)
+// A secret that already exists is left alone. The API never returns a value,
+// so a put would silently replace whatever was there: two operators
+// bootstrapping with different credentials would leave one winner and
+// nothing to detect it. Git arbitrates every other collision by refusing a
+// stale push, and this is the one collision it cannot see.
+func TestGitHubRealizerKeepsASecretThatAlreadyExists(t *testing.T) {
+	t.Setenv("ROTATION_SOURCE", "new-value")
+
+	r, api := githubRealizer(t)
+	api.EXPECT().SecretExists(mock.Anything, "o/r", "S").Return(true, nil)
+
+	action, err := r.Realize(citypes.Resource{
+		Kind: managercontroller.KindActionsSecret,
+		Name: "o/r/S",
+		Spec: map[string]any{"repo": "o/r", "secret": "S", "fromEnv": "ROTATION_SOURCE"},
+	}, plain)
+	require.NoError(t, err)
+	assert.False(t, action.Changed)
+	assert.Contains(t, action.Text, "kept secret S on o/r")
+	assert.Contains(t, action.Text, "--force", "the message must name the knob that rotates it")
+}
+
+// Force is how a rotation is asked for, and it is the only way.
+func TestGitHubRealizerForceRotatesAnExistingSecret(t *testing.T) {
+	pub, priv, err := box.GenerateKey(rand.Reader)
 	require.NoError(t, err)
 
 	t.Setenv("ROTATION_SOURCE", "new-value")
@@ -121,16 +146,26 @@ func TestGitHubRealizerRotatingAnExistingSecretIsNotAChange(t *testing.T) {
 	api.EXPECT().SecretExists(mock.Anything, "o/r", "S").Return(true, nil)
 	api.EXPECT().PublicKey(mock.Anything, "o/r").
 		Return("k1", base64.StdEncoding.EncodeToString(pub[:]), nil)
-	api.EXPECT().PutSecret(mock.Anything, "o/r", "S", "k1", mock.Anything).Return(nil)
+	api.EXPECT().PutSecret(mock.Anything, "o/r", "S", "k1", mock.Anything).
+		RunAndReturn(func(_ context.Context, _, _, _ string, sealedB64 string) error {
+			raw, err := base64.StdEncoding.DecodeString(sealedB64)
+			require.NoError(t, err)
+
+			opened, ok := box.OpenAnonymous(nil, raw, pub, priv)
+			require.True(t, ok)
+			assert.Equal(t, "new-value", string(opened), "the NEW value is what lands")
+
+			return nil
+		})
 
 	action, err := r.Realize(citypes.Resource{
 		Kind: managercontroller.KindActionsSecret,
 		Name: "o/r/S",
 		Spec: map[string]any{"repo": "o/r", "secret": "S", "fromEnv": "ROTATION_SOURCE"},
-	})
+	}, managercontroller.Options{Force: true})
 	require.NoError(t, err)
-	assert.False(t, action.Changed)
-	assert.Contains(t, action.Text, "it already existed")
+	assert.True(t, action.Changed)
+	assert.Contains(t, action.Text, "rotated secret S on o/r")
 }
 
 func TestGitHubRealizerRefusesAnEmptySecretSource(t *testing.T) {
@@ -142,7 +177,7 @@ func TestGitHubRealizerRefusesAnEmptySecretSource(t *testing.T) {
 		Kind: managercontroller.KindActionsSecret,
 		Name: "o/r/S",
 		Spec: map[string]any{"repo": "o/r", "secret": "S", "fromEnv": "EMPTY_SOURCE"},
-	})
+	}, plain)
 	require.ErrorContains(t, err, "EMPTY_SOURCE is empty")
 }
 
@@ -162,7 +197,7 @@ func TestGitHubRealizerSecretDefaultsToGithubToken(t *testing.T) {
 		Kind: managercontroller.KindActionsSecret,
 		Name: "o/r/S",
 		Spec: map[string]any{"repo": "o/r", "secret": "S"},
-	})
+	}, plain)
 	require.NoError(t, err)
 	assert.Contains(t, action.Text, "from $GITHUB_TOKEN")
 }
@@ -179,7 +214,7 @@ func TestGitHubRealizerEnablesAWorkflow(t *testing.T) {
 		Kind: managercontroller.KindWorkflowEnabled,
 		Name: "o/r/intake.yaml",
 		Spec: map[string]any{"repo": "o/r", "workflow": "intake.yaml"},
-	})
+	}, plain)
 	require.NoError(t, err)
 	assert.Equal(t, "enabled workflow intake.yaml on o/r", action.Text)
 	assert.True(t, action.Changed)
@@ -200,7 +235,7 @@ func TestGitHubRealizerDoesNotEnableAWorkflowThatIsAlreadyActive(t *testing.T) {
 		Kind: managercontroller.KindWorkflowEnabled,
 		Name: "o/r/intake.yaml",
 		Spec: map[string]any{"repo": "o/r", "workflow": "intake.yaml"},
-	})
+	}, plain)
 	require.NoError(t, err)
 	assert.Equal(t, "workflow intake.yaml already enabled on o/r", action.Text)
 	assert.False(t, action.Changed)
@@ -222,7 +257,7 @@ func TestGitHubRealizerEnableIsPendingBeforeTheFirstPush(t *testing.T) {
 		Kind: managercontroller.KindWorkflowEnabled,
 		Name: "o/r/new.yaml",
 		Spec: map[string]any{"repo": "o/r", "workflow": "new.yaml"},
-	})
+	}, plain)
 	require.NoError(t, err)
 	assert.Contains(t, action.Text, "not on the remote yet")
 	assert.False(t, action.Changed, "nothing was enabled, so nothing changed")
@@ -233,7 +268,7 @@ func TestGitHubRealizerRefusesAnUnknownKind(t *testing.T) {
 
 	r, _ := githubRealizer(t)
 
-	_, err := r.Realize(citypes.Resource{Kind: "table", Name: "x"})
+	_, err := r.Realize(citypes.Resource{Kind: "table", Name: "x"}, plain)
 	require.ErrorContains(t, err, `cannot realize kind "table"`)
 }
 
@@ -242,10 +277,10 @@ func TestGitHubRealizerRefusesMissingSpecKeys(t *testing.T) {
 
 	r, _ := githubRealizer(t)
 
-	_, err := r.Realize(citypes.Resource{Kind: managercontroller.KindActionsSecret, Name: "x"})
+	_, err := r.Realize(citypes.Resource{Kind: managercontroller.KindActionsSecret, Name: "x"}, plain)
 	require.ErrorContains(t, err, "spec.repo and spec.secret are required")
 
-	_, err = r.Realize(citypes.Resource{Kind: managercontroller.KindWorkflowEnabled, Name: "x"})
+	_, err = r.Realize(citypes.Resource{Kind: managercontroller.KindWorkflowEnabled, Name: "x"}, plain)
 	require.ErrorContains(t, err, "spec.repo and spec.workflow are required")
 }
 
@@ -262,7 +297,7 @@ func TestGitHubRealizerResolvesRelativeFilesAgainstTheRoot(t *testing.T) {
 		Kind: managercontroller.KindFileContent,
 		Name: "repo/.github/workflows/ci.yaml",
 		Spec: map[string]any{"content": "on: push\n"},
-	})
+	}, plain)
 	require.NoError(t, err)
 
 	require.FileExists(t, filepath.Join(root, "repo/.github/workflows/ci.yaml"))
@@ -291,7 +326,7 @@ func TestA403OnTheSecretsAPINamesTheRealCause(t *testing.T) {
 		Kind: managercontroller.KindActionsSecret,
 		Name: "owner/repo/FORGE_CI_GITHUB_TOKEN",
 		Spec: map[string]any{"repo": "owner/repo", "secret": "FORGE_CI_GITHUB_TOKEN", "fromEnv": "A_PAT"},
-	})
+	}, plain)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "can never manage repository secrets")
 	require.Contains(t, err.Error(), "spec.tokenEnv",
@@ -314,7 +349,7 @@ func TestGitHubRealizerEnableIsPendingWhenTheWorkflowIsNotActiveYet(t *testing.T
 		Kind: managercontroller.KindWorkflowEnabled,
 		Name: "o/r/fresh.yaml",
 		Spec: map[string]any{"repo": "o/r", "workflow": "fresh.yaml"},
-	})
+	}, plain)
 	require.NoError(t, err)
 	assert.Contains(t, action.Text, "not on the remote yet")
 	assert.False(t, action.Changed)
@@ -336,6 +371,6 @@ func TestGitHubRealizerEnableStillFailsOnARealDenial(t *testing.T) {
 		Kind: managercontroller.KindWorkflowEnabled,
 		Name: "o/r/denied.yaml",
 		Spec: map[string]any{"repo": "o/r", "workflow": "denied.yaml"},
-	})
+	}, plain)
 	require.ErrorContains(t, err, "status 403")
 }

@@ -161,11 +161,14 @@ func TestASettleWithNoRemoteCommitsAndSaysSo(t *testing.T) {
 	assert.Empty(t, out(t, member, "status", "--porcelain"))
 }
 
-// A bootstrap converges and never commits. It is run by an operator who is
-// about to look at what it wrote, and it runs no stages, so there is nothing
-// to stop and nothing to settle.
-func TestABootstrapConvergesAndDoesNotCommit(t *testing.T) {
-	root, member, _ := workspace(t)
+// A bootstrap settles like any other reconcile. One rule: a change is made
+// durable by whoever made it.
+//
+// The alternative was leaving eight repos' worth of generated files
+// uncommitted for an operator to commit by hand, and resolving the
+// bootstrap's own revision over that dirty tree.
+func TestABootstrapCommitsAndPushesLikeAnyOtherReconcile(t *testing.T) {
+	root, member, remote := workspace(t)
 
 	res, err := settling(t, root).Reconcile(citypes.ReconcileInput{
 		Manager:   "github",
@@ -174,9 +177,54 @@ func TestABootstrapConvergesAndDoesNotCommit(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.True(t, res.Changed)
-	require.FileExists(t, filepath.Join(member, ".github/workflows/ci.yaml"),
-		"written and left for the operator to review")
-	assert.NotEmpty(t, out(t, member, "status", "--porcelain"), "and not committed")
+
+	assert.Empty(t, out(t, member, "status", "--porcelain"),
+		"so the revision this bootstrap goes on to resolve hashes a committed tree")
+	assert.Contains(t, out(t, remote, "show", "main:.github/workflows/ci.yaml"), "on: push")
+}
+
+// A dry run reads everything and writes nothing, anywhere. It still reports
+// what would change, because a plan is only worth reading if it came from
+// the same comparison the real run makes.
+func TestADryRunWritesNothingAndStillSaysWhatWouldChange(t *testing.T) {
+	root, member, _ := workspace(t)
+
+	head := out(t, member, "rev-parse", "HEAD")
+
+	res, err := settling(t, root).Reconcile(citypes.ReconcileInput{
+		Manager:   "github",
+		DryRun:    true,
+		Resources: []citypes.Resource{fileContent("member/.github/workflows/ci.yaml", "on: push\n")},
+	})
+	require.NoError(t, err)
+
+	assert.True(t, res.Changed, "the plan says this run would change something")
+	assert.Equal(t, []string{"would converge file member/.github/workflows/ci.yaml"}, res.Actions)
+
+	require.NoFileExists(t, filepath.Join(member, ".github/workflows/ci.yaml"))
+	assert.Equal(t, head, out(t, member, "rev-parse", "HEAD"), "and nothing was committed")
+	assert.Empty(t, out(t, member, "status", "--porcelain"))
+}
+
+// The promise a plan makes: run it twice and it says the same thing, because
+// it changed nothing the second reading could see.
+func TestADryRunIsRepeatable(t *testing.T) {
+	root, _, _ := workspace(t)
+
+	in := citypes.ReconcileInput{
+		Manager:   "github",
+		DryRun:    true,
+		Resources: []citypes.Resource{fileContent("member/.github/workflows/ci.yaml", "on: push\n")},
+	}
+
+	first, err := settling(t, root).Reconcile(in)
+	require.NoError(t, err)
+
+	in.Owned = first.Owned
+
+	second, err := settling(t, root).Reconcile(in)
+	require.NoError(t, err)
+	assert.Equal(t, first.Actions, second.Actions)
 }
 
 // A declared file the repo ignores can never be made durable, so every run

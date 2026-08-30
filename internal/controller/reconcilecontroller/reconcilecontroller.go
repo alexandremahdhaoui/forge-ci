@@ -69,6 +69,10 @@ type Report struct {
 	// Released is where each release landed, one per stage that declared one.
 	Released []citypes.ArtifactOutput `json:"released,omitempty"`
 
+	// Planned says this was a dry run. Nothing was written, anywhere, and
+	// Actions is what a real run would do instead.
+	Planned bool `json:"planned,omitempty"`
+
 	// Superseded says a manager found drift in the pipeline's own resources,
 	// corrected it, and made the correction durable. Nothing ran after that.
 	//
@@ -93,6 +97,20 @@ func (r Report) Advanced() bool {
 	return true
 }
 
+// Options is how one verb was asked for.
+//
+// DryRun forbids every write and ends the run after the reconcile: no
+// revision is resolved, no stage runs, nothing is minted or released. It
+// takes the same code path a real run takes, with the write suppressed, so a
+// plan that says nothing would change is a promise the next run keeps.
+//
+// Force rewrites what cannot be compared, which today is one thing: an
+// Actions secret, whose value the API never returns.
+type Options struct {
+	DryRun bool
+	Force  bool
+}
+
 type Controller struct {
 	caller engineadapter.Caller
 	git    gitadapter.Git
@@ -109,14 +127,23 @@ func New(caller engineadapter.Caller, git gitadapter.Git, now func() time.Time) 
 	return &Controller{caller: caller, git: git, now: now}
 }
 
-func (c *Controller) Apply(ctx context.Context, p config.Pipeline, root string) (Report, error) {
+func (c *Controller) Apply(
+	ctx context.Context, p config.Pipeline, root string, opts Options,
+) (Report, error) {
 	index := newIndex(p, root)
 
 	// false: an apply converges what can be converged and leaves credentials
 	// alone. Only a bootstrap is responsible for those.
-	actions, changed, err := c.reconcileResources(ctx, p, index, root, false)
+	actions, changed, err := c.reconcileResources(ctx, p, index, root, false, opts)
 	if err != nil {
 		return Report{}, err
+	}
+
+	// A plan ends here. Resolving a revision would be harmless and running a
+	// stage would not: a stage builds, writes and records, and none of that
+	// is a plan.
+	if opts.DryRun {
+		return Report{Actions: actions, Planned: true}, nil
 	}
 
 	// A reconcile that changed something ends the run here, before the
@@ -556,6 +583,7 @@ func (c *Controller) reconcileResources(
 	index engineIndex,
 	root string,
 	bootstrap bool,
+	opts Options,
 ) ([]string, bool, error) {
 	owned, err := c.readOwnership(ctx, index)
 	if err != nil {
@@ -618,6 +646,8 @@ func (c *Controller) reconcileResources(
 			Owned:     owned,
 			Bootstrap: bootstrap,
 			Spec:      spec,
+			DryRun:    opts.DryRun,
+			Force:     opts.Force,
 		}, &out); err != nil {
 			return nil, false, fmt.Errorf("manager %q: %w", alias, err)
 		}
@@ -633,8 +663,13 @@ func (c *Controller) reconcileResources(
 		}
 	}
 
-	if err := c.writeOwnership(ctx, index, merged); err != nil {
-		return nil, false, err
+	// The ownership record is a write like any other, and a plan performs
+	// none. Writing it would also commit and push the state repo, which is
+	// the loudest thing a dry run could possibly do.
+	if !opts.DryRun {
+		if err := c.writeOwnership(ctx, index, merged); err != nil {
+			return nil, false, err
+		}
 	}
 
 	return actions, changed, nil

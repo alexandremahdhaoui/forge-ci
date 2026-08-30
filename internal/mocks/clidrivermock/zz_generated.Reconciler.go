@@ -41,8 +41,8 @@ func (_m *MockReconciler) EXPECT() *MockReconciler_Expecter {
 }
 
 // Apply provides a mock function for the type MockReconciler
-func (_mock *MockReconciler) Apply(context1 context.Context, pipeline config.Pipeline, s string) (reconcilecontroller.Report, error) {
-	ret := _mock.Called(context1, pipeline, s)
+func (_mock *MockReconciler) Apply(context1 context.Context, pipeline config.Pipeline, s string, options reconcilecontroller.Options) (reconcilecontroller.Report, error) {
+	ret := _mock.Called(context1, pipeline, s, options)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Apply")
@@ -50,16 +50,16 @@ func (_mock *MockReconciler) Apply(context1 context.Context, pipeline config.Pip
 
 	var r0 reconcilecontroller.Report
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, config.Pipeline, string) (reconcilecontroller.Report, error)); ok {
-		return returnFunc(context1, pipeline, s)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, config.Pipeline, string, reconcilecontroller.Options) (reconcilecontroller.Report, error)); ok {
+		return returnFunc(context1, pipeline, s, options)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, config.Pipeline, string) reconcilecontroller.Report); ok {
-		r0 = returnFunc(context1, pipeline, s)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, config.Pipeline, string, reconcilecontroller.Options) reconcilecontroller.Report); ok {
+		r0 = returnFunc(context1, pipeline, s, options)
 	} else {
 		r0 = ret.Get(0).(reconcilecontroller.Report)
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, config.Pipeline, string) error); ok {
-		r1 = returnFunc(context1, pipeline, s)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, config.Pipeline, string, reconcilecontroller.Options) error); ok {
+		r1 = returnFunc(context1, pipeline, s, options)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -75,11 +75,12 @@ type MockReconciler_Apply_Call struct {
 //   - context1 context.Context
 //   - pipeline config.Pipeline
 //   - s string
-func (_e *MockReconciler_Expecter) Apply(context1 any, pipeline any, s any) *MockReconciler_Apply_Call {
-	return &MockReconciler_Apply_Call{Call: _e.mock.On("Apply", context1, pipeline, s)}
+//   - options reconcilecontroller.Options
+func (_e *MockReconciler_Expecter) Apply(context1 any, pipeline any, s any, options any) *MockReconciler_Apply_Call {
+	return &MockReconciler_Apply_Call{Call: _e.mock.On("Apply", context1, pipeline, s, options)}
 }
 
-func (_c *MockReconciler_Apply_Call) Run(run func(context1 context.Context, pipeline config.Pipeline, s string)) *MockReconciler_Apply_Call {
+func (_c *MockReconciler_Apply_Call) Run(run func(context1 context.Context, pipeline config.Pipeline, s string, options reconcilecontroller.Options)) *MockReconciler_Apply_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -93,10 +94,15 @@ func (_c *MockReconciler_Apply_Call) Run(run func(context1 context.Context, pipe
 		if args[2] != nil {
 			arg2 = args[2].(string)
 		}
+		var arg3 reconcilecontroller.Options
+		if args[3] != nil {
+			arg3 = args[3].(reconcilecontroller.Options)
+		}
 		run(
 			arg0,
 			arg1,
 			arg2,
+			arg3,
 		)
 	})
 	return _c
@@ -107,14 +113,14 @@ func (_c *MockReconciler_Apply_Call) Return(report reconcilecontroller.Report, e
 	return _c
 }
 
-func (_c *MockReconciler_Apply_Call) RunAndReturn(run func(context1 context.Context, pipeline config.Pipeline, s string) (reconcilecontroller.Report, error)) *MockReconciler_Apply_Call {
+func (_c *MockReconciler_Apply_Call) RunAndReturn(run func(context1 context.Context, pipeline config.Pipeline, s string, options reconcilecontroller.Options) (reconcilecontroller.Report, error)) *MockReconciler_Apply_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // Bootstrap provides a mock function for the type MockReconciler
-func (_mock *MockReconciler) Bootstrap(context1 context.Context, pipeline config.Pipeline, s string) (reconcilecontroller.Report, error) {
-	ret := _mock.Called(context1, pipeline, s)
+func (_mock *MockReconciler) Bootstrap(context1 context.Context, pipeline config.Pipeline, s string, options reconcilecontroller.Options) (reconcilecontroller.Report, error) {
+	ret := _mock.Called(context1, pipeline, s, options)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Bootstrap")
@@ -122,16 +128,16 @@ func (_mock *MockReconciler) Bootstrap(context1 context.Context, pipeline config
 
 	var r0 reconcilecontroller.Report
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, config.Pipeline, string) (reconcilecontroller.Report, error)); ok {
-		return returnFunc(context1, pipeline, s)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, config.Pipeline, string, reconcilecontroller.Options) (reconcilecontroller.Report, error)); ok {
+		return returnFunc(context1, pipeline, s, options)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, config.Pipeline, string) reconcilecontroller.Report); ok {
-		r0 = returnFunc(context1, pipeline, s)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, config.Pipeline, string, reconcilecontroller.Options) reconcilecontroller.Report); ok {
+		r0 = returnFunc(context1, pipeline, s, options)
 	} else {
 		r0 = ret.Get(0).(reconcilecontroller.Report)
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, config.Pipeline, string) error); ok {
-		r1 = returnFunc(context1, pipeline, s)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, config.Pipeline, string, reconcilecontroller.Options) error); ok {
+		r1 = returnFunc(context1, pipeline, s, options)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -147,11 +153,12 @@ type MockReconciler_Bootstrap_Call struct {
 //   - context1 context.Context
 //   - pipeline config.Pipeline
 //   - s string
-func (_e *MockReconciler_Expecter) Bootstrap(context1 any, pipeline any, s any) *MockReconciler_Bootstrap_Call {
-	return &MockReconciler_Bootstrap_Call{Call: _e.mock.On("Bootstrap", context1, pipeline, s)}
+//   - options reconcilecontroller.Options
+func (_e *MockReconciler_Expecter) Bootstrap(context1 any, pipeline any, s any, options any) *MockReconciler_Bootstrap_Call {
+	return &MockReconciler_Bootstrap_Call{Call: _e.mock.On("Bootstrap", context1, pipeline, s, options)}
 }
 
-func (_c *MockReconciler_Bootstrap_Call) Run(run func(context1 context.Context, pipeline config.Pipeline, s string)) *MockReconciler_Bootstrap_Call {
+func (_c *MockReconciler_Bootstrap_Call) Run(run func(context1 context.Context, pipeline config.Pipeline, s string, options reconcilecontroller.Options)) *MockReconciler_Bootstrap_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -165,10 +172,15 @@ func (_c *MockReconciler_Bootstrap_Call) Run(run func(context1 context.Context, 
 		if args[2] != nil {
 			arg2 = args[2].(string)
 		}
+		var arg3 reconcilecontroller.Options
+		if args[3] != nil {
+			arg3 = args[3].(reconcilecontroller.Options)
+		}
 		run(
 			arg0,
 			arg1,
 			arg2,
+			arg3,
 		)
 	})
 	return _c
@@ -179,7 +191,7 @@ func (_c *MockReconciler_Bootstrap_Call) Return(report reconcilecontroller.Repor
 	return _c
 }
 
-func (_c *MockReconciler_Bootstrap_Call) RunAndReturn(run func(context1 context.Context, pipeline config.Pipeline, s string) (reconcilecontroller.Report, error)) *MockReconciler_Bootstrap_Call {
+func (_c *MockReconciler_Bootstrap_Call) RunAndReturn(run func(context1 context.Context, pipeline config.Pipeline, s string, options reconcilecontroller.Options) (reconcilecontroller.Report, error)) *MockReconciler_Bootstrap_Call {
 	_c.Call.Return(run)
 	return _c
 }

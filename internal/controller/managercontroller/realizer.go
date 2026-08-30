@@ -26,7 +26,7 @@ func (LocalRealizer) Kind() string {
 	return "local"
 }
 
-func (r LocalRealizer) Realize(res citypes.Resource) (Action, error) {
+func (r LocalRealizer) Realize(res citypes.Resource, opts Options) (Action, error) {
 	switch res.Kind {
 	case KindDirectory:
 		// Existence is read first because MkdirAll cannot say whether it
@@ -39,6 +39,10 @@ func (r LocalRealizer) Realize(res citypes.Resource) (Action, error) {
 
 		if exists {
 			return Kept("kept directory " + res.Name), nil
+		}
+
+		if opts.DryRun {
+			return Did(opts.would("create directory " + res.Name)), nil
 		}
 
 		if err := r.fs.MkdirAll(res.Name); err != nil {
@@ -54,6 +58,10 @@ func (r LocalRealizer) Realize(res citypes.Resource) (Action, error) {
 
 		if exists {
 			return Kept("kept file " + res.Name), nil
+		}
+
+		if opts.DryRun {
+			return Did(opts.would("create file " + res.Name)), nil
 		}
 
 		body, _ := res.Spec["content"].(string)
@@ -84,6 +92,6 @@ func (DryRunRealizer) Kind() string {
 // Realize reports what would happen and never that anything did. A dry run
 // moves nothing, so it must never stop a run: the whole point is to say what
 // an apply would do without doing it.
-func (DryRunRealizer) Realize(res citypes.Resource) (Action, error) {
+func (DryRunRealizer) Realize(res citypes.Resource, _ Options) (Action, error) {
 	return Kept("would realize " + res.ID()), nil
 }

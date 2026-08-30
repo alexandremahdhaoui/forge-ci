@@ -81,6 +81,19 @@ for dir in cmd/ci-*; do
             fail=1
         fi
     done
+
+    # The inward half. DryRun dropped is a plan that writes, which is the
+    # worst failure this whole surface has; Force dropped is a secret nobody
+    # can rotate. Both are bools, so both are silent.
+    for field in DryRun Force; do
+        grep -q "	$field bool" "$spec" || continue
+
+        if ! grep -qE "$field: *in\.$field" "$handlers"; then
+            echo "$handlers drops ReconcileInput.$field: the wire carries it and the mapping does not copy it." >&2
+            echo "  A missing field here is not a compile error, it is a zero value at runtime." >&2
+            fail=1
+        fi
+    done
 done
 
 if [ "$fail" -eq 0 ]; then

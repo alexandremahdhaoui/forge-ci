@@ -38,6 +38,7 @@ engines:
     spec:
       path: <string>
       kinds: <list of string>
+      push: <boolean>
 ```
 
 ## Worth knowing

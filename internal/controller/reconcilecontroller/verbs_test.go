@@ -24,7 +24,7 @@ func TestBootstrapReconcilesAndRecordsTheRevisionWithoutRunning(t *testing.T) {
 	f := newFakeEngines(t)
 
 	report, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Bootstrap(context.Background(),
-		pipeline(stage("build", substage("default", []string{"build"}))), "/work")
+		pipeline(stage("build", substage("default", []string{"build"}))), "/work", plain)
 	require.NoError(t, err)
 	require.NotEmpty(t, report.Revision.ID)
 	require.Equal(t, []string{"reconciled"}, report.Actions)
@@ -38,7 +38,7 @@ func TestBootstrapReportsAManagerFailure(t *testing.T) {
 	f.failOn[call{uriManager, "reconcile"}] = errBoom
 
 	_, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Bootstrap(context.Background(),
-		pipeline(stage("build", substage("default", []string{"build"}))), "/work")
+		pipeline(stage("build", substage("default", []string{"build"}))), "/work", plain)
 	require.ErrorIs(t, err, errBoom)
 }
 
@@ -49,7 +49,7 @@ func TestBootstrapReportsAGitFailure(t *testing.T) {
 	git.EXPECT().HeadSHA(mockAny(), mockAny()).Return("", errBoom).Once()
 
 	_, err := reconcilecontroller.New(f.caller(), git, clock()).Bootstrap(context.Background(),
-		pipeline(stage("build", substage("default", []string{"build"}))), "/work")
+		pipeline(stage("build", substage("default", []string{"build"}))), "/work", plain)
 	require.ErrorIs(t, err, errBoom)
 }
 
@@ -70,7 +70,7 @@ func TestStatusShowsWhatApplyRecorded(t *testing.T) {
 	f := newFakeEngines(t)
 	p := pipeline(stage("build", substage("default", []string{"build"})))
 
-	_, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(), p, "/work")
+	_, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(), p, "/work", plain)
 	require.NoError(t, err)
 
 	report, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Status(context.Background(), p, "/work")
@@ -86,7 +86,7 @@ func TestStatusCountsAPendingGateAsNotFinished(t *testing.T) {
 
 	p := pipeline(stage("prod", substage("eu-a", []string{"build"}, "approve")))
 
-	_, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(), p, "/work")
+	_, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(), p, "/work", plain)
 	require.NoError(t, err)
 
 	report, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Status(context.Background(), p, "/work")

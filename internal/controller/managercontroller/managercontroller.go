@@ -35,9 +35,32 @@ func Kept(text string) Action { return Action{Text: text} }
 // Did is an action that found a difference and closed it.
 func Did(text string) Action { return Action{Text: text, Changed: true} }
 
+// Options is how one reconcile is being run, handed to every realizer.
+//
+// DryRun forbids every write. A realizer still reads actual state and still
+// answers what it would do, because the plan is only worth reading if it
+// came from the same comparison the real run makes.
+//
+// Force rewrites what cannot be compared. Only a write-only resource needs
+// it, and only a human asks for it.
+type Options struct {
+	DryRun bool
+	Force  bool
+}
+
+// would prefixes an action that did not happen, so a plan never reads like a
+// report of work done.
+func (o Options) would(text string) string {
+	if o.DryRun {
+		return "would " + text
+	}
+
+	return text
+}
+
 type Realizer interface {
 	Kind() string
-	Realize(citypes.Resource) (Action, error)
+	Realize(citypes.Resource, Options) (Action, error)
 }
 
 // Settler is the optional half of a manager: making this reconcile's changes
@@ -90,6 +113,8 @@ func (c *Controller) Reconcile(in citypes.ReconcileInput) (citypes.ReconcileOutp
 		changed  []string
 	)
 
+	opts := Options{DryRun: in.DryRun, Force: in.Force}
+
 	for _, r := range in.Resources {
 		if r.Kind == "" || r.Name == "" {
 			return citypes.ReconcileOutput{}, fmt.Errorf("reconciling: resource needs a kind and a name, got %+v", r)
@@ -118,7 +143,7 @@ func (c *Controller) Reconcile(in citypes.ReconcileInput) (citypes.ReconcileOutp
 			continue
 		}
 
-		action, err := c.realizer.Realize(r)
+		action, err := c.realizer.Realize(r, opts)
 		if err != nil {
 			failures = append(failures, fmt.Errorf("realizing %s: %w", r.ID(), err))
 
@@ -139,10 +164,13 @@ func (c *Controller) Reconcile(in citypes.ReconcileInput) (citypes.ReconcileOutp
 	// pipeline, so a thousand declared resources would take a thousand runs
 	// to update - and every one of those runs would report the same thing.
 	//
-	// A bootstrap settles nothing. It is run by an operator at a terminal who
-	// is about to look at what it wrote, and it runs no stages, so there is
-	// no run to supersede and nothing to protect from a tree it dirtied.
-	if settler, ok := c.realizer.(Settler); ok && !in.Bootstrap && len(changed) > 0 {
+	// A bootstrap settles like any other reconcile. One rule: a change is
+	// made durable by whoever made it. A bootstrap that wrote eight workflow
+	// files and left them uncommitted resolves a revision over its own
+	// output, and leaves an operator to commit across eight repos by hand.
+	//
+	// A dry run settles nothing, because it changed nothing.
+	if settler, ok := c.realizer.(Settler); ok && !in.DryRun && len(changed) > 0 {
 		action, err := settler.Settle(changed)
 		if err != nil {
 			failures = append(failures, fmt.Errorf("settling what changed: %w", err))
@@ -170,7 +198,7 @@ func (c *Controller) Reconcile(in citypes.ReconcileInput) (citypes.ReconcileOutp
 
 func (c *Controller) record(in citypes.ReconcileInput, out citypes.ReconcileOutput) error {
 	path, _ := in.Spec["statePath"].(string)
-	if path == "" || c.fs == nil {
+	if path == "" || c.fs == nil || in.DryRun {
 		return nil
 	}
 

@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -51,9 +52,33 @@ func (f *ghFake) handle(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case strings.HasSuffix(r.URL.Path, "/actions/secrets/public-key"):
 		fmt.Fprintf(w, `{"key_id":"k1","key":"%s"}`, f.keyB64)
+	case strings.Contains(r.URL.Path, "/actions/secrets/") && r.Method == http.MethodGet:
+		// GitHub answers a secret's metadata and never its value, so
+		// existence is the only state a manager can compare against.
+		if !slices.Contains(f.secrets, filepath.Base(r.URL.Path)) {
+			w.WriteHeader(http.StatusNotFound)
+
+			return
+		}
+
+		fmt.Fprintf(w, `{"name":"%s"}`, filepath.Base(r.URL.Path))
 	case strings.Contains(r.URL.Path, "/actions/secrets/"):
 		f.secrets = append(f.secrets, filepath.Base(r.URL.Path))
 		w.WriteHeader(http.StatusCreated)
+	case strings.Contains(r.URL.Path, "/actions/workflows/") &&
+		strings.HasSuffix(r.URL.Path, ".yaml") && r.Method == http.MethodGet:
+		// The read that makes enablement converge rather than repeat.
+		// Enabling an already-enabled workflow succeeds, so a fake without
+		// this reports a change on every apply, the run stops as superseded
+		// and no stage ever runs. That is not a fixture detail: it is the
+		// behaviour the real API has.
+		if !slices.Contains(f.enabled, filepath.Base(r.URL.Path)) {
+			w.WriteHeader(http.StatusNotFound)
+
+			return
+		}
+
+		fmt.Fprint(w, `{"state":"active"}`)
 	case strings.HasSuffix(r.URL.Path, "/enable"):
 		parts := strings.Split(r.URL.Path, "/")
 		f.enabled = append(f.enabled, parts[len(parts)-2])
@@ -166,18 +191,21 @@ func TestTheGitHubSurfaceIsProvisionedAndConverged(t *testing.T) {
 	t.Setenv("FORGE_CI_GITHUB_TOKEN", "pat-under-test")
 	t.Setenv("FORGE_CI_DISPATCH_TOKEN", "dispatch-pat-under-test")
 
-	root, statePath := workspace(t, "true")
+	root, statePath := bareWorkspace(t, "true")
 	require.NoError(t, os.WriteFile(filepath.Join(root, "forge-ci.yaml"),
 		[]byte(githubPipelineYAML(root, statePath, srv.URL)), 0o600))
 
-	// The real flow: bootstrap provisions the surface, the realized
-	// workflow files are committed, and only then does apply run - a
-	// dirty revision is refused by the remote compute on purpose.
+	// The real flow, and the whole point of the settle: bootstrap
+	// provisions the surface AND commits what it wrote, so nobody has to
+	// commit eight repos' worth of generated files by hand and the revision
+	// apply resolves is not the tree the bootstrap just dirtied.
 	mustRun(t, root, "forge-ci", "bootstrap", "--config", "forge-ci.yaml", "--root", root)
 
 	repo := filepath.Join(root, "demo-repo")
-	mustRun(t, repo, "git", "add", ".github")
-	mustRun(t, repo, "git", "commit", "-m", "adopt the provisioned workflows")
+	require.Empty(t, mustRun(t, repo, "git", "status", "--porcelain"),
+		"the bootstrap committed the workflow files it converged")
+	require.Contains(t, mustRun(t, repo, "git", "log", "--name-only", "-1"),
+		".github/workflows/release.yaml")
 
 	mustRun(t, root, "forge-ci", "apply", "--config", "forge-ci.yaml", "--root", root)
 

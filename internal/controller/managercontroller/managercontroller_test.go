@@ -368,7 +368,7 @@ type countingRealizer struct {
 
 func (countingRealizer) Kind() string { return "counting" }
 
-func (c *countingRealizer) Realize(res citypes.Resource) (managercontroller.Action, error) {
+func (c *countingRealizer) Realize(res citypes.Resource, _ managercontroller.Options) (managercontroller.Action, error) {
 	c.seen = append(c.seen, res.Name)
 
 	if err, ok := c.fail[res.ID()]; ok {

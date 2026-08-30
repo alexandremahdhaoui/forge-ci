@@ -53,7 +53,7 @@ func TestEveryStageRunsInOrderAndAdvances(t *testing.T) {
 	report, err := c.Apply(context.Background(), pipeline(
 		stage("build", substage("default", []string{"build"})),
 		stage("self", substage("default", []string{"self"})),
-	), "/work")
+	), "/work", plain)
 	require.NoError(t, err)
 	require.True(t, report.Advanced())
 	require.Len(t, report.Stages, 2)
@@ -66,13 +66,13 @@ func TestTheRevisionIsRecordedAndStable(t *testing.T) {
 	f := newFakeEngines(t)
 	c := reconcilecontroller.New(f.caller(), gitAt(t, "abc123"), clock())
 
-	first, err := c.Apply(context.Background(), pipeline(stage("build", substage("default", []string{"build"}))), "/work")
+	first, err := c.Apply(context.Background(), pipeline(stage("build", substage("default", []string{"build"}))), "/work", plain)
 	require.NoError(t, err)
 	require.NotEmpty(t, first.Revision.ID)
 	require.Equal(t, "abc123", first.Revision.Repos["golden-rust"])
 	require.Contains(t, f.store, "revision/"+first.Revision.ID)
 
-	second, err := c.Apply(context.Background(), pipeline(stage("build", substage("default", []string{"build"}))), "/work")
+	second, err := c.Apply(context.Background(), pipeline(stage("build", substage("default", []string{"build"}))), "/work", plain)
 	require.NoError(t, err)
 	require.Equal(t, first.Revision.ID, second.Revision.ID)
 }
@@ -82,11 +82,11 @@ func TestANewCommitIsANewRevision(t *testing.T) {
 	p := pipeline(stage("build", substage("default", []string{"build"})))
 
 	before, err := reconcilecontroller.New(f.caller(), gitAt(t, "aaa"), clock()).
-		Apply(context.Background(), p, "/work")
+		Apply(context.Background(), p, "/work", plain)
 	require.NoError(t, err)
 
 	after, err := reconcilecontroller.New(f.caller(), gitAt(t, "bbb"), clock()).
-		Apply(context.Background(), p, "/work")
+		Apply(context.Background(), p, "/work", plain)
 	require.NoError(t, err)
 	require.NotEqual(t, before.Revision.ID, after.Revision.ID)
 }
@@ -96,12 +96,12 @@ func TestAPassedSubstageIsNotRunAgain(t *testing.T) {
 	p := pipeline(stage("build", substage("default", []string{"build"})))
 
 	_, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).
-		Apply(context.Background(), p, "/work")
+		Apply(context.Background(), p, "/work", plain)
 	require.NoError(t, err)
 	require.Equal(t, 1, f.counted(call{uriCompute, "run"}))
 
 	_, err = reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).
-		Apply(context.Background(), p, "/work")
+		Apply(context.Background(), p, "/work", plain)
 	require.NoError(t, err)
 	require.Equal(t, 1, f.counted(call{uriCompute, "run"}))
 }
@@ -113,7 +113,7 @@ func TestAFailedSubstageStopsTheRestOfThePipeline(t *testing.T) {
 	report, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(), pipeline(
 		stage("build", substage("default", []string{"build"})),
 		stage("self", substage("default", []string{"self"})),
-	), "/work")
+	), "/work", plain)
 	require.NoError(t, err)
 	require.False(t, report.Advanced())
 	require.Len(t, report.Stages, 1)
@@ -127,12 +127,12 @@ func TestAFailedSubstageIsRetriedOnTheNextApply(t *testing.T) {
 
 	p := pipeline(stage("build", substage("default", []string{"build"})))
 
-	_, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(), p, "/work")
+	_, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(), p, "/work", plain)
 	require.NoError(t, err)
 
 	delete(f.runOutputs, "build/default")
 
-	report, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(), p, "/work")
+	report, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(), p, "/work", plain)
 	require.NoError(t, err)
 	require.True(t, report.Advanced())
 	require.Equal(t, 2, f.counted(call{uriCompute, "run"}))
@@ -142,7 +142,7 @@ func TestGatesRunAfterTheSubstageAndAreRecorded(t *testing.T) {
 	f := newFakeEngines(t)
 
 	report, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(),
-		pipeline(stage("prod", substage("eu-a", []string{"build"}, "approve"))), "/work")
+		pipeline(stage("prod", substage("eu-a", []string{"build"}, "approve"))), "/work", plain)
 	require.NoError(t, err)
 	require.Len(t, report.Stages[0].Runs[0].Gates, 1)
 	require.Equal(t, "approve", report.Stages[0].Runs[0].Gates[0].Alias)
@@ -157,7 +157,7 @@ func TestAPendingGateBlocksTheStage(t *testing.T) {
 		pipeline(
 			stage("prod", substage("eu-a", []string{"build"}, "approve")),
 			stage("after", substage("default", []string{"self"})),
-		), "/work")
+		), "/work", plain)
 	require.NoError(t, err)
 	require.False(t, report.Advanced())
 	require.Len(t, report.Stages, 1)
@@ -170,12 +170,12 @@ func TestAPendingGateIsRetriedOnTheNextApply(t *testing.T) {
 
 	p := pipeline(stage("prod", substage("eu-a", []string{"build"}, "approve")))
 
-	_, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(), p, "/work")
+	_, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(), p, "/work", plain)
 	require.NoError(t, err)
 
 	f.gateStatus = citypes.StatusPassed
 
-	report, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(), p, "/work")
+	report, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(), p, "/work", plain)
 	require.NoError(t, err)
 	require.True(t, report.Advanced())
 }
@@ -193,7 +193,7 @@ func TestManySubstagesAllRun(t *testing.T) {
 				Name: "eu-b", Engine: "here", Manager: "local", Targets: []string{"build"},
 				Params: map[string]string{"region": "eu-west-1", "cell": "b"},
 			},
-		)), "/work")
+		)), "/work", plain)
 	require.NoError(t, err)
 	require.Len(t, report.Stages[0].Runs, 2)
 	require.Equal(t, 2, f.counted(call{uriCompute, "run"}))
@@ -203,7 +203,7 @@ func TestOwnershipIsRecordedAndFedBackToTheManager(t *testing.T) {
 	f := newFakeEngines(t)
 
 	_, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(),
-		pipeline(stage("build", substage("default", []string{"build"}))), "/work")
+		pipeline(stage("build", substage("default", []string{"build"}))), "/work", plain)
 	require.NoError(t, err)
 
 	payload, ok := f.store["owned/resources"]
@@ -219,7 +219,7 @@ func TestAManagerRefusalStopsTheApply(t *testing.T) {
 	f.failOn[call{uriManager, "reconcile"}] = errBoom
 
 	_, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(),
-		pipeline(stage("build", substage("default", []string{"build"}))), "/work")
+		pipeline(stage("build", substage("default", []string{"build"}))), "/work", plain)
 	require.ErrorIs(t, err, errBoom)
 	require.Contains(t, err.Error(), `manager "local"`)
 }
@@ -236,7 +236,7 @@ func TestAChangedReconcileStopsTheApplyBeforeTheRevision(t *testing.T) {
 	f.reconcileChanged = true
 
 	report, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(),
-		pipeline(stage("build", substage("default", []string{"build"}))), "/work")
+		pipeline(stage("build", substage("default", []string{"build"}))), "/work", plain)
 	require.NoError(t, err, "a corrected drift is not a failure")
 
 	require.True(t, report.Superseded)
@@ -256,7 +256,7 @@ func TestAnUnchangedReconcileRunsTheWholePipeline(t *testing.T) {
 	f := newFakeEngines(t)
 
 	report, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(),
-		pipeline(stage("build", substage("default", []string{"build"}))), "/work")
+		pipeline(stage("build", substage("default", []string{"build"}))), "/work", plain)
 	require.NoError(t, err)
 	require.False(t, report.Superseded)
 	require.NotEmpty(t, report.Revision.ID)
@@ -268,7 +268,7 @@ func TestADeclareFailureNamesTheEngine(t *testing.T) {
 	f.failOn[call{uriCompute, "declare"}] = errBoom
 
 	_, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(),
-		pipeline(stage("build", substage("default", []string{"build"}))), "/work")
+		pipeline(stage("build", substage("default", []string{"build"}))), "/work", plain)
 	require.ErrorIs(t, err, errBoom)
 	require.Contains(t, err.Error(), `engine "here"`)
 }
@@ -280,7 +280,7 @@ func TestAnUnknownComputeEngineIsReported(t *testing.T) {
 		Name: "default", Engine: "missing", Manager: "local", Targets: []string{"build"},
 	}))
 
-	_, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(), p, "/work")
+	_, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(), p, "/work", plain)
 	require.ErrorIs(t, err, reconcilecontroller.ErrEngine)
 	require.Contains(t, err.Error(), `stage "build" substage "default"`)
 }
@@ -292,7 +292,7 @@ func TestAWrongPortIsReported(t *testing.T) {
 		Name: "default", Engine: "st", Manager: "local", Targets: []string{"build"},
 	}))
 
-	_, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(), p, "/work")
+	_, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(), p, "/work", plain)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "is a state engine, want compute")
 }
@@ -303,7 +303,7 @@ func TestAnUnknownManagerIsReported(t *testing.T) {
 	p := pipeline(stage("build", substage("default", []string{"build"})))
 	p.Engines[0].Manager = "ghost"
 
-	_, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(), p, "/work")
+	_, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(), p, "/work", plain)
 	require.ErrorIs(t, err, reconcilecontroller.ErrEngine)
 	require.Contains(t, err.Error(), `manager "ghost"`)
 }
@@ -314,7 +314,7 @@ func TestAGitFailureNamesTheRepo(t *testing.T) {
 	git.EXPECT().HeadSHA(mock.Anything, mock.Anything).Return("", errBoom).Once()
 
 	_, err := reconcilecontroller.New(f.caller(), git, clock()).Apply(context.Background(),
-		pipeline(stage("build", substage("default", []string{"build"}))), "/work")
+		pipeline(stage("build", substage("default", []string{"build"}))), "/work", plain)
 	require.ErrorIs(t, err, errBoom)
 	require.Contains(t, err.Error(), "resolving the revision of golden-rust")
 }
@@ -324,7 +324,7 @@ func TestWithoutAPromotionEngineEveryPassingSubstageAdvances(t *testing.T) {
 
 	p := pipeline(config.Stage{Name: "build", Substages: []config.Substage{substage("default", []string{"build"})}})
 
-	report, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(), p, "/work")
+	report, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(), p, "/work", plain)
 	require.NoError(t, err)
 	require.True(t, report.Advanced())
 	require.Contains(t, report.Stages[0].Reason, "passed every substage")
@@ -336,7 +336,7 @@ func TestWithoutAPromotionEngineAFailureStillBlocks(t *testing.T) {
 
 	p := pipeline(config.Stage{Name: "build", Substages: []config.Substage{substage("default", []string{"build"})}})
 
-	report, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(), p, "/work")
+	report, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(), p, "/work", plain)
 	require.NoError(t, err)
 	require.False(t, report.Advanced())
 	require.Contains(t, report.Stages[0].Reason, "not finished")
@@ -350,7 +350,7 @@ func TestAnUnknownPromotionEngineIsReported(t *testing.T) {
 		Substages: []config.Substage{substage("default", []string{"build"})},
 	})
 
-	_, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(), p, "/work")
+	_, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(), p, "/work", plain)
 	require.ErrorIs(t, err, reconcilecontroller.ErrEngine)
 }
 
@@ -359,7 +359,7 @@ func TestAnUnknownGateEngineIsReported(t *testing.T) {
 
 	p := pipeline(stage("prod", substage("eu-a", []string{"build"}, "ghost")))
 
-	_, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(), p, "/work")
+	_, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(), p, "/work", plain)
 	require.ErrorIs(t, err, reconcilecontroller.ErrEngine)
 }
 
@@ -367,7 +367,7 @@ func TestTheRunEngineIsGivenTheCheckoutsAndTargets(t *testing.T) {
 	f := newFakeEngines(t)
 
 	_, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(),
-		pipeline(stage("build", substage("default", []string{"build"}))), "/work")
+		pipeline(stage("build", substage("default", []string{"build"}))), "/work", plain)
 	require.NoError(t, err)
 
 	payload, ok := f.store["run/"+revisionOf(t, f)+"/build/default"]
@@ -385,7 +385,7 @@ func TestAStateFailureIsNamed(t *testing.T) {
 	f.failOn[call{uriState, "get"}] = errBoom
 
 	_, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(),
-		pipeline(stage("build", substage("default", []string{"build"}))), "/work")
+		pipeline(stage("build", substage("default", []string{"build"}))), "/work", plain)
 	require.ErrorIs(t, err, errBoom)
 	require.Contains(t, err.Error(), `state engine "st"`)
 }
@@ -395,7 +395,7 @@ func TestARunEngineFailureIsNamed(t *testing.T) {
 	f.failOn[call{uriCompute, "run"}] = errBoom
 
 	_, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(),
-		pipeline(stage("build", substage("default", []string{"build"}))), "/work")
+		pipeline(stage("build", substage("default", []string{"build"}))), "/work", plain)
 	require.ErrorIs(t, err, errBoom)
 	require.Contains(t, err.Error(), `stage "build" substage "default"`)
 }
@@ -405,7 +405,7 @@ func TestCorruptStateIsReportedNotIgnored(t *testing.T) {
 	f.store["owned/resources"] = "not json"
 
 	_, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(),
-		pipeline(stage("build", substage("default", []string{"build"}))), "/work")
+		pipeline(stage("build", substage("default", []string{"build"}))), "/work", plain)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "reading the ownership record")
 }
@@ -414,12 +414,12 @@ func TestACorruptRunRecordIsReported(t *testing.T) {
 	f := newFakeEngines(t)
 	p := pipeline(stage("build", substage("default", []string{"build"})))
 
-	_, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(), p, "/work")
+	_, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(), p, "/work", plain)
 	require.NoError(t, err)
 
 	f.store["run/"+revisionOf(t, f)+"/build/default"] = "not json"
 
-	_, err = reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(), p, "/work")
+	_, err = reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(), p, "/work", plain)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "reading run")
 }
@@ -442,7 +442,7 @@ func TestANilClockFallsBackToTheRealOne(t *testing.T) {
 	f := newFakeEngines(t)
 
 	report, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), nil).Apply(context.Background(),
-		pipeline(stage("build", substage("default", []string{"build"}))), "/work")
+		pipeline(stage("build", substage("default", []string{"build"}))), "/work", plain)
 	require.NoError(t, err)
 	require.False(t, report.Revision.CreatedAt.IsZero())
 }
@@ -452,7 +452,7 @@ func TestAnUnknownTargetAliasIsSkippedRatherThanSentAsAnEmptyTarget(t *testing.T
 
 	p := pipeline(stage("build", substage("default", []string{"build", "ghost"})))
 
-	_, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(), p, "/work")
+	_, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(), p, "/work", plain)
 	require.NoError(t, err)
 	require.Equal(t, 1, f.counted(call{uriCompute, "run"}))
 }
@@ -462,7 +462,7 @@ func TestAFailureWritingOwnershipIsReported(t *testing.T) {
 	f.failOn[call{uriState, "put"}] = errBoom
 
 	_, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(),
-		pipeline(stage("build", substage("default", []string{"build"}))), "/work")
+		pipeline(stage("build", substage("default", []string{"build"}))), "/work", plain)
 	require.ErrorIs(t, err, errBoom)
 }
 
@@ -471,7 +471,7 @@ func TestAGateEngineFailureIsReported(t *testing.T) {
 	f.failOn[call{uriGate, "evaluate"}] = errBoom
 
 	_, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(),
-		pipeline(stage("prod", substage("eu-a", []string{"build"}, "approve"))), "/work")
+		pipeline(stage("prod", substage("eu-a", []string{"build"}, "approve"))), "/work", plain)
 	require.ErrorIs(t, err, errBoom)
 }
 
@@ -480,7 +480,7 @@ func TestAPromotionEngineFailureIsReported(t *testing.T) {
 	f.failOn[call{uriPromotion, "evaluate"}] = errBoom
 
 	_, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(),
-		pipeline(stage("build", substage("default", []string{"build"}))), "/work")
+		pipeline(stage("build", substage("default", []string{"build"}))), "/work", plain)
 	require.ErrorIs(t, err, errBoom)
 	require.Contains(t, err.Error(), `stage "build"`)
 }
@@ -492,7 +492,7 @@ func TestAPipelineWithNoReposStillResolvesARevision(t *testing.T) {
 	p.Repos = nil
 
 	report, err := reconcilecontroller.New(f.caller(), noRepoGit(t), clock()).
-		Apply(context.Background(), p, "/work")
+		Apply(context.Background(), p, "/work", plain)
 	require.NoError(t, err)
 	require.NotEmpty(t, report.Revision.ID)
 	require.Empty(t, report.Revision.Repos)
@@ -505,7 +505,7 @@ func TestTheRunOutputIsRecordedSoAFailureCanBeRead(t *testing.T) {
 	}
 
 	report, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(),
-		pipeline(stage("build", substage("default", []string{"build"}))), "/work")
+		pipeline(stage("build", substage("default", []string{"build"}))), "/work", plain)
 	require.NoError(t, err)
 	require.Equal(t, "two tests failed\n", report.Stages[0].Runs[0].Output)
 }
@@ -518,7 +518,7 @@ func TestALongOutputIsTruncatedFromTheFront(t *testing.T) {
 	}
 
 	report, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(),
-		pipeline(stage("build", substage("default", []string{"build"}))), "/work")
+		pipeline(stage("build", substage("default", []string{"build"}))), "/work", plain)
 	require.NoError(t, err)
 
 	got := report.Stages[0].Runs[0].Output
@@ -535,7 +535,7 @@ func TestAnUncommittedChangeIsANewRevisionAndReruns(t *testing.T) {
 	clean.EXPECT().HeadSHA(mock.Anything, mock.Anything).Return("abc", nil).Maybe()
 	clean.EXPECT().WorktreeHash(mock.Anything, mock.Anything).Return("", nil).Maybe()
 
-	first, err := reconcilecontroller.New(f.caller(), clean, clock()).Apply(context.Background(), p, "/work")
+	first, err := reconcilecontroller.New(f.caller(), clean, clock()).Apply(context.Background(), p, "/work", plain)
 	require.NoError(t, err)
 	require.Empty(t, first.Revision.Dirty)
 	require.NotContains(t, first.Revision.ID, "-dirty")
@@ -545,7 +545,7 @@ func TestAnUncommittedChangeIsANewRevisionAndReruns(t *testing.T) {
 	dirty.EXPECT().HeadSHA(mock.Anything, mock.Anything).Return("abc", nil).Maybe()
 	dirty.EXPECT().WorktreeHash(mock.Anything, mock.Anything).Return("wt1", nil).Maybe()
 
-	second, err := reconcilecontroller.New(f.caller(), dirty, clock()).Apply(context.Background(), p, "/work")
+	second, err := reconcilecontroller.New(f.caller(), dirty, clock()).Apply(context.Background(), p, "/work", plain)
 	require.NoError(t, err)
 	require.Equal(t, []string{"golden-rust"}, second.Revision.Dirty)
 	require.Contains(t, second.Revision.ID, "-dirty")
@@ -565,7 +565,7 @@ func TestEditingAgainIsAnotherRevision(t *testing.T) {
 		git.EXPECT().HeadSHA(mock.Anything, mock.Anything).Return("abc", nil).Maybe()
 		git.EXPECT().WorktreeHash(mock.Anything, mock.Anything).Return(worktree, nil).Maybe()
 
-		report, err := reconcilecontroller.New(f.caller(), git, clock()).Apply(context.Background(), p, "/work")
+		report, err := reconcilecontroller.New(f.caller(), git, clock()).Apply(context.Background(), p, "/work", plain)
 		require.NoError(t, err)
 
 		ids[report.Revision.ID] = true
@@ -583,7 +583,7 @@ func TestAWorktreeFailureNamesTheRepo(t *testing.T) {
 	git.EXPECT().WorktreeHash(mock.Anything, mock.Anything).Return("", errBoom).Once()
 
 	_, err := reconcilecontroller.New(f.caller(), git, clock()).Apply(context.Background(),
-		pipeline(stage("build", substage("default", []string{"build"}))), "/work")
+		pipeline(stage("build", substage("default", []string{"build"}))), "/work", plain)
 	require.ErrorIs(t, err, errBoom)
 	require.Contains(t, err.Error(), "resolving the revision of golden-rust")
 }
@@ -597,7 +597,7 @@ func TestSubstagesRunAtTheSameTime(t *testing.T) {
 	}
 
 	report, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).
-		Apply(context.Background(), pipeline(stage("build", subs...)), "/work")
+		Apply(context.Background(), pipeline(stage("build", subs...)), "/work", plain)
 	require.NoError(t, err)
 	require.Len(t, report.Stages[0].Runs, 4)
 	require.Equal(t, 4, f.peak,
@@ -612,7 +612,7 @@ func TestTheReportKeepsSubstageOrderDespiteConcurrency(t *testing.T) {
 			substage("first", []string{"build"}),
 			substage("second", []string{"build"}),
 			substage("third", []string{"build"}),
-		)), "/work")
+		)), "/work", plain)
 	require.NoError(t, err)
 	require.Equal(t, []string{"first", "second", "third"}, []string{
 		report.Stages[0].Runs[0].Substage,
@@ -629,7 +629,7 @@ func TestOneFailingSubstageStillReportsTheOthers(t *testing.T) {
 		Apply(context.Background(), pipeline(stage("build",
 			substage("rust", []string{"build"}),
 			substage("go", []string{"build"}),
-		)), "/work")
+		)), "/work", plain)
 	require.NoError(t, err)
 	require.False(t, report.Advanced())
 	require.Equal(t, citypes.StatusPassed, report.Stages[0].Runs[0].Status)
@@ -649,6 +649,7 @@ func TestAFailedBuildMintsNothing(t *testing.T) {
 		context.Background(),
 		pipeline(stage("build", substage("default", []string{"build"}))),
 		"/work",
+		plain,
 	)
 	require.NoError(t, err)
 
@@ -666,6 +667,7 @@ func TestAStageThatDoesNotDeclareMintWritesNoRevision(t *testing.T) {
 		context.Background(),
 		pipeline(mintlessStage("build", substage("default", []string{"build"}))),
 		"/work",
+		plain,
 	)
 	require.NoError(t, err)
 	require.True(t, report.Advanced())
@@ -682,7 +684,7 @@ func TestAStageAfterTheMintingOneStillSeesTheRevision(t *testing.T) {
 		mintlessStage("staging", substage("default", []string{"build"})),
 	)
 
-	report, err := c.Apply(context.Background(), p, "/work")
+	report, err := c.Apply(context.Background(), p, "/work", plain)
 	require.NoError(t, err)
 	require.True(t, report.Minted)
 	require.Len(t, report.Stages, 2)
@@ -699,7 +701,7 @@ func TestAStageThatDeclaresAReleasePublishesWhatItProved(t *testing.T) {
 
 	p := pipeline(releasingStage("build", substage("default", []string{"build"})))
 
-	report, err := c.Apply(context.Background(), p, "/work")
+	report, err := c.Apply(context.Background(), p, "/work", plain)
 	require.NoError(t, err)
 
 	require.Len(t, report.Released, 1)
@@ -722,7 +724,7 @@ func TestAFailedStagePublishesNothing(t *testing.T) {
 
 	p := pipeline(releasingStage("build", substage("default", []string{"build"})))
 
-	report, err := c.Apply(context.Background(), p, "/work")
+	report, err := c.Apply(context.Background(), p, "/work", plain)
 	require.NoError(t, err)
 
 	require.Empty(t, report.Released)
@@ -737,6 +739,7 @@ func TestAStageWithNoReleasePublishesNothing(t *testing.T) {
 		context.Background(),
 		pipeline(stage("build", substage("default", []string{"build"}))),
 		"/work",
+		plain,
 	)
 	require.NoError(t, err)
 	require.Empty(t, report.Released)
@@ -754,7 +757,7 @@ func TestTheDefaultStrategyMovesThePatch(t *testing.T) {
 	c := reconcilecontroller.New(f.caller(), git, clock())
 
 	report, err := c.Apply(context.Background(),
-		pipeline(releasingStage("build", substage("default", []string{"build"}))), "/work")
+		pipeline(releasingStage("build", substage("default", []string{"build"}))), "/work", plain)
 	require.NoError(t, err)
 	require.Len(t, f.published, 1)
 	require.Equal(t, "v0.2.5", f.published[0].Version)
@@ -771,7 +774,7 @@ func TestTheMinorStrategyMovesTheMinor(t *testing.T) {
 	p := pipeline(releasingStage("build", substage("default", []string{"build"})))
 	p.Versioning.Strategy = config.StrategyMinor
 
-	_, err := c.Apply(context.Background(), p, "/work")
+	_, err := c.Apply(context.Background(), p, "/work", plain)
 	require.NoError(t, err)
 	require.Equal(t, "v0.3.0", f.published[0].Version)
 }
@@ -799,7 +802,7 @@ func TestTheSemanticStrategyReadsEveryMember(t *testing.T) {
 		Ignore: []string{"docs:"},
 	}
 
-	_, err := c.Apply(context.Background(), p, "/work")
+	_, err := c.Apply(context.Background(), p, "/work", plain)
 	require.NoError(t, err)
 	require.Equal(t, "v0.3.0", f.published[0].Version,
 		"the highest claim any member makes decides the one number all of them carry")
@@ -821,7 +824,7 @@ func TestACapClampsTheBumpInsteadOfStoppingTheRelease(t *testing.T) {
 	p.Versioning.Cap = "v0"
 	p.Versioning.Semantic = config.Semantic{Major: []string{"!:"}, Minor: []string{"feat:"}}
 
-	_, err := c.Apply(context.Background(), p, "/work")
+	_, err := c.Apply(context.Background(), p, "/work", plain)
 	require.NoError(t, err)
 	require.Equal(t, "v0.50.0", f.published[0].Version,
 		"a major under a v0 cap drops to a minor rather than refusing to release")
@@ -840,7 +843,7 @@ func TestTheTagPrefixReachesTheEngine(t *testing.T) {
 	p := pipeline(releasingStage("build", substage("default", []string{"build"})))
 	p.Versioning.TagPrefix = "forge"
 
-	_, err := c.Apply(context.Background(), p, "/work")
+	_, err := c.Apply(context.Background(), p, "/work", plain)
 	require.NoError(t, err)
 	require.Equal(t, "v0.49.1", f.published[0].Version)
 	require.Equal(t, "forge", f.published[0].TagPrefix)
@@ -851,7 +854,7 @@ func TestAWorkspaceThatNeverReleasedStartsAtTheFirstVersion(t *testing.T) {
 	c := reconcilecontroller.New(f.caller(), gitAt(t, "abc123"), clock())
 
 	_, err := c.Apply(context.Background(),
-		pipeline(releasingStage("build", substage("default", []string{"build"}))), "/work")
+		pipeline(releasingStage("build", substage("default", []string{"build"}))), "/work", plain)
 	require.NoError(t, err)
 	require.Equal(t, "v0.1.0", f.published[0].Version)
 }
@@ -878,7 +881,7 @@ func TestOnlyABootstrapTellsTheManagerItMayWriteCredentials(t *testing.T) {
 
 		_, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc123"), clock()).Apply(
 			context.Background(),
-			pipeline(stage("build", substage("default", []string{"build"}))), "/work")
+			pipeline(stage("build", substage("default", []string{"build"}))), "/work", plain)
 		require.NoError(t, err)
 
 		require.Contains(t, f.realized, secret.ID(),
@@ -893,7 +896,7 @@ func TestOnlyABootstrapTellsTheManagerItMayWriteCredentials(t *testing.T) {
 
 		_, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc123"), clock()).Bootstrap(
 			context.Background(),
-			pipeline(stage("build", substage("default", []string{"build"}))), "/work")
+			pipeline(stage("build", substage("default", []string{"build"}))), "/work", plain)
 		require.NoError(t, err)
 
 		require.True(t, f.bootstrapped,

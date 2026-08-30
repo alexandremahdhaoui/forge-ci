@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alexandremahdhaoui/forge-ci/internal/controller/reconcilecontroller"
 	"github.com/alexandremahdhaoui/forge-ci/internal/mocks/engineadaptermock"
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 	"github.com/alexandremahdhaoui/forge-ci/pkg/config"
@@ -54,6 +55,10 @@ type fakeEngines struct {
 	// how a test stands up a run that found drift and corrected it.
 	reconcileChanged bool
 }
+
+// plain is an ordinary run: it writes, and it rewrites nothing that cannot
+// be compared. A case that names Options is a case about one of those flags.
+var plain = reconcilecontroller.Options{}
 
 func newFakeEngines(t *testing.T) *fakeEngines {
 	return &fakeEngines{

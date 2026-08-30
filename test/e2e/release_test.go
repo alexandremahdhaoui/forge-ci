@@ -177,6 +177,11 @@ func TestAGreenBuildReleasesTheAggregatedDistribution(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(root, "forge-ci.yaml"),
 		[]byte(releasePipelineYAML(root, statePath, fake.server.URL)), 0o600))
 
+	// Provisioned before it is applied, in that order, which is what an
+	// operator does. An apply on a workspace nobody bootstrapped creates the
+	// state directories, reports a change and stops as superseded.
+	mustRun(t, root, "forge-ci", "bootstrap", "--config", "forge-ci.yaml", "--root", ".")
+
 	out := mustRun(t, root, "forge-ci", "apply", "--config", "forge-ci.yaml", "--root", ".")
 	require.Contains(t, out, "released")
 
@@ -239,6 +244,8 @@ func TestADirtyTreeNeverReleases(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(root, "forge-ci.yaml"),
 		[]byte(releasePipelineYAML(root, filepath.Join(root, "state2"), fake.server.URL)), 0o600))
 
+	mustRun(t, root, "forge-ci", "bootstrap", "--config", "forge-ci.yaml", "--root", ".")
+
 	repo := filepath.Join(root, "demo-repo")
 	require.NoError(t, os.WriteFile(filepath.Join(repo, "forge.yaml"), []byte(releaseForgeYAML), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(repo, "README.md"), []byte("uncommitted change"), 0o600))
@@ -297,6 +304,11 @@ func TestAPreTaggedLineContinuesRatherThanStartingOver(t *testing.T) {
 
 	require.NoError(t, os.WriteFile(filepath.Join(root, "forge-ci.yaml"),
 		[]byte(releasePipelineYAML(root, statePath, fake.server.URL)), 0o600))
+
+	// Provisioned before it is applied, in that order, which is what an
+	// operator does. An apply on a workspace nobody bootstrapped creates the
+	// state directories, reports a change and stops as superseded.
+	mustRun(t, root, "forge-ci", "bootstrap", "--config", "forge-ci.yaml", "--root", ".")
 
 	out := mustRun(t, root, "forge-ci", "apply", "--config", "forge-ci.yaml", "--root", ".")
 	require.Contains(t, out, "released")

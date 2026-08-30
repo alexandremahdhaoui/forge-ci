@@ -149,7 +149,26 @@ stages:
 `
 }
 
+// workspace stands a workspace up and provisions it, which is what an
+// operator does and in that order.
+//
+// The bootstrap matters to every test that applies. An apply reconciles
+// first, and on a workspace nobody bootstrapped the state directories do not
+// exist yet: the manager creates them, reports a change, and the run stops
+// as superseded before a stage can run. That is the rule working. A test
+// that skipped the bootstrap was testing a state the product never reaches.
 func workspace(t *testing.T, testCommand string) (root, statePath string) {
+	t.Helper()
+
+	root, statePath = bareWorkspace(t, testCommand)
+	mustRun(t, root, "forge-ci", "bootstrap", "--config", filepath.Join(root, "forge-ci.yaml"))
+
+	return root, statePath
+}
+
+// bareWorkspace stops before the bootstrap, for the one test that is about
+// the bootstrap itself.
+func bareWorkspace(t *testing.T, testCommand string) (root, statePath string) {
 	t.Helper()
 
 	root = t.TempDir()
@@ -199,7 +218,7 @@ func readRun(t *testing.T, statePath, revision string) citypes.Run {
 }
 
 func TestTheWholeLoopRunsLocallyWithNoCloud(t *testing.T) {
-	root, statePath := workspace(t, "true")
+	root, statePath := bareWorkspace(t, "true")
 
 	out := mustRun(t, root, "forge-ci", "bootstrap", "--config", filepath.Join(root, "forge-ci.yaml"))
 	require.Contains(t, out, "created directory "+statePath)
@@ -277,6 +296,11 @@ func TestAFailingStageBlocksAndExitsNonZero(t *testing.T) {
 	root, statePath := workspace(t, "exit 1")
 	config := filepath.Join(root, "forge-ci.yaml")
 
+	// What the bootstrap already recorded. It resolves a revision of its
+	// own, which is not a claim that anything was proven - only a mint is
+	// that - so the question here is what the FAILING run added.
+	before := revisionIDs(t, statePath)
+
 	out, err := run(t, root, "forge-ci", "apply", "--config", config)
 	require.Error(t, err, out)
 	require.Contains(t, out, "default failed")
@@ -286,7 +310,7 @@ func TestAFailingStageBlocksAndExitsNonZero(t *testing.T) {
 	failed := readRun(t, statePath, revisionFromOutput(t, out))
 	require.Equal(t, citypes.StatusFailed, failed.Status)
 
-	require.Empty(t, revisionIDs(t, statePath),
+	require.Equal(t, before, revisionIDs(t, statePath),
 		"a build that failed must mint no revision")
 }
 

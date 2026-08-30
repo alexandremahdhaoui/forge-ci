@@ -39,6 +39,10 @@ type Git interface {
 	// Push sends the branch to origin. A rejected push is ErrRejected: the
 	// remote moved, and only a human can decide what wins.
 	Push(ctx context.Context, dir, branch string) error
+	// PullRebase fetches origin and replays local commits on top. It is how
+	// a store whose records are one file each recovers from a concurrent
+	// run without anybody choosing a winner.
+	PullRebase(ctx context.Context, dir, branch string) error
 }
 
 // ErrNoRemote marks a checkout with no origin. It is not a failure: a
@@ -337,6 +341,22 @@ func (g *CLI) Push(ctx context.Context, dir, branch string) error {
 	}
 
 	return nil
+}
+
+// PullRebase replays this checkout's commits on top of origin's.
+//
+// It carries an identity for the same reason Commit does: a rebase writes
+// commit objects, and a runner has no ambient one.
+func (g *CLI) PullRebase(ctx context.Context, dir, branch string) error {
+	if _, err := g.run(ctx, dir, "fetching origin in "+dir, "fetch", "origin", branch); err != nil {
+		return err
+	}
+
+	args := append(gitident.Args(ctx, g.runner, dir), "rebase", "origin/"+branch)
+
+	_, err := g.run(ctx, dir, "rebasing "+dir+" onto origin/"+branch, args...)
+
+	return err
 }
 
 // TagAt answers where a tag points, and whether the repo carries it. A repo

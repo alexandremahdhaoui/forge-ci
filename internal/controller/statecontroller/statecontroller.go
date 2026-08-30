@@ -142,11 +142,71 @@ func (c *Controller) Put(ctx context.Context, in citypes.StatePutInput) (citypes
 		return citypes.StateGetOutput{}, fmt.Errorf("writing %s %q: %w", in.Kind, in.Key, err)
 	}
 
-	if err := c.commit(ctx, root, target, in.Kind, in.Key); err != nil {
+	committed, err := c.commit(ctx, root, target, in.Kind, in.Key)
+	if err != nil {
 		return citypes.StateGetOutput{}, err
 	}
 
+	if committed {
+		if err := c.push(ctx, root, in.Spec); err != nil {
+			return citypes.StateGetOutput{}, fmt.Errorf("recording %s %q: %w", in.Kind, in.Key, err)
+		}
+	}
+
 	return citypes.StateGetOutput{Found: true, Payload: in.Payload}, nil
+}
+
+// push sends the store to its remote, which is what makes a record outlive
+// the run that wrote it.
+//
+// Without it a CI run reads whatever the remote holds, commits, and throws
+// the commit away with the container. Every minted revision, every run
+// record and the ownership record died that way. forge-factory reads
+// revisions/<id>.json from this repo's REMOTE to pin a remote run's member
+// shas, so the record was never found and every remote run fell back to
+// floating tags with only a log line to say so.
+//
+// Declared, and off by default, so a store nobody declared a push for keeps
+// behaving as it did.
+func (c *Controller) push(ctx context.Context, root string, spec map[string]any) error {
+	want, _ := spec["push"].(bool)
+	if !want || c.git == nil {
+		return nil
+	}
+
+	has, err := c.git.HasRemote(ctx, root)
+	if err != nil {
+		return err
+	}
+
+	if !has {
+		// A scratch store with no origin is a legitimate state, and a test
+		// fixture is always in it.
+		return nil
+	}
+
+	branch, err := c.git.Branch(ctx, root)
+	if err != nil {
+		return err
+	}
+
+	if branch == "" {
+		return nil
+	}
+
+	err = c.git.Push(ctx, root, branch)
+	if !errors.Is(err, gitadapter.ErrRejected) {
+		return err
+	}
+
+	// The remote moved under this run. Every record is a file of its own, so
+	// replaying this run's commits on top of the other run's is the whole
+	// resolution: neither run loses a record and nobody picks a winner.
+	if err := c.git.PullRebase(ctx, root, branch); err != nil {
+		return err
+	}
+
+	return c.git.Push(ctx, root, branch)
 }
 
 func (c *Controller) List(ctx context.Context, in citypes.StateGetInput) (citypes.StateListOutput, error) {
@@ -184,19 +244,22 @@ func (c *Controller) List(ctx context.Context, in citypes.StateGetInput) (citype
 // one path and commits only what is staged: the store often shares a
 // repo with other work, and sweeping a dirty tree into a "ci:" commit
 // buries changes the engine had no business recording.
-func (c *Controller) commit(ctx context.Context, root, target, kind, key string) error {
+// commit records the written file and answers whether a commit happened. An
+// identical payload stages nothing, and a caller that pushed on that would
+// push nothing every time a run re-recorded a record it already had.
+func (c *Controller) commit(ctx context.Context, root, target, kind, key string) (bool, error) {
 	if c.git == nil {
-		return nil
+		return false, nil
 	}
 
 	isRepo, err := c.git.IsRepo(ctx, root)
 	if err != nil {
-		return fmt.Errorf("recording %s %q: %w", kind, key, err)
+		return false, fmt.Errorf("recording %s %q: %w", kind, key, err)
 	}
 
 	if !isRepo {
 		if err := c.git.Init(ctx, root); err != nil {
-			return fmt.Errorf("recording %s %q: %w", kind, key, err)
+			return false, fmt.Errorf("recording %s %q: %w", kind, key, err)
 		}
 	}
 
@@ -209,23 +272,23 @@ func (c *Controller) commit(ctx context.Context, root, target, kind, key string)
 	}
 
 	if err := c.git.Add(ctx, root, relTarget); err != nil {
-		return fmt.Errorf("recording %s %q: %w", kind, key, err)
+		return false, fmt.Errorf("recording %s %q: %w", kind, key, err)
 	}
 
 	staged, err := c.git.Staged(ctx, root)
 	if err != nil {
-		return fmt.Errorf("recording %s %q: %w", kind, key, err)
+		return false, fmt.Errorf("recording %s %q: %w", kind, key, err)
 	}
 
 	if !staged {
-		return nil
+		return false, nil
 	}
 
 	if err := c.git.Commit(ctx, root, fmt.Sprintf("ci: %s %s", kind, key)); err != nil {
-		return fmt.Errorf("recording %s %q: %w", kind, key, err)
+		return false, fmt.Errorf("recording %s %q: %w", kind, key, err)
 	}
 
-	return nil
+	return true, nil
 }
 
 func (c *Controller) pathFor(spec map[string]any, kind, key string) (string, error) {

@@ -72,6 +72,8 @@ func toReconcileInput(in ReconcileInput) citypes.ReconcileInput {
 		Owned:     owned,
 		Bootstrap: in.Bootstrap,
 		Spec:      in.Spec,
+		DryRun:    in.DryRun,
+		Force:     in.Force,
 	}
 }
 

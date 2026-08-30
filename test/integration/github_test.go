@@ -198,6 +198,89 @@ func TestTheGitHubManagerRealizesEveryKindOverMCP(t *testing.T) {
 	require.True(t, out.Changed, "nothing existed, so every kind converged something")
 }
 
+// dryRun and force are bools, so a handler that drops one compiles, passes
+// every unit test, and fails only here. Dropping dryRun is a plan that
+// writes, which is the worst failure this surface has.
+func TestADryRunOverMCPWritesNothingAndStillSaysWhatWouldChange(t *testing.T) {
+	fake, srv := newFakeGitHub(t, "success")
+	t.Setenv("GITHUB_TOKEN", "pat-under-test")
+
+	file := filepath.Join(t.TempDir(), ".github", "workflows", "intake.yaml")
+
+	var out citypes.ReconcileOutput
+
+	err := caller().Call(context.Background(), githubManagerURI, "reconcile",
+		citypes.ReconcileInput{
+			Manager: "github",
+			DryRun:  true,
+			Spec:    map[string]any{"apiBaseURL": srv.URL},
+			Resources: []citypes.Resource{
+				{Kind: "file-content", Name: file, Spec: map[string]any{"content": "on: push\n"}},
+				{
+					Kind: "actions-secret", Name: "o/r/FORGE_CI_GITHUB_TOKEN",
+					Spec: map[string]any{"repo": "o/r", "secret": "FORGE_CI_GITHUB_TOKEN"},
+				},
+			},
+		}, &out)
+	require.NoError(t, err)
+
+	require.True(t, out.Changed, "the plan says a real run would change something")
+	require.NoFileExists(t, file, "and it wrote nothing")
+	require.Empty(t, fake.secrets, "and sealed nothing")
+
+	for _, action := range out.Actions {
+		require.Contains(t, action, "would ",
+			"every line of a plan must read as something that has not happened")
+	}
+}
+
+// An existing secret is kept unless force says otherwise. This is the one
+// collision git cannot arbitrate: the API never returns a value, so two
+// operators with different credentials would leave one winner in silence.
+func TestForceOverMCPIsWhatRewritesAnExistingSecret(t *testing.T) {
+	fake, srv := newFakeGitHub(t, "success")
+
+	secret := []citypes.Resource{{
+		Kind: "actions-secret", Name: "o/r/FORGE_CI_GITHUB_TOKEN",
+		Spec: map[string]any{"repo": "o/r", "secret": "FORGE_CI_GITHUB_TOKEN"},
+	}}
+
+	t.Setenv("GITHUB_TOKEN", "the-first-token")
+
+	var first citypes.ReconcileOutput
+
+	require.NoError(t, caller().Call(context.Background(), githubManagerURI, "reconcile",
+		citypes.ReconcileInput{
+			Manager: "github", Resources: secret,
+			Spec: map[string]any{"apiBaseURL": srv.URL},
+		}, &first))
+	require.Equal(t, "the-first-token", fake.open(t, fake.secrets["FORGE_CI_GITHUB_TOKEN"]))
+
+	t.Setenv("GITHUB_TOKEN", "a-second-operators-token")
+
+	var second citypes.ReconcileOutput
+
+	require.NoError(t, caller().Call(context.Background(), githubManagerURI, "reconcile",
+		citypes.ReconcileInput{
+			Manager: "github", Resources: secret, Owned: first.Owned,
+			Spec: map[string]any{"apiBaseURL": srv.URL},
+		}, &second))
+	require.False(t, second.Changed)
+	require.Equal(t, "the-first-token", fake.open(t, fake.secrets["FORGE_CI_GITHUB_TOKEN"]),
+		"the second operator must not silently replace the first one's credential")
+
+	var forced citypes.ReconcileOutput
+
+	require.NoError(t, caller().Call(context.Background(), githubManagerURI, "reconcile",
+		citypes.ReconcileInput{
+			Manager: "github", Resources: secret, Owned: first.Owned, Force: true,
+			Spec: map[string]any{"apiBaseURL": srv.URL},
+		}, &forced))
+	require.True(t, forced.Changed)
+	require.Equal(t, "a-second-operators-token", fake.open(t, fake.secrets["FORGE_CI_GITHUB_TOKEN"]),
+		"a rotation is asked for, and force is how")
+}
+
 // The second half, and the one that decides whether a pipeline ever runs
 // again: over the same fake, with everything already as declared, the
 // manager must answer changed false. A file it kept, a workflow already

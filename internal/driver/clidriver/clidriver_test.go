@@ -103,7 +103,7 @@ func TestApplyRendersTheWholeReport(t *testing.T) {
 	var out bytes.Buffer
 
 	r := clidrivermock.NewMockReconciler(t)
-	r.EXPECT().Apply(mock.Anything, mock.Anything, mock.Anything).Return(passingReport(), nil).Once()
+	r.EXPECT().Apply(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(passingReport(), nil).Once()
 
 	err := clidriver.New(&out, r).Run(context.Background(), []string{"apply", "--config", write(t, minimal)})
 	require.NoError(t, err)
@@ -126,7 +126,7 @@ func TestASupersededApplyReportsLoudlyAndDoesNotFail(t *testing.T) {
 	var out bytes.Buffer
 
 	r := clidrivermock.NewMockReconciler(t)
-	r.EXPECT().Apply(mock.Anything, mock.Anything, mock.Anything).Return(reconcilecontroller.Report{
+	r.EXPECT().Apply(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(reconcilecontroller.Report{
 		Superseded: true,
 		Actions: []string{
 			"converged file golden-go/.github/workflows/notify.yaml",
@@ -146,11 +146,63 @@ func TestASupersededApplyReportsLoudlyAndDoesNotFail(t *testing.T) {
 		"no revision was resolved, so printing an empty one would read as a bug")
 }
 
+// A plan says so on its first line. An operator reading a wall of actions
+// has to be able to tell at a glance whether they already happened, and the
+// exit status cannot say it: a plan exits 0 and so does a green run.
+func TestADryRunSaysItIsAPlanAndPrintsNoRevision(t *testing.T) {
+	var out bytes.Buffer
+
+	r := clidrivermock.NewMockReconciler(t)
+	r.EXPECT().Apply(mock.Anything, mock.Anything, mock.Anything, reconcilecontroller.Options{DryRun: true}).
+		Return(reconcilecontroller.Report{
+			Planned: true,
+			Actions: []string{"would converge file golden-go/.github/workflows/notify.yaml"},
+		}, nil).Once()
+
+	err := clidriver.New(&out, r).Run(context.Background(),
+		[]string{"apply", "--config", write(t, minimal), "--dry-run"})
+	require.NoError(t, err)
+
+	text := out.String()
+	require.Contains(t, text, "this is a plan, nothing was written")
+	require.Contains(t, text, "would converge file golden-go/.github/workflows/notify.yaml")
+	require.NotContains(t, text, "revision ")
+	require.NotContains(t, text, "stage ")
+}
+
+// The empty plan has to say something. A bare "nothing was written" with no
+// lines under it reads like a run that failed to look.
+func TestAnEmptyPlanSaysEverythingAlreadyMatches(t *testing.T) {
+	var out bytes.Buffer
+
+	r := clidrivermock.NewMockReconciler(t)
+	r.EXPECT().Bootstrap(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return(reconcilecontroller.Report{Planned: true}, nil).Once()
+
+	err := clidriver.New(&out, r).Run(context.Background(),
+		[]string{"bootstrap", "--config", write(t, minimal), "--dry-run"})
+	require.NoError(t, err)
+	require.Contains(t, out.String(), "everything already matches what is declared")
+}
+
+// --force reaches the reconcile. It is one bool and it decides whether a
+// second operator's bootstrap silently replaces the first one's credential.
+func TestForceReachesTheReconcile(t *testing.T) {
+	var out bytes.Buffer
+
+	r := clidrivermock.NewMockReconciler(t)
+	r.EXPECT().Bootstrap(mock.Anything, mock.Anything, mock.Anything, reconcilecontroller.Options{Force: true}).
+		Return(passingReport(), nil).Once()
+
+	require.NoError(t, clidriver.New(&out, r).Run(context.Background(),
+		[]string{"bootstrap", "--config", write(t, minimal), "--force"}))
+}
+
 func TestApplyFailsWhenThePipelineDidNotAdvance(t *testing.T) {
 	var out bytes.Buffer
 
 	r := clidrivermock.NewMockReconciler(t)
-	r.EXPECT().Apply(mock.Anything, mock.Anything, mock.Anything).Return(blockedReport(), nil).Once()
+	r.EXPECT().Apply(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(blockedReport(), nil).Once()
 
 	err := clidriver.New(&out, r).Run(context.Background(), []string{"apply", "--config", write(t, minimal)})
 	require.ErrorIs(t, err, clidriver.ErrBlocked)
@@ -172,7 +224,7 @@ func TestBootstrapNeverFailsOnABlockedPipeline(t *testing.T) {
 	var out bytes.Buffer
 
 	r := clidrivermock.NewMockReconciler(t)
-	r.EXPECT().Bootstrap(mock.Anything, mock.Anything, mock.Anything).Return(blockedReport(), nil).Once()
+	r.EXPECT().Bootstrap(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(blockedReport(), nil).Once()
 
 	err := clidriver.New(&out, r).Run(context.Background(), []string{"bootstrap", "--config", write(t, minimal)})
 	require.NoError(t, err)
@@ -208,10 +260,10 @@ func TestEveryVerbPropagatesAnError(t *testing.T) {
 
 			switch verb {
 			case "bootstrap":
-				r.EXPECT().Bootstrap(mock.Anything, mock.Anything, mock.Anything).
+				r.EXPECT().Bootstrap(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 					Return(reconcilecontroller.Report{}, errBoom).Once()
 			case "apply":
-				r.EXPECT().Apply(mock.Anything, mock.Anything, mock.Anything).
+				r.EXPECT().Apply(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 					Return(reconcilecontroller.Report{}, errBoom).Once()
 			case "status":
 				r.EXPECT().Status(mock.Anything, mock.Anything, mock.Anything).
@@ -232,7 +284,7 @@ func TestTheRootDefaultsToThePipelineDirectory(t *testing.T) {
 	path := write(t, minimal)
 
 	r := clidrivermock.NewMockReconciler(t)
-	r.EXPECT().Apply(mock.Anything, mock.Anything, filepath.Dir(path)).Return(passingReport(), nil).Once()
+	r.EXPECT().Apply(mock.Anything, mock.Anything, filepath.Dir(path), mock.Anything).Return(passingReport(), nil).Once()
 
 	require.NoError(t, clidriver.New(&bytes.Buffer{}, r).
 		Run(context.Background(), []string{"apply", "--config", path}))
@@ -240,7 +292,7 @@ func TestTheRootDefaultsToThePipelineDirectory(t *testing.T) {
 
 func TestAnExplicitRootWins(t *testing.T) {
 	r := clidrivermock.NewMockReconciler(t)
-	r.EXPECT().Apply(mock.Anything, mock.Anything, "/elsewhere").Return(passingReport(), nil).Once()
+	r.EXPECT().Apply(mock.Anything, mock.Anything, "/elsewhere", mock.Anything).Return(passingReport(), nil).Once()
 
 	require.NoError(t, clidriver.New(&bytes.Buffer{}, r).
 		Run(context.Background(), []string{"apply", "--config", write(t, minimal), "--root", "/elsewhere"}))
@@ -292,7 +344,7 @@ func TestABadFlagIsReported(t *testing.T) {
 
 func TestAFailingWriterIsReported(t *testing.T) {
 	r := clidrivermock.NewMockReconciler(t)
-	r.EXPECT().Apply(mock.Anything, mock.Anything, mock.Anything).Return(passingReport(), nil).Once()
+	r.EXPECT().Apply(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(passingReport(), nil).Once()
 
 	err := clidriver.New(brokenWriter{}, r).
 		Run(context.Background(), []string{"apply", "--config", write(t, minimal)})
@@ -314,7 +366,7 @@ func TestApplyRefusesToRunInsideApply(t *testing.T) {
 
 func TestTheOtherVerbsStillWorkInsideApply(t *testing.T) {
 	r := clidrivermock.NewMockReconciler(t)
-	r.EXPECT().Bootstrap(mock.Anything, mock.Anything, mock.Anything).Return(passingReport(), nil).Once()
+	r.EXPECT().Bootstrap(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(passingReport(), nil).Once()
 
 	require.NoError(t, clidriver.New(&bytes.Buffer{}, r).
 		AlreadyApplying(true).
@@ -328,7 +380,7 @@ func TestAFailingRunPrintsItsOutput(t *testing.T) {
 	report.Stages[0].Runs[0].Output = "two tests failed\nsecond line\n"
 
 	r := clidrivermock.NewMockReconciler(t)
-	r.EXPECT().Apply(mock.Anything, mock.Anything, mock.Anything).Return(report, nil).Once()
+	r.EXPECT().Apply(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(report, nil).Once()
 
 	err := clidriver.New(&out, r).Run(context.Background(), []string{"apply", "--config", write(t, minimal)})
 	require.ErrorIs(t, err, clidriver.ErrBlocked)
@@ -343,7 +395,7 @@ func TestAPassingRunDoesNotPrintItsOutput(t *testing.T) {
 	report.Stages[0].Runs[0].Output = "lots of noise\n"
 
 	r := clidrivermock.NewMockReconciler(t)
-	r.EXPECT().Apply(mock.Anything, mock.Anything, mock.Anything).Return(report, nil).Once()
+	r.EXPECT().Apply(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(report, nil).Once()
 
 	require.NoError(t, clidriver.New(&out, r).
 		Run(context.Background(), []string{"apply", "--config", write(t, minimal)}))
@@ -465,8 +517,10 @@ func TestTheRootReachesTheEnginesAbsolute(t *testing.T) {
 			var seen string
 
 			r := clidrivermock.NewMockReconciler(t)
-			r.EXPECT().Apply(mock.Anything, mock.Anything, mock.Anything).
-				RunAndReturn(func(_ context.Context, _ config.Pipeline, root string) (reconcilecontroller.Report, error) {
+			r.EXPECT().Apply(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+				RunAndReturn(func(
+					_ context.Context, _ config.Pipeline, root string, _ reconcilecontroller.Options,
+				) (reconcilecontroller.Report, error) {
 					seen = root
 
 					return passingReport(), nil

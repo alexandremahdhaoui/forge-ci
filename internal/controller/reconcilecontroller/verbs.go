@@ -7,17 +7,24 @@ import (
 	"github.com/alexandremahdhaoui/forge-ci/pkg/config"
 )
 
-func (c *Controller) Bootstrap(ctx context.Context, p config.Pipeline, root string) (Report, error) {
+func (c *Controller) Bootstrap(
+	ctx context.Context, p config.Pipeline, root string, opts Options,
+) (Report, error) {
 	index := newIndex(p, root)
 
 	// true: the bootstrap is the one ceremony that writes credentials.
 	//
-	// The changed flag is read and dropped on purpose. A bootstrap is run by
-	// an operator at a terminal who is about to look at what it wrote, and it
-	// runs no stages, so there is nothing to supersede.
-	actions, _, err := c.reconcileResources(ctx, p, index, root, true)
+	// The changed flag is read and dropped on purpose. A bootstrap runs no
+	// stages, so there is no run to supersede, and the manager has already
+	// made its changes durable - which is what lets the revision below hash
+	// a committed tree rather than the files this call just wrote.
+	actions, _, err := c.reconcileResources(ctx, p, index, root, true, opts)
 	if err != nil {
 		return Report{}, err
+	}
+
+	if opts.DryRun {
+		return Report{Actions: actions, Planned: true}, nil
 	}
 
 	revision, err := c.resolveRevision(ctx, p, root)

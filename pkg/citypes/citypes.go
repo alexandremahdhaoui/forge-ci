@@ -50,6 +50,15 @@ type ReconcileInput struct {
 	// is true.
 	Bootstrap bool           `json:"bootstrap,omitempty"`
 	Spec      map[string]any `json:"spec,omitempty"`
+	// DryRun asks what would happen and forbids every write. The manager
+	// reads actual state exactly as it always does and settles nothing, so
+	// a plan that says nothing would change is a promise the next run keeps.
+	DryRun bool `json:"dryRun,omitempty"`
+	// Force rewrites a resource that exists and cannot be compared. Only a
+	// write-only resource needs it: a put over an existing Actions secret
+	// silently replaces whatever was there, and two operators with different
+	// credentials leave one winner. Without this, an existing one is kept.
+	Force bool `json:"force,omitempty"`
 }
 
 type ReconcileOutput struct {

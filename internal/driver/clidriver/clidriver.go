@@ -29,8 +29,8 @@ var (
 )
 
 type Reconciler interface {
-	Bootstrap(context.Context, config.Pipeline, string) (reconcilecontroller.Report, error)
-	Apply(context.Context, config.Pipeline, string) (reconcilecontroller.Report, error)
+	Bootstrap(context.Context, config.Pipeline, string, reconcilecontroller.Options) (reconcilecontroller.Report, error)
+	Apply(context.Context, config.Pipeline, string, reconcilecontroller.Options) (reconcilecontroller.Report, error)
 	Status(context.Context, config.Pipeline, string) (reconcilecontroller.Report, error)
 	Poll(context.Context, config.Pipeline, string) (citypes.TriggerOutput, error)
 }
@@ -87,7 +87,7 @@ func (d *Driver) Run(ctx context.Context, args []string) error {
 		return d.release(ctx, args[1:])
 	}
 
-	p, root, err := d.load(verb, args[1:])
+	p, root, opts, err := d.load(verb, args[1:])
 	if err != nil {
 		return err
 	}
@@ -97,7 +97,7 @@ func (d *Driver) Run(ctx context.Context, args []string) error {
 		return d.write(describe(p))
 	case "bootstrap":
 		return d.reportOf(func() (reconcilecontroller.Report, error) {
-			return d.reconciler.Bootstrap(ctx, p, root)
+			return d.reconciler.Bootstrap(ctx, p, root, opts)
 		}, false)
 	case "apply":
 		if d.applying {
@@ -107,7 +107,7 @@ func (d *Driver) Run(ctx context.Context, args []string) error {
 		}
 
 		return d.reportOf(func() (reconcilecontroller.Report, error) {
-			return d.reconciler.Apply(ctx, p, root)
+			return d.reconciler.Apply(ctx, p, root, opts)
 		}, true)
 	case "status":
 		return d.reportOf(func() (reconcilecontroller.Report, error) {
@@ -136,20 +136,26 @@ func (d *Driver) Run(ctx context.Context, args []string) error {
 	}
 }
 
-func (d *Driver) load(verb string, args []string) (config.Pipeline, string, error) {
+func (d *Driver) load(verb string, args []string) (config.Pipeline, string, reconcilecontroller.Options, error) {
 	fs := flag.NewFlagSet(verb, flag.ContinueOnError)
 	fs.SetOutput(d.out)
 
 	path := fs.String("config", DefaultPath, "path to the forge-ci file")
 	root := fs.String("root", "", "directory holding the repos, defaults to the pipeline file's parent")
+	dryRun := fs.Bool("dry-run", false,
+		"say what would change and write nothing, anywhere")
+	force := fs.Bool("force", false,
+		"rewrite a resource that exists and cannot be compared, which today means one thing: a secret")
 
 	if err := fs.Parse(args); err != nil {
-		return config.Pipeline{}, "", fmt.Errorf("parsing flags: %w", err)
+		return config.Pipeline{}, "", reconcilecontroller.Options{}, fmt.Errorf("parsing flags: %w", err)
 	}
+
+	opts := reconcilecontroller.Options{DryRun: *dryRun, Force: *force}
 
 	p, err := Load(*path)
 	if err != nil {
-		return config.Pipeline{}, "", err
+		return config.Pipeline{}, "", opts, err
 	}
 
 	// The root is absolute from here on, whichever way it arrived. It
@@ -170,7 +176,7 @@ func (d *Driver) load(verb string, args []string) (config.Pipeline, string, erro
 	if *root == "" {
 		abs, err := filepath.Abs(*path)
 		if err != nil {
-			return config.Pipeline{}, "", fmt.Errorf("resolving %s: %w", *path, err)
+			return config.Pipeline{}, "", opts, fmt.Errorf("resolving %s: %w", *path, err)
 		}
 
 		*root = filepath.Dir(abs)
@@ -178,10 +184,10 @@ func (d *Driver) load(verb string, args []string) (config.Pipeline, string, erro
 
 	abs, err := filepath.Abs(*root)
 	if err != nil {
-		return config.Pipeline{}, "", fmt.Errorf("resolving %s: %w", *root, err)
+		return config.Pipeline{}, "", opts, fmt.Errorf("resolving %s: %w", *root, err)
 	}
 
-	return p, abs, nil
+	return p, abs, opts, nil
 }
 
 func (d *Driver) reportOf(
@@ -228,18 +234,28 @@ func describe(p config.Pipeline) string {
 func render(report reconcilecontroller.Report) string {
 	var b strings.Builder
 
+	// A plan says so on its first line and never prints a revision, because
+	// it resolved none. An operator reading a wall of actions has to be able
+	// to tell at a glance whether they already happened.
+	if report.Planned {
+		b.WriteString("this is a plan, nothing was written\n")
+
+		if len(report.Actions) == 0 {
+			b.WriteString("  everything already matches what is declared\n")
+		}
+
+		writeActions(&b, report.Actions)
+
+		return b.String()
+	}
+
 	// The superseded report comes first and reads as its own thing. It is
 	// not a failure and the exit status says so, so the only way an operator
 	// learns why no stage ran is by reading this.
 	if report.Superseded {
 		b.WriteString("reconcile changed this pipeline's own resources and settled them\n")
 		b.WriteString("this run is superseded by the run those changes trigger\n")
-
-		for _, action := range report.Actions {
-			for _, line := range strings.Split(strings.TrimRight(action, "\n"), "\n") {
-				fmt.Fprintf(&b, "  %s\n", line)
-			}
-		}
+		writeActions(&b, report.Actions)
 
 		return b.String()
 	}
@@ -296,6 +312,16 @@ func render(report reconcilecontroller.Report) string {
 	}
 
 	return b.String()
+}
+
+// writeActions indents every action, splitting the ones that carry more than
+// one line. A settle reports one line per repo it pushed.
+func writeActions(b *strings.Builder, actions []string) {
+	for _, action := range actions {
+		for _, line := range strings.Split(strings.TrimRight(action, "\n"), "\n") {
+			fmt.Fprintf(b, "  %s\n", line)
+		}
+	}
 }
 
 func blockedReason(report reconcilecontroller.Report) string {

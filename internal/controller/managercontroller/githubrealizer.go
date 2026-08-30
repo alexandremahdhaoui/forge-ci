@@ -64,14 +64,14 @@ func (GitHubRealizer) Kind() string {
 }
 
 // Realize converges one resource.
-func (r GitHubRealizer) Realize(res citypes.Resource) (Action, error) {
+func (r GitHubRealizer) Realize(res citypes.Resource, opts Options) (Action, error) {
 	switch res.Kind {
 	case KindFileContent:
-		return r.realizeFile(res)
+		return r.realizeFile(res, opts)
 	case KindActionsSecret:
-		return r.realizeSecret(res)
+		return r.realizeSecret(res, opts)
 	case KindWorkflowEnabled:
-		return r.realizeEnable(res)
+		return r.realizeEnable(res, opts)
 	default:
 		return Action{}, fmt.Errorf("the github manager cannot realize kind %q, it knows %s, %s and %s",
 			res.Kind, KindFileContent, KindActionsSecret, KindWorkflowEnabled)
@@ -81,7 +81,7 @@ func (r GitHubRealizer) Realize(res citypes.Resource) (Action, error) {
 // realizeFile writes the declared content when the file is missing or
 // differs, and keeps it when it already matches. The pipeline's own push
 // delivers the file to the remote; this manager converges the checkout.
-func (r GitHubRealizer) realizeFile(res citypes.Resource) (Action, error) {
+func (r GitHubRealizer) realizeFile(res citypes.Resource, opts Options) (Action, error) {
 	want, _ := res.Spec["content"].(string)
 	if want == "" {
 		return Action{}, errors.New("spec.content is required")
@@ -95,6 +95,10 @@ func (r GitHubRealizer) realizeFile(res citypes.Resource) (Action, error) {
 	have, err := r.fs.ReadFile(path)
 	if err == nil && string(have) == want {
 		return Kept("kept file " + res.Name), nil
+	}
+
+	if opts.DryRun {
+		return Did(opts.would("converge file " + res.Name)), nil
 	}
 
 	if dir := filepath.Dir(path); dir != "." {
@@ -116,11 +120,14 @@ func (r GitHubRealizer) realizeFile(res citypes.Resource) (Action, error) {
 // at the first workflow run.
 //
 // The secrets API never returns a value, so existence is the only actual
-// state there is to read back, and it is what decides whether this changed
-// anything. A put over a secret that already existed is a rotation: it moves
-// nothing in any checkout, so it does not stop the run. A secret that did
-// not exist is a change, and it does.
-func (r GitHubRealizer) realizeSecret(res citypes.Resource) (Action, error) {
+// state there is to read back. A secret that already exists is therefore
+// left alone: a put would silently replace whatever was there, and two
+// operators bootstrapping with different credentials would leave one winner
+// with nothing to detect it. Git arbitrates every other collision by
+// refusing a stale push; this is the one it cannot see.
+//
+// Force rewrites it anyway, which is how a rotation is asked for.
+func (r GitHubRealizer) realizeSecret(res citypes.Resource, opts Options) (Action, error) {
 	repo, _ := res.Spec["repo"].(string)
 	secret, _ := res.Spec["secret"].(string)
 
@@ -144,6 +151,17 @@ func (r GitHubRealizer) realizeSecret(res citypes.Resource) (Action, error) {
 		return Action{}, explainSecretsDenial(err)
 	}
 
+	if existed && !opts.Force {
+		return Kept(fmt.Sprintf(
+			"kept secret %s on %s: it already exists and cannot be read back, so it is not rewritten. "+
+				"--force rotates it", secret, repo)), nil
+	}
+
+	text := fmt.Sprintf("seal secret %s on %s from $%s", secret, repo, fromEnv)
+	if opts.DryRun {
+		return Did(opts.would(text)), nil
+	}
+
 	keyID, keyB64, err := r.api.PublicKey(r.ctx, repo)
 	if err != nil {
 		return Action{}, explainSecretsDenial(err)
@@ -158,12 +176,11 @@ func (r GitHubRealizer) realizeSecret(res citypes.Resource) (Action, error) {
 		return Action{}, err
 	}
 
-	text := fmt.Sprintf("sealed secret %s on %s from $%s", secret, repo, fromEnv)
 	if existed {
-		return Kept(text + " (it already existed)"), nil
+		return Did(fmt.Sprintf("rotated secret %s on %s from $%s", secret, repo, fromEnv)), nil
 	}
 
-	return Did(text), nil
+	return Did(fmt.Sprintf("sealed secret %s on %s from $%s", secret, repo, fromEnv)), nil
 }
 
 // explainSecretsDenial names the one failure of the secrets API worth
@@ -200,7 +217,7 @@ func explainSecretsDenial(err error) error {
 // is the answer a first bootstrap actually gets - tolerating only the 404
 // killed the run on its first repo. A real permission denial is 403 as well
 // and stays fatal; the adapter separates them.
-func (r GitHubRealizer) realizeEnable(res citypes.Resource) (Action, error) {
+func (r GitHubRealizer) realizeEnable(res citypes.Resource, opts Options) (Action, error) {
 	repo, _ := res.Spec["repo"].(string)
 	workflow, _ := res.Spec["workflow"].(string)
 
@@ -219,6 +236,13 @@ func (r GitHubRealizer) realizeEnable(res citypes.Resource) (Action, error) {
 
 	if err != nil && !errors.Is(err, githubadapter.ErrNotFound) {
 		return Action{}, err
+	}
+
+	if opts.DryRun {
+		// A plan cannot know whether the enable would land: the file it needs
+		// is one this same reconcile would have written and not yet pushed.
+		// Saying it would try is the honest answer.
+		return Did(opts.would(fmt.Sprintf("enable workflow %s on %s", workflow, repo))), nil
 	}
 
 	err = r.api.EnableWorkflow(r.ctx, repo, workflow)
