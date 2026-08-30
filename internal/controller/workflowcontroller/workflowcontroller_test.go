@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"sigs.k8s.io/yaml"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/githubadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/workflowcontroller"
@@ -869,4 +870,62 @@ func TestAWorkflowWithNoSecretCarriesNoSecretEnv(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.NotContains(t, rendered[0].Content, "secrets.FORGE_CI_GITHUB_TOKEN")
+}
+
+// A factory's own pipeline needs both: nothing dispatches when the workspace
+// files themselves change, and two applies at once race the state repo.
+//
+// Live case: the hand-written workflow these replace carried a concurrency
+// group with the comment "apply is idempotent, and two at once would race the
+// state repo", and seven dispatches arrived within seconds of each other the
+// day this was written.
+func TestAPipelineCanRunOnItsOwnPushAndOnlyOneAtATime(t *testing.T) {
+	t.Parallel()
+
+	spec := workflowcontroller.Spec{
+		Repo:      "o/r",
+		Workspace: workflowcontroller.Workspace{BootstrapCommand: "true", ToolchainScript: "true\n"},
+		Workflows: []workflowcontroller.WorkflowSpec{{
+			Name: "pipeline", Kind: "command", Command: "true\n", Secret: "S",
+			Events:       []string{"member-pushed"},
+			PushBranches: []string{"main"},
+			Concurrency:  "pipeline",
+		}},
+	}
+
+	files, err := workflowcontroller.RenderAll(spec)
+	require.NoError(t, err)
+	require.Len(t, files, 1)
+
+	got := files[0].Content
+	assert.Contains(t, got, "  push:\n    branches: [main]\n")
+	assert.Contains(t, got, "\nconcurrency:\n  group: pipeline\n  cancel-in-progress: false\n")
+
+	// Queued, never cancelled. An apply already writing state has to finish,
+	// or the store keeps a revision with no run beside it.
+	assert.NotContains(t, got, "cancel-in-progress: true")
+
+	var parsed map[string]any
+	require.NoError(t, yaml.Unmarshal([]byte(got), &parsed), "the rendered workflow must be valid YAML")
+}
+
+// Neither is rendered when unasked, so every existing workflow is unchanged.
+func TestNoPushTriggerAndNoConcurrencyWithoutThem(t *testing.T) {
+	t.Parallel()
+
+	files, err := workflowcontroller.RenderAll(registerSpec())
+	require.NoError(t, err)
+
+	byName := map[string]string{}
+	for _, f := range files {
+		byName[f.Name] = f.Content
+		assert.NotContainsf(t, f.Content, "concurrency:", "%s asked for no concurrency group", f.Name)
+	}
+
+	// Only the command workflows. A fan-out fires on a tag push by
+	// definition, so "push:" there is its trigger and not this feature.
+	for _, name := range []string{"intake", "request", "ci-runner"} {
+		assert.NotContainsf(t, byName[name], "  push:\n    branches:",
+			"%s asked for no push trigger", name)
+	}
 }

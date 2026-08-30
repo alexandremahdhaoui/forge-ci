@@ -74,6 +74,13 @@ func renderCommand(spec Spec, w WorkflowSpec) string {
 			strings.Join(w.Events, ", "))
 	}
 
+	// A push to the repo the workflow lives on. Nothing dispatches when a
+	// factory's own workspace files change, so its pipeline asks for this or
+	// an edit to the pipeline never runs the pipeline.
+	if len(w.PushBranches) > 0 {
+		fmt.Fprintf(&b, "  push:\n    branches: [%s]\n", strings.Join(w.PushBranches, ", "))
+	}
+
 	job := w.Job
 	if job == "" {
 		job = "run"
@@ -90,6 +97,14 @@ func renderCommand(spec Spec, w WorkflowSpec) string {
 	// everything.
 	if w.Packages {
 		b.WriteString("  packages: write\n")
+	}
+
+	// One run of the group at a time, queued rather than cancelled: an apply
+	// that is already writing state must finish, and the next one then sees
+	// what it wrote. Cancelling mid-write is how a state repo ends up with a
+	// revision recorded and no run beside it.
+	if w.Concurrency != "" {
+		fmt.Fprintf(&b, "\nconcurrency:\n  group: %s\n  cancel-in-progress: false\n", w.Concurrency)
 	}
 
 	writeRunsOn(&b, spec, job)

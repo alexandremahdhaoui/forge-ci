@@ -104,8 +104,18 @@ type WorkflowSpec struct {
 	Header string `json:"header,omitempty"`
 
 	// command kind.
-	Cron       string   `json:"cron,omitempty"`
-	Events     []string `json:"events,omitempty"`
+	Cron   string   `json:"cron,omitempty"`
+	Events []string `json:"events,omitempty"`
+	// PushBranches also starts this workflow when the repo it lives on is
+	// pushed. A factory's own pipeline wants it: nothing dispatches when the
+	// workspace files themselves change, so without it an edit to the
+	// pipeline's own config never runs it.
+	PushBranches []string `json:"pushBranches,omitempty"`
+	// Concurrency names a group only one run of may be in flight, so a
+	// second start queues instead of racing the first. An apply is
+	// idempotent and two at once race the state repo: seven dispatches
+	// arrived within seconds of each other the day this was written.
+	Concurrency string `json:"concurrency,omitempty"`
 	Job        string   `json:"job,omitempty"`
 	StepName   string   `json:"stepName,omitempty"`
 	Secret     string   `json:"secret,omitempty"`

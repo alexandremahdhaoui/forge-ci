@@ -86,7 +86,7 @@ spec:
 - key: workflows
   type: list
   required: false
-  means: The owned workflows, each a kind with its parameters or verbatim content, plus an optional header comment block.
+  means: The owned workflows, each a kind with its parameters or verbatim content, plus an optional header comment block. A command workflow also takes pushBranches (also start on a push to this repo, which is how a factory pipeline reruns when its own workspace files change) and concurrency (a group only one run of may be in flight, queued rather than cancelled - an apply that is already writing state must finish).
 - key: runner
   type: object
   required: false
