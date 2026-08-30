@@ -63,7 +63,7 @@ func toRunInput(in RunInput) citypes.RunInput {
 
 	repos := make([]citypes.RepoCheckout, 0, len(in.Repos))
 	for _, r := range in.Repos {
-		repos = append(repos, citypes.RepoCheckout{Name: r.Name, Path: r.Path, SHA: r.Sha})
+		repos = append(repos, citypes.RepoCheckout{Name: r.Name, Path: r.Path, SHA: r.Sha, Needs: r.Needs})
 	}
 
 	return citypes.RunInput{

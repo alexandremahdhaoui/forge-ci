@@ -295,3 +295,141 @@ func TestTheHarvesterIsToldWhenTheRunStarted(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, started, h.since)
 }
+
+// The compatibility guarantee at the engine, not just in the graph: with no
+// needs declared, the dirs run one at a time in the order given. This asserts
+// the sequence rather than the set, because that is what changed.
+func TestWithNoNeedsTheDirsRunOneAtATimeInOrder(t *testing.T) {
+	runner := execadaptermock.NewMockRunner(t)
+
+	var seen []string
+
+	runner.EXPECT().RunEnv(mock.Anything, mock.Anything, mock.Anything, "forge", "test-all").
+		RunAndReturn(func(_ context.Context, dir string, _ map[string]string, _ string, _ ...string) (execadapter.Result, error) {
+			seen = append(seen, dir)
+
+			return passing(), nil
+		}).Times(3)
+
+	out, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
+		Root: "/work",
+		Repos: []citypes.RepoCheckout{
+			{Name: "c"}, {Name: "a"}, {Name: "b"},
+		},
+		Targets: []citypes.Target{{Alias: "build", Forge: "test-all", In: []string{"c", "a", "b"}}},
+	})
+	require.NoError(t, err)
+	require.Equal(t, citypes.StatusPassed, out.Status)
+	require.Equal(t, []string{"/work/c", "/work/a", "/work/b"}, seen,
+		"a pipeline that declares nothing must run exactly as it did before dependencies existed")
+}
+
+// One edge, and the rest of the wave overlaps. The runner blocks until every
+// member of the wave has entered it, so the test passes only if they really
+// are concurrent - a sequential implementation deadlocks and fails on the
+// timeout rather than passing quietly.
+func TestAWaveRunsItsMembersAtOnce(t *testing.T) {
+	runner := execadaptermock.NewMockRunner(t)
+
+	var (
+		entered = make(chan string, 3)
+		release = make(chan struct{})
+		last    = make(chan string, 1)
+	)
+
+	runner.EXPECT().RunEnv(mock.Anything, mock.Anything, mock.Anything, "forge", "test-all").
+		RunAndReturn(func(_ context.Context, dir string, _ map[string]string, _ string, _ ...string) (execadapter.Result, error) {
+			if dir == "/work/last" {
+				last <- dir
+
+				return passing(), nil
+			}
+
+			entered <- dir
+			<-release
+
+			return passing(), nil
+		}).Times(4)
+
+	done := make(chan citypes.RunOutput, 1)
+
+	go func() {
+		out, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
+			Root: "/work",
+			Repos: []citypes.RepoCheckout{
+				{Name: "one"}, {Name: "two"}, {Name: "three"},
+				{Name: "last", Needs: []string{"one", "two", "three"}},
+			},
+			Targets: []citypes.Target{{
+				Alias: "build", Forge: "test-all",
+				In: []string{"one", "two", "three", "last"},
+			}},
+		})
+		require.NoError(t, err)
+		done <- out
+	}()
+
+	// All three are inside the runner before any of them is let go, which no
+	// sequential loop can manage.
+	for range 3 {
+		select {
+		case <-entered:
+		case <-time.After(5 * time.Second):
+			t.Fatal("the wave did not run its members at once")
+		}
+	}
+
+	require.Empty(t, last, "the repo that needs the wave must not have started")
+	close(release)
+
+	select {
+	case out := <-done:
+		require.Equal(t, citypes.StatusPassed, out.Status)
+		require.Len(t, last, 1, "the repo that needs the wave runs after it")
+	case <-time.After(5 * time.Second):
+		t.Fatal("the run did not finish")
+	}
+}
+
+// A wave finishes even when one of its members fails, so a red run names
+// every repo that broke rather than the one that broke first. The wave after
+// it does not start.
+func TestAFailedWaveFinishesAndStopsTheNext(t *testing.T) {
+	runner := execadaptermock.NewMockRunner(t)
+
+	runner.EXPECT().RunEnv(mock.Anything, "/work/one", mock.Anything, "forge", "test-all").
+		Return(execadapter.Result{ExitCode: 1, Stdout: "one broke\n"}, nil).Once()
+	runner.EXPECT().RunEnv(mock.Anything, "/work/two", mock.Anything, "forge", "test-all").
+		Return(execadapter.Result{ExitCode: 1, Stdout: "two broke\n"}, nil).Once()
+
+	out, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
+		Root: "/work",
+		Repos: []citypes.RepoCheckout{
+			{Name: "one"}, {Name: "two"},
+			{Name: "last", Needs: []string{"one", "two"}},
+		},
+		Targets: []citypes.Target{{
+			Alias: "build", Forge: "test-all", In: []string{"one", "two", "last"},
+		}},
+	})
+	require.NoError(t, err, "a failing build is a failed run and never an error")
+	require.Equal(t, citypes.StatusFailed, out.Status)
+	require.Contains(t, out.Output, "one broke")
+	require.Contains(t, out.Output, "two broke", "the whole wave is reported, not just the first failure")
+}
+
+// A cycle among the repos a target names is machinery that cannot run, not a
+// build that failed.
+func TestACycleIsAnError(t *testing.T) {
+	out, err := computecontroller.New(execadaptermock.NewMockRunner(t), nil, nil).
+		Run(context.Background(), citypes.RunInput{
+			Root: "/work",
+			Repos: []citypes.RepoCheckout{
+				{Name: "one", Needs: []string{"two"}},
+				{Name: "two", Needs: []string{"one"}},
+			},
+			Targets: []citypes.Target{{Alias: "build", Forge: "test-all", In: []string{"one", "two"}}},
+		})
+	require.ErrorIs(t, err, citypes.ErrCycle)
+	require.Empty(t, out.Status)
+}

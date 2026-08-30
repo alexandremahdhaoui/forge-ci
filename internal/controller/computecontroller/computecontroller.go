@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 	"text/template"
 	"time"
 
@@ -61,36 +62,90 @@ func (c *Controller) Run(ctx context.Context, in citypes.RunInput) (citypes.RunO
 		env["FORGE_CI_VERSION"] = in.Version
 	}
 
+	// One mutex over everything a wave's members share: the log, the status
+	// and the harvested artifacts. A wave runs its dirs at once, so all three
+	// are written concurrently.
+	var mu sync.Mutex
+
 	for _, target := range in.Targets {
 		binary, expanded, err := CommandFor(target, in.Params)
 		if err != nil {
 			return citypes.RunOutput{}, err
 		}
 
-		for _, dir := range dirsFor(target, in) {
-			res, err := c.runner.RunEnv(ctx, dir, env, binary, strings.Fields(expanded)...)
-			if err != nil {
-				return citypes.RunOutput{}, fmt.Errorf("running target %q in %s: %w", target.Alias, dir, err)
+		waves, err := citypes.WavesFor(target, in)
+		if err != nil {
+			return citypes.RunOutput{}, err
+		}
+
+		for _, wave := range waves {
+			var (
+				wg sync.WaitGroup
+				// broke is the first machinery failure, kept apart from a
+				// target that merely exited non-zero. A runner that could not
+				// start is broken; a build that failed is a failed build.
+				broke error
+			)
+
+			// A wave finishes before the next starts, and it finishes even
+			// when one of its members fails. Cancelling the rest would report
+			// the first failure and hide every other one, and somebody
+			// reading a red run wants every repo that broke.
+			for _, dir := range pathsFor(wave, in) {
+				wg.Add(1)
+
+				go func(dir string) {
+					defer wg.Done()
+
+					res, err := c.runner.RunEnv(ctx, dir, env, binary, strings.Fields(expanded)...)
+
+					mu.Lock()
+					defer mu.Unlock()
+
+					if err != nil {
+						if broke == nil {
+							broke = fmt.Errorf("running target %q in %s: %w", target.Alias, dir, err)
+						}
+
+						return
+					}
+
+					// One Fprintf per dir, under the lock, so two members of
+					// a wave cannot interleave halfway through a line.
+					fmt.Fprintf(&log, "$ %s %s (in %s)\n%s%s", binary, expanded, dir, res.Stdout, res.Stderr)
+
+					if res.ExitCode != 0 && out.Status != citypes.StatusFailed {
+						out.Status = citypes.StatusFailed
+						out.Message = fmt.Sprintf("target %q exited %d in %s", target.Alias, res.ExitCode, dir)
+					}
+
+					if binary != forgeBinary || c.harvester == nil {
+						return
+					}
+
+					harvested, err := c.harvester.Harvest(dir, started)
+					if err != nil {
+						if broke == nil {
+							broke = err
+						}
+
+						return
+					}
+
+					rebase(harvested, in.Root, dir)
+					out.Forge = merge(out.Forge, harvested)
+				}(dir)
 			}
 
-			fmt.Fprintf(&log, "$ %s %s (in %s)\n%s%s", binary, expanded, dir, res.Stdout, res.Stderr)
+			wg.Wait()
 
-			if res.ExitCode != 0 {
-				out.Status = citypes.StatusFailed
-				out.Message = fmt.Sprintf("target %q exited %d in %s", target.Alias, res.ExitCode, dir)
+			if broke != nil {
+				return citypes.RunOutput{}, broke
 			}
 
-			if binary != forgeBinary || c.harvester == nil {
-				continue
+			if out.Status == citypes.StatusFailed {
+				break
 			}
-
-			harvested, err := c.harvester.Harvest(dir, started)
-			if err != nil {
-				return citypes.RunOutput{}, err
-			}
-
-			rebase(harvested, in.Root, dir)
-			out.Forge = merge(out.Forge, harvested)
 		}
 
 		if out.Status == citypes.StatusFailed {
@@ -131,14 +186,18 @@ func binaryFor(t citypes.Target) (string, string, error) {
 	}
 }
 
-func dirsFor(t citypes.Target, in citypes.RunInput) []string {
-	if len(t.In) == 0 {
-		return []string{in.Root}
-	}
+// pathsFor puts one wave's repo names on disk. The empty name is the
+// workspace root, which is what a target naming no repo runs in.
+func pathsFor(wave []string, in citypes.RunInput) []string {
+	paths := make([]string, 0, len(wave))
 
-	paths := make([]string, 0, len(t.In))
+	for _, name := range wave {
+		if name == "" {
+			paths = append(paths, in.Root)
 
-	for _, name := range t.In {
+			continue
+		}
+
 		resolved := filepath.Join(in.Root, name)
 
 		for _, repo := range in.Repos {

@@ -464,3 +464,64 @@ func TestTheDecidedVersionReachesTheTargetEnvironmentOverMCP(t *testing.T) {
 	require.Equal(t, "v9.9.9|rev-abc", string(seen),
 		"the version the core decided must reach the target, not be dropped at the engine boundary")
 }
+
+// needs crosses the wire, which is the only place it can be proven. The field
+// exists in Go, in the OpenAPI document the engine schema is generated from,
+// and in the handler that copies the wire type into the internal one; a gap
+// in any of the three is invisible to a unit test on either side. That is
+// exactly how RunInput.version once went missing.
+//
+// The probe records the order it was entered in. With the graph declared, the
+// dependent repo must come last whatever order the target listed them in.
+func TestTheNeedsGraphOrdersDirsOverMCP(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "order.txt")
+
+	for _, name := range []string{"first", "second", "last"} {
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, name), 0o750))
+	}
+
+	// A target names "forge" and nothing else, resolved by name on PATH, so
+	// the probe is a shim called forge ahead of the real one. It appends the
+	// directory it ran in, which makes the file the observed order.
+	shimDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(shimDir, "forge"),
+		[]byte("#!/bin/sh\nbasename \"$PWD\" >> "+out+"\n"), 0o700))
+	t.Setenv("PATH", shimDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	var runOut citypes.RunOutput
+
+	err := caller().Call(context.Background(),
+		"forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-compute-local@v0.1.0",
+		"run",
+		citypes.RunInput{
+			Revision: "rev-abc",
+			Stage:    "build",
+			Substage: "default",
+			Root:     dir,
+			Targets: []citypes.Target{{
+				Alias: "build", Forge: "test-all",
+				// Listed with the dependent one first on purpose: the
+				// declaration decides the order, not the list.
+				In: []string{"last", "first", "second"},
+			}},
+			Repos: []citypes.RepoCheckout{
+				{Name: "first", Path: filepath.Join(dir, "first"), SHA: "a"},
+				{Name: "second", Path: filepath.Join(dir, "second"), SHA: "b"},
+				{Name: "last", Path: filepath.Join(dir, "last"), SHA: "c",
+					Needs: []string{"first", "second"}},
+			},
+		}, &runOut)
+	require.NoError(t, err)
+	require.Equal(t, citypes.StatusPassed, runOut.Status, runOut.Output)
+
+	seen, readErr := os.ReadFile(out)
+	require.NoError(t, readErr, "the target must have run: %s", runOut.Output)
+
+	order := strings.Fields(string(seen))
+	require.Len(t, order, 3)
+	require.Equal(t, "last", order[2],
+		"needs must survive the wire; a dropped field would let last run first, as it was listed")
+	require.ElementsMatch(t, []string{"first", "second"}, order[:2],
+		"the two it waits on run together, in either order")
+}

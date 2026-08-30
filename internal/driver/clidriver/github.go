@@ -66,4 +66,3 @@ func (d *Driver) release(ctx context.Context, args []string) error {
 
 	return d.write(fmt.Sprintf("%s: %s %s\n", *tag, report.Reason, report.URL))
 }
-

@@ -115,13 +115,13 @@ type WorkflowSpec struct {
 	// second start queues instead of racing the first. An apply is
 	// idempotent and two at once race the state repo: seven dispatches
 	// arrived within seconds of each other the day this was written.
-	Concurrency string `json:"concurrency,omitempty"`
-	Job        string   `json:"job,omitempty"`
-	StepName   string   `json:"stepName,omitempty"`
-	Secret     string   `json:"secret,omitempty"`
-	PayloadEnv []string `json:"payloadEnv,omitempty"`
-	Command    string   `json:"command,omitempty"`
-	Push       bool     `json:"push,omitempty"`
+	Concurrency string   `json:"concurrency,omitempty"`
+	Job         string   `json:"job,omitempty"`
+	StepName    string   `json:"stepName,omitempty"`
+	Secret      string   `json:"secret,omitempty"`
+	PayloadEnv  []string `json:"payloadEnv,omitempty"`
+	Command     string   `json:"command,omitempty"`
+	Push        bool     `json:"push,omitempty"`
 
 	// Token puts secrets.GITHUB_TOKEN into the step's environment. Nothing
 	// else does: engines inherit forge-ci's environment and nothing else,
@@ -524,13 +524,35 @@ func scriptFor(in citypes.RunInput) (string, error) {
 			argv = append(argv, quote(arg))
 		}
 
-		dirs := target.In
-		if len(dirs) == 0 {
-			dirs = []string{"."}
+		waves, err := citypes.WavesFor(target, in)
+		if err != nil {
+			return "", err
 		}
 
-		for _, dir := range dirs {
-			fmt.Fprintf(&b, "(cd %s && %s)\n", quote(dir), strings.Join(argv, " "))
+		for _, wave := range waves {
+			// A wave of one is written as a plain subshell, which is what
+			// every target rendered before dependencies existed. A pipeline
+			// that declares no needs therefore renders the identical script,
+			// byte for byte.
+			if len(wave) == 1 {
+				fmt.Fprintf(&b, "(cd %s && %s)\n", quote(dirOf(wave[0])), strings.Join(argv, " "))
+
+				continue
+			}
+
+			// A real wave backgrounds its members and waits. `set -eu` does
+			// not fail the script on a background job, so the exit status of
+			// each is collected and the first non-zero one is re-raised after
+			// every member has finished - a wave reports every repo that
+			// broke, not the one that broke first.
+			b.WriteString("wave_rc=0\n")
+
+			for _, name := range wave {
+				fmt.Fprintf(&b, "(cd %s && %s) & \n", quote(dirOf(name)), strings.Join(argv, " "))
+			}
+
+			b.WriteString("for job in $(jobs -p); do wait \"$job\" || wave_rc=$?; done\n")
+			b.WriteString("[ \"$wave_rc\" -eq 0 ] || exit \"$wave_rc\"\n")
 		}
 	}
 
@@ -565,4 +587,14 @@ func orEmptySpec(spec map[string]any) map[string]any {
 	}
 
 	return spec
+}
+
+// dirOf is the directory one wave member runs in. The empty name is the
+// workspace root, which is what a target naming no repo runs in.
+func dirOf(name string) string {
+	if name == "" {
+		return "."
+	}
+
+	return name
 }

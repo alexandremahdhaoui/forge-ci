@@ -33,6 +33,30 @@ for dir in cmd/ci-*; do
             fail=1
         fi
     done
+
+    # RepoCheckout is nested inside RunInput, so the loop above cannot see it:
+    # its fields are on another type and not all of them are strings. The
+    # checkout list is what carries the needs graph, and a dropped Needs makes
+    # every repo build in list order - which looks exactly like a workspace
+    # that declared no dependencies.
+    grep -q 'citypes.RepoCheckout{' "$handlers" || continue
+
+    for field in Name Path Sha Needs; do
+        grep -qE "	$field \[?\]?string" "$spec" || continue
+
+        # SHA is the internal spelling of the generated Sha. Only the
+        # capitalisation differs; it is still one field to one field.
+        internal="$field"
+        if [ "$field" = "Sha" ]; then
+            internal="SHA"
+        fi
+
+        if ! grep -qE "$internal: *r\.$field" "$handlers"; then
+            echo "$handlers drops RepoCheckout.$field: the wire carries it and the mapping does not copy it." >&2
+            echo "  A missing field here is not a compile error, it is a zero value at runtime." >&2
+            fail=1
+        fi
+    done
 done
 
 if [ "$fail" -eq 0 ]; then

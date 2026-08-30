@@ -774,6 +774,10 @@ func checkouts(p config.Pipeline, root string, revision citypes.Revision) []city
 			Name: repo.Name,
 			Path: filepath.Join(root, repo.Name),
 			SHA:  revision.Repos[repo.Name],
+			// The needs graph rides the checkout list every substage already
+			// receives, so a local run and a remote one order the work from
+			// the same declaration.
+			Needs: repo.Needs,
 		})
 	}
 

@@ -61,6 +61,11 @@ type RepoCheckout struct {
 	Name string `json:"name"`
 	Path string `json:"path"`
 	SHA  string `json:"sha"`
+	// Needs names the repos that must finish before this one starts, when a
+	// target runs in both. A compute engine groups a target's dirs into
+	// waves from these edges; with none declared every dir is its own wave,
+	// in the order given, which is one at a time.
+	Needs []string `json:"needs,omitempty"`
 }
 
 type Target struct {

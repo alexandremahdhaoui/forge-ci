@@ -220,3 +220,84 @@ stages:
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "version")
 }
+
+// needsPipeline is the smallest valid pipeline carrying a repo graph, so the
+// tests below assert on the graph and not on everything else a pipeline
+// needs to be valid.
+func needsPipeline(repos ...config.Repo) config.Pipeline {
+	return config.Pipeline{
+		Name:     "demo",
+		State:    "st",
+		Repos:    repos,
+		Managers: []config.Manager{{Alias: "local", Engine: "forge://m"}},
+		Engines: []config.Engine{
+			{Alias: "st", Type: config.PortState, Engine: "forge://x", Manager: "local"},
+			{Alias: "here", Type: config.PortCompute, Engine: "forge://x", Manager: "local"},
+		},
+		Targets: []config.Target{{Alias: "t", Forge: "test-all"}},
+		Stages: []config.Stage{{
+			Name: "build",
+			Substages: []config.Substage{
+				{Name: "default", Engine: "here", Manager: "local", Targets: []string{"t"}},
+			},
+		}},
+	}
+}
+
+func TestAValidNeedsGraphParses(t *testing.T) {
+	t.Parallel()
+
+	err := needsPipeline(
+		config.Repo{Name: "spec", URL: "u"},
+		config.Repo{Name: "impl", URL: "u", Needs: []string{"spec"}},
+	).Validate()
+	require.NoError(t, err)
+}
+
+// A repo that waits on a name nothing declares would wait forever, and a
+// build that never starts reads like a build that was never asked for. The
+// typo is refused here rather than at the substage that meets it.
+func TestNeedingAnUndeclaredRepoIsRejected(t *testing.T) {
+	t.Parallel()
+
+	err := needsPipeline(
+		config.Repo{Name: "impl", URL: "u", Needs: []string{"spec"}},
+	).Validate()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), `needs "spec"`)
+}
+
+func TestNeedingItselfIsRejected(t *testing.T) {
+	t.Parallel()
+
+	err := needsPipeline(
+		config.Repo{Name: "impl", URL: "u", Needs: []string{"impl"}},
+	).Validate()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "needs itself")
+}
+
+// The cycle is checked against every repo at once, which is the widest any
+// target can be, so nothing that parses can fail at a substage later.
+func TestACycleBetweenReposIsRejected(t *testing.T) {
+	t.Parallel()
+
+	err := needsPipeline(
+		config.Repo{Name: "one", URL: "u", Needs: []string{"two"}},
+		config.Repo{Name: "two", URL: "u", Needs: []string{"one"}},
+	).Validate()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "cycle")
+}
+
+// Every pipeline in the fleet today declares no needs. Nothing about them
+// may change.
+func TestNoNeedsAtAllIsValid(t *testing.T) {
+	t.Parallel()
+
+	err := needsPipeline(
+		config.Repo{Name: "one", URL: "u"},
+		config.Repo{Name: "two", URL: "u"},
+	).Validate()
+	require.NoError(t, err)
+}

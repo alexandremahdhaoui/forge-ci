@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
+
 	"sigs.k8s.io/yaml"
 )
 
@@ -93,6 +95,15 @@ type Repo struct {
 	Name string `json:"name"`
 	URL  string `json:"url"`
 	Ref  string `json:"ref,omitempty"`
+	// Needs names the repos that must finish before this one starts, when a
+	// target runs in both. It is a dependency and not an order: a substage
+	// builds everything it can at once and holds back only what is waiting,
+	// so adding a repo cannot silently reorder the others.
+	//
+	// A need on a repo the target does not name costs nothing. The
+	// declaration says what must be built first when both are being built,
+	// not that the other must be built at all.
+	Needs []string `json:"needs,omitempty"`
 }
 
 type Manager struct {
@@ -177,6 +188,37 @@ func (p Pipeline) Validate() error {
 		}
 
 		repos[r.Name] = true
+	}
+
+	// The needs graph, once every name is known. A repo that waits on
+	// something no repos entry declares would wait forever and read as a
+	// build that never started, so a typo is refused here rather than at
+	// the substage that meets it.
+	needs := map[string][]string{}
+	names := make([]string, 0, len(p.Repos))
+
+	for i, r := range p.Repos {
+		for _, need := range r.Needs {
+			switch {
+			case need == r.Name:
+				add("repos[%d] (%s): needs itself", i, r.Name)
+			case !repos[need]:
+				add("repos[%d] (%s): needs %q, which is not a declared repo", i, r.Name, need)
+			}
+		}
+
+		if len(r.Needs) > 0 {
+			needs[r.Name] = r.Needs
+		}
+
+		names = append(names, r.Name)
+	}
+
+	// A cycle is checked against every repo at once, which is the widest any
+	// target can be. A subset of a graph with no cycle has none either, so
+	// nothing that passes here can fail at a substage.
+	if _, err := citypes.Waves(names, needs); err != nil {
+		add("repos: %s", err)
 	}
 
 	managers := map[string]bool{}
