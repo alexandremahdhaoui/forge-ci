@@ -35,7 +35,7 @@ engines:
     engine: "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-artifact-release@v0.1.0"
     manager: local
     spec:
-      releaseIn: <string>
+      repo: <string>
       root: <string>
       apiBaseURL: <string>
       tokenEnv: <string>
@@ -56,11 +56,13 @@ convention whatever engine produced it. A container image or a URL is somebody
 else's to serve.
 
 The release itself is ONE aggregated release per revision, tagged dist-<revision>
-in the releaseIn repo, carrying every upload plus index.json - the distribution
+in the repo spec.repo names, carrying every upload plus index.json - the distribution
 index mapping the revision to the sha256 of each binary per platform, measured on
 the actual files. forge-factory sync consumes that index into the store. The
 dist tag is not semver on purpose, so a v* fan-out never fires for it.
 
-The host's gh CLI publishes when present; otherwise the GitHub REST API is spoken
-directly with the token named by spec.tokenEnv, against spec.apiBaseURL, and the
-repo is read off the releaseIn checkout's own origin remote.
+Tagging is plain git in each member checkout; the release itself is the GitHub
+REST API, spoken with the token named by spec.tokenEnv against spec.apiBaseURL,
+in the repo spec.repo names. There is no gh path: gh reads whatever token the
+host happens to carry, so it cannot be pointed at the credential the pipeline
+declared, and it is not in every image a job runs in.

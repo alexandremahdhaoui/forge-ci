@@ -39,6 +39,156 @@ func (_m *MockAPI) EXPECT() *MockAPI_Expecter {
 	return &MockAPI_Expecter{mock: &_m.Mock}
 }
 
+// CreateIssue provides a mock function for the type MockAPI
+func (_mock *MockAPI) CreateIssue(ctx context.Context, repo string, title string, body string) (githubadapter.Issue, error) {
+	ret := _mock.Called(ctx, repo, title, body)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateIssue")
+	}
+
+	var r0 githubadapter.Issue
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, string) (githubadapter.Issue, error)); ok {
+		return returnFunc(ctx, repo, title, body)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, string) githubadapter.Issue); ok {
+		r0 = returnFunc(ctx, repo, title, body)
+	} else {
+		r0 = ret.Get(0).(githubadapter.Issue)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string, string) error); ok {
+		r1 = returnFunc(ctx, repo, title, body)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockAPI_CreateIssue_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateIssue'
+type MockAPI_CreateIssue_Call struct {
+	*mock.Call
+}
+
+// CreateIssue is a helper method to define mock.On call
+//   - ctx context.Context
+//   - repo string
+//   - title string
+//   - body string
+func (_e *MockAPI_Expecter) CreateIssue(ctx any, repo any, title any, body any) *MockAPI_CreateIssue_Call {
+	return &MockAPI_CreateIssue_Call{Call: _e.mock.On("CreateIssue", ctx, repo, title, body)}
+}
+
+func (_c *MockAPI_CreateIssue_Call) Run(run func(ctx context.Context, repo string, title string, body string)) *MockAPI_CreateIssue_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		var arg3 string
+		if args[3] != nil {
+			arg3 = args[3].(string)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+			arg3,
+		)
+	})
+	return _c
+}
+
+func (_c *MockAPI_CreateIssue_Call) Return(issue githubadapter.Issue, err error) *MockAPI_CreateIssue_Call {
+	_c.Call.Return(issue, err)
+	return _c
+}
+
+func (_c *MockAPI_CreateIssue_Call) RunAndReturn(run func(ctx context.Context, repo string, title string, body string) (githubadapter.Issue, error)) *MockAPI_CreateIssue_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CreateRelease provides a mock function for the type MockAPI
+func (_mock *MockAPI) CreateRelease(ctx context.Context, repo string, tag string) (githubadapter.Release, error) {
+	ret := _mock.Called(ctx, repo, tag)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateRelease")
+	}
+
+	var r0 githubadapter.Release
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) (githubadapter.Release, error)); ok {
+		return returnFunc(ctx, repo, tag)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) githubadapter.Release); ok {
+		r0 = returnFunc(ctx, repo, tag)
+	} else {
+		r0 = ret.Get(0).(githubadapter.Release)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string) error); ok {
+		r1 = returnFunc(ctx, repo, tag)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockAPI_CreateRelease_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateRelease'
+type MockAPI_CreateRelease_Call struct {
+	*mock.Call
+}
+
+// CreateRelease is a helper method to define mock.On call
+//   - ctx context.Context
+//   - repo string
+//   - tag string
+func (_e *MockAPI_Expecter) CreateRelease(ctx any, repo any, tag any) *MockAPI_CreateRelease_Call {
+	return &MockAPI_CreateRelease_Call{Call: _e.mock.On("CreateRelease", ctx, repo, tag)}
+}
+
+func (_c *MockAPI_CreateRelease_Call) Run(run func(ctx context.Context, repo string, tag string)) *MockAPI_CreateRelease_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *MockAPI_CreateRelease_Call) Return(release githubadapter.Release, err error) *MockAPI_CreateRelease_Call {
+	_c.Call.Return(release, err)
+	return _c
+}
+
+func (_c *MockAPI_CreateRelease_Call) RunAndReturn(run func(ctx context.Context, repo string, tag string) (githubadapter.Release, error)) *MockAPI_CreateRelease_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Dispatch provides a mock function for the type MockAPI
 func (_mock *MockAPI) Dispatch(ctx context.Context, repo string, workflowFile string, ref string, inputs map[string]string) error {
 	ret := _mock.Called(ctx, repo, workflowFile, ref, inputs)
@@ -257,6 +407,84 @@ func (_c *MockAPI_ListRuns_Call) RunAndReturn(run func(ctx context.Context, repo
 	return _c
 }
 
+// OpenIssueByTitle provides a mock function for the type MockAPI
+func (_mock *MockAPI) OpenIssueByTitle(ctx context.Context, repo string, title string) (githubadapter.Issue, bool, error) {
+	ret := _mock.Called(ctx, repo, title)
+
+	if len(ret) == 0 {
+		panic("no return value specified for OpenIssueByTitle")
+	}
+
+	var r0 githubadapter.Issue
+	var r1 bool
+	var r2 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) (githubadapter.Issue, bool, error)); ok {
+		return returnFunc(ctx, repo, title)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) githubadapter.Issue); ok {
+		r0 = returnFunc(ctx, repo, title)
+	} else {
+		r0 = ret.Get(0).(githubadapter.Issue)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string) bool); ok {
+		r1 = returnFunc(ctx, repo, title)
+	} else {
+		r1 = ret.Get(1).(bool)
+	}
+	if returnFunc, ok := ret.Get(2).(func(context.Context, string, string) error); ok {
+		r2 = returnFunc(ctx, repo, title)
+	} else {
+		r2 = ret.Error(2)
+	}
+	return r0, r1, r2
+}
+
+// MockAPI_OpenIssueByTitle_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'OpenIssueByTitle'
+type MockAPI_OpenIssueByTitle_Call struct {
+	*mock.Call
+}
+
+// OpenIssueByTitle is a helper method to define mock.On call
+//   - ctx context.Context
+//   - repo string
+//   - title string
+func (_e *MockAPI_Expecter) OpenIssueByTitle(ctx any, repo any, title any) *MockAPI_OpenIssueByTitle_Call {
+	return &MockAPI_OpenIssueByTitle_Call{Call: _e.mock.On("OpenIssueByTitle", ctx, repo, title)}
+}
+
+func (_c *MockAPI_OpenIssueByTitle_Call) Run(run func(ctx context.Context, repo string, title string)) *MockAPI_OpenIssueByTitle_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *MockAPI_OpenIssueByTitle_Call) Return(issue githubadapter.Issue, b bool, err error) *MockAPI_OpenIssueByTitle_Call {
+	_c.Call.Return(issue, b, err)
+	return _c
+}
+
+func (_c *MockAPI_OpenIssueByTitle_Call) RunAndReturn(run func(ctx context.Context, repo string, title string) (githubadapter.Issue, bool, error)) *MockAPI_OpenIssueByTitle_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // PublicKey provides a mock function for the type MockAPI
 func (_mock *MockAPI) PublicKey(ctx context.Context, repo string) (string, string, error) {
 	ret := _mock.Called(ctx, repo)
@@ -404,6 +632,84 @@ func (_c *MockAPI_PutSecret_Call) RunAndReturn(run func(ctx context.Context, rep
 	return _c
 }
 
+// ReleaseByTag provides a mock function for the type MockAPI
+func (_mock *MockAPI) ReleaseByTag(ctx context.Context, repo string, tag string) (githubadapter.Release, bool, error) {
+	ret := _mock.Called(ctx, repo, tag)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ReleaseByTag")
+	}
+
+	var r0 githubadapter.Release
+	var r1 bool
+	var r2 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) (githubadapter.Release, bool, error)); ok {
+		return returnFunc(ctx, repo, tag)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) githubadapter.Release); ok {
+		r0 = returnFunc(ctx, repo, tag)
+	} else {
+		r0 = ret.Get(0).(githubadapter.Release)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string) bool); ok {
+		r1 = returnFunc(ctx, repo, tag)
+	} else {
+		r1 = ret.Get(1).(bool)
+	}
+	if returnFunc, ok := ret.Get(2).(func(context.Context, string, string) error); ok {
+		r2 = returnFunc(ctx, repo, tag)
+	} else {
+		r2 = ret.Error(2)
+	}
+	return r0, r1, r2
+}
+
+// MockAPI_ReleaseByTag_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ReleaseByTag'
+type MockAPI_ReleaseByTag_Call struct {
+	*mock.Call
+}
+
+// ReleaseByTag is a helper method to define mock.On call
+//   - ctx context.Context
+//   - repo string
+//   - tag string
+func (_e *MockAPI_Expecter) ReleaseByTag(ctx any, repo any, tag any) *MockAPI_ReleaseByTag_Call {
+	return &MockAPI_ReleaseByTag_Call{Call: _e.mock.On("ReleaseByTag", ctx, repo, tag)}
+}
+
+func (_c *MockAPI_ReleaseByTag_Call) Run(run func(ctx context.Context, repo string, tag string)) *MockAPI_ReleaseByTag_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *MockAPI_ReleaseByTag_Call) Return(release githubadapter.Release, b bool, err error) *MockAPI_ReleaseByTag_Call {
+	_c.Call.Return(release, b, err)
+	return _c
+}
+
+func (_c *MockAPI_ReleaseByTag_Call) RunAndReturn(run func(ctx context.Context, repo string, tag string) (githubadapter.Release, bool, error)) *MockAPI_ReleaseByTag_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Run provides a mock function for the type MockAPI
 func (_mock *MockAPI) Run(ctx context.Context, repo string, id int64) (githubadapter.RunInfo, error) {
 	ret := _mock.Called(ctx, repo, id)
@@ -472,6 +778,69 @@ func (_c *MockAPI_Run_Call) Return(runInfo githubadapter.RunInfo, err error) *Mo
 }
 
 func (_c *MockAPI_Run_Call) RunAndReturn(run func(ctx context.Context, repo string, id int64) (githubadapter.RunInfo, error)) *MockAPI_Run_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UploadAsset provides a mock function for the type MockAPI
+func (_mock *MockAPI) UploadAsset(ctx context.Context, uploadURL string, file string) error {
+	ret := _mock.Called(ctx, uploadURL, file)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UploadAsset")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) error); ok {
+		r0 = returnFunc(ctx, uploadURL, file)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockAPI_UploadAsset_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UploadAsset'
+type MockAPI_UploadAsset_Call struct {
+	*mock.Call
+}
+
+// UploadAsset is a helper method to define mock.On call
+//   - ctx context.Context
+//   - uploadURL string
+//   - file string
+func (_e *MockAPI_Expecter) UploadAsset(ctx any, uploadURL any, file any) *MockAPI_UploadAsset_Call {
+	return &MockAPI_UploadAsset_Call{Call: _e.mock.On("UploadAsset", ctx, uploadURL, file)}
+}
+
+func (_c *MockAPI_UploadAsset_Call) Run(run func(ctx context.Context, uploadURL string, file string)) *MockAPI_UploadAsset_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *MockAPI_UploadAsset_Call) Return(err error) *MockAPI_UploadAsset_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockAPI_UploadAsset_Call) RunAndReturn(run func(ctx context.Context, uploadURL string, file string) error) *MockAPI_UploadAsset_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -343,8 +343,122 @@ func TestCommitWorksOnAHostWithNoGitIdentityAtAll(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, sha)
 
-	author, err := execadapter.New().Run(ctx, dir, "log", "-1", "--format=%an <%ae>")
-	if err == nil && author.ExitCode == 0 {
-		require.Contains(t, author.Stdout, "alexandre.mahdhaoui@gmail.com")
+	author, err := execadapter.New().Run(ctx, dir, "git", "log", "-1", "--format=%an <%ae>")
+	require.NoError(t, err)
+	require.Zero(t, author.ExitCode, author.Stderr)
+	require.Contains(t, author.Stdout, "alexandre.mahdhaoui@gmail.com")
+}
+
+// stripIdentity puts the process in the state a CI runner is in: no global
+// config, no system config, an empty HOME, and no identity variables.
+//
+// Unset, not empty. That distinction is the whole fix: git reads an empty
+// GIT_COMMITTER_NAME as an identity of "", and the environment beats -c, so
+// an empty one cannot be overridden while an absent one can. t.Setenv
+// registers the restore before the unset.
+func stripIdentity(t *testing.T) {
+	t.Helper()
+
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
+
+	for _, k := range []string{
+		"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL",
+		"GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL",
+	} {
+		t.Setenv(k, "")
+		require.NoError(t, os.Unsetenv(k))
 	}
+}
+
+// An annotated tag is an object git writes, so it needs a committer identity
+// exactly as a commit does. This shipped as a second instance of the same
+// defect after the commit one was fixed, in a different adapter, and it was
+// the release step of a run that had already passed every stage.
+//
+// Real git again, for the same reason: a mock cannot fail on empty ident.
+func TestTagWorksOnAHostWithNoGitIdentityAtAll(t *testing.T) {
+	dir := t.TempDir()
+
+	stripIdentity(t)
+
+	g := gitadapter.New(execadapter.New())
+	ctx := context.Background()
+	exec := execadapter.New()
+
+	run := func(args ...string) {
+		t.Helper()
+
+		res, err := exec.Run(ctx, dir, "git", args...)
+		require.NoError(t, err)
+		require.Zero(t, res.ExitCode, "git %v: %s", args, res.Stderr)
+	}
+
+	run("init", "-q")
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "a-file"), []byte("x\n"), 0o600))
+	require.NoError(t, g.Add(ctx, dir, "a-file"))
+	require.NoError(t, g.Commit(ctx, dir, "first"))
+
+	sha, err := g.HeadSHA(ctx, dir)
+	require.NoError(t, err)
+
+	// Absent is not an error. It is what a first release of a member looks
+	// like, and a release that treated it as one would never publish.
+	at, found, err := g.TagAt(ctx, dir, "v0.2.0")
+	require.NoError(t, err)
+	require.False(t, found)
+	require.Empty(t, at)
+
+	// Prove the premise: a bare annotated tag here fails.
+	bare, err := exec.Run(ctx, dir, "git", "tag", "-m", "bare", "bare", sha)
+	require.NoError(t, err)
+	require.NotZero(t, bare.ExitCode, "a bare annotated tag must fail with no identity, or this test proves nothing")
+
+	// No origin here, so the push half fails and the tag half must already
+	// have run: what is under test is that git wrote the object at all.
+	_ = g.Tag(ctx, dir, "v0.2.0", sha)
+
+	at, found, err = g.TagAt(ctx, dir, "v0.2.0")
+	require.NoError(t, err)
+	require.True(t, found, "the annotated tag must exist; a missing identity is what stopped it before")
+
+	// rev-list resolves the tag OBJECT to the commit it points at. Without
+	// that step an annotated tag answers its own sha, and the release then
+	// reads every already-tagged member as pointing somewhere else and
+	// refuses to publish.
+	require.Equal(t, sha, at)
+
+	tagger, err := exec.Run(ctx, dir, "git", "for-each-ref", "--format=%(taggeremail)", "refs/tags/v0.2.0")
+	require.NoError(t, err)
+	require.Zero(t, tagger.ExitCode, tagger.Stderr)
+	require.Contains(t, tagger.Stdout, "alexandre.mahdhaoui@gmail.com")
+}
+
+// A tag is never moved, because moving it changes what a consumer already
+// pinned.
+func TestTagRefusesToMoveOne(t *testing.T) {
+	dir := t.TempDir()
+
+	stripIdentity(t)
+
+	g := gitadapter.New(execadapter.New())
+	ctx := context.Background()
+
+	res, err := execadapter.New().Run(ctx, dir, "git", "init", "-q")
+	require.NoError(t, err)
+	require.Zero(t, res.ExitCode)
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "a-file"), []byte("x\n"), 0o600))
+	require.NoError(t, g.Add(ctx, dir, "a-file"))
+	require.NoError(t, g.Commit(ctx, dir, "first"))
+
+	sha, err := g.HeadSHA(ctx, dir)
+	require.NoError(t, err)
+
+	_ = g.Tag(ctx, dir, "v0.2.0", sha)
+
+	err = g.Tag(ctx, dir, "v0.2.0", sha)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "never moved")
 }

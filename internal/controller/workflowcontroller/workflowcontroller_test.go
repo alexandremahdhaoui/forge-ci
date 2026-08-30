@@ -58,7 +58,7 @@ echo "$HOME/go/bin" >> "$GITHUB_PATH"
 # workspace around this checkout.
 `,
 				Cron: "17 5 * * *", Job: "apply", StepName: "Run the register pipeline",
-				Secret: "FORGE_CI_GITHUB_TOKEN", Push: true,
+				Secret: "FORGE_CI_GITHUB_TOKEN", Push: true, ReportFailure: true,
 				Command: "cd golden-register\ntouch .envrc\nforge-ci apply --config forge-ci.yaml --root ..\n",
 			},
 			{
@@ -75,7 +75,7 @@ echo "$HOME/go/bin" >> "$GITHUB_PATH"
 #     --dispatch <owner>/golden-register
 `,
 				Events: []string{"admission-request"}, Job: "file", StepName: "File the request",
-				Secret:     "FORGE_CI_GITHUB_TOKEN",
+				Secret: "FORGE_CI_GITHUB_TOKEN", ReportFailure: true,
 				PayloadEnv: []string{"ecosystem", "package", "track", "version", "requester", "reason"},
 				Command: `cd golden-register
 forge-register add \
@@ -98,7 +98,7 @@ forge-register add \
 				TagPattern: "v*", Secret: "FORGE_CI_GITHUB_TOKEN", EventType: "register-tag",
 				Consumers: []string{"golden-factory", "golden-register-consumer"},
 			},
-			{Name: "release", Kind: workflowcontroller.KindRelease},
+			{Name: "release", Kind: workflowcontroller.KindRelease, Secret: "FORGE_CI_GITHUB_TOKEN"},
 		},
 		Runner: workflowcontroller.RunnerSpec{Name: "ci-runner", Secret: "FORGE_CI_GITHUB_TOKEN"},
 	}
@@ -162,7 +162,10 @@ func TestAContainerReplacesTheToolchainInstallAndNotTheCheckout(t *testing.T) {
 	assertGolden(t, "intake-container", byName["intake"],
 		"a command workflow in a container must render exactly this")
 
-	for _, name := range []string{"intake", "request", "ci-runner"} {
+	// release is in this list because it stands the workspace up too: its
+	// toolchain script does `cd <member> && go install`, so a lone checkout
+	// of this repo leaves that step with no directory to enter.
+	for _, name := range []string{"intake", "request", "ci-runner", "release"} {
 		got := byName[name]
 
 		assert.Containsf(t, got,
@@ -174,12 +177,10 @@ func TestAContainerReplacesTheToolchainInstallAndNotTheCheckout(t *testing.T) {
 			"%s: the checkout stays - a container carries tools and not a workspace", name)
 	}
 
-	// A fan-out curls a dispatch and a release runs gh. Neither builds a
-	// workspace, so neither needs the toolchain image.
-	for _, name := range []string{"propagate", "release"} {
-		assert.NotContainsf(t, byName[name], "container:",
-			"%s does not build a workspace, so it stays on the runner's own image", name)
-	}
+	// A fan-out curls a dispatch and nothing else. It builds no workspace and
+	// runs no toolchain, so it stays on the runner's own image.
+	assert.NotContains(t, byName["propagate"], "container:",
+		"a fan-out only curls a dispatch, so it needs no toolchain image")
 }
 
 func TestRenderHonorsAVerbatimOverride(t *testing.T) {
@@ -281,7 +282,9 @@ func TestDeclareEmitsEveryGitHubResource(t *testing.T) {
 
 	spec := specMap(t)
 	spec["secrets"] = []any{map[string]any{"name": "FORGE_CI_GITHUB_TOKEN"}}
-	spec["workflows"] = []any{map[string]any{"name": "release", "kind": "release"}}
+	spec["workflows"] = []any{
+		map[string]any{"name": "release", "kind": "release", "secret": "FORGE_CI_GITHUB_TOKEN"},
+	}
 
 	out, err := c.Declare(spec)
 	require.NoError(t, err)
@@ -716,9 +719,11 @@ func TestOnlyAScheduledWorkflowRaisesItsOwnAlarm(t *testing.T) {
 	assert.Contains(t, scheduled, "if: failure()")
 	assert.Contains(t, scheduled, "issues: write",
 		"a workflow that files an issue needs the permission to file one")
-	assert.Contains(t, scheduled, `--search "$TITLE in:title"`,
-		"a job that fails daily must leave one issue open, not thirty")
-	assert.Contains(t, scheduled, "GH_TOKEN: ${{ github.token }}",
+	assert.Contains(t, scheduled, "forge-ci report-failure",
+		"the dedupe belongs in a controller with a test, not in a shell block nothing can reach")
+	assert.NotContains(t, scheduled, "gh issue",
+		"the toolchain image carries no gh, so the step that reports a failure must not need one")
+	assert.Contains(t, scheduled, "GITHUB_TOKEN: ${{ github.token }}",
 		"reporting a failure must not need a secret somebody has to remember to seal")
 
 	// A repository_dispatch run looks attended and is not: somebody caused
@@ -767,7 +772,7 @@ func TestEveryGeneratedWorkflowCanBeFiredByHand(t *testing.T) {
 // in. Engines inherit forge-ci's environment and nothing else, and the
 // secrets a bootstrap seals into Actions are sealed on the operator's laptop:
 // they put nothing into a running job. So a release engine that shells out to
-// gh, or pushes to a registry, had no credential at all, and would have found
+// the API, or pushes to a registry, had no credential at all, and would have found
 // that out after the build and the tags.
 func TestAPublishingWorkflowGetsACredentialAndThePermissionToUseIt(t *testing.T) {
 	t.Parallel()

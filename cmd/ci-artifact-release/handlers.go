@@ -5,13 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"time"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/execadapter"
-	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/releaseadapter"
+	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/fsadapter"
+	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/gitadapter"
+	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/githubadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/artifactcontroller"
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 	"github.com/alexandremahdhaoui/forge/pkg/forge"
@@ -41,7 +42,7 @@ func NewHandlers() Handlers {
 				return nil, err
 			}
 
-			out, err := publish(ctx, ctrl, publisherFor(in.Spec), citypes.ArtifactInput{
+			out, err := publish(ctx, ctrl, gitadapter.New(execadapter.New()), apiFor(in.Spec), citypes.ArtifactInput{
 				Revision:  in.Revision,
 				Version:   in.Version,
 				TagPrefix: in.TagPrefix,
@@ -99,14 +100,15 @@ func fromResources(in []citypes.Resource) []Resource {
 	return out
 }
 
-// publisherFor picks how to reach GitHub: the gh CLI when the host carries
-// it, else the REST API directly with the token the spec names (default
-// GITHUB_TOKEN) against spec.apiBaseURL (default the public API).
-func publisherFor(spec map[string]any) releaseadapter.Publisher {
-	if _, err := exec.LookPath("gh"); err == nil {
-		return releaseadapter.New(execadapter.New())
-	}
-
+// apiFor builds the GitHub client from the spec: the token the spec names
+// (default GITHUB_TOKEN) against spec.apiBaseURL (default the public API).
+//
+// There is no gh path. gh reads whatever GH_TOKEN or GITHUB_TOKEN the host
+// happens to carry, so it cannot be pointed at the credential the pipeline
+// declares, and it is not in every image a job runs in. Both are the same
+// defect: a dependency on the ambient environment that is invisible until
+// the environment changes.
+func apiFor(spec map[string]any) githubadapter.API {
 	tokenEnv, _ := spec["tokenEnv"].(string)
 	if tokenEnv == "" {
 		tokenEnv = "GITHUB_TOKEN"
@@ -114,7 +116,7 @@ func publisherFor(spec map[string]any) releaseadapter.Publisher {
 
 	base, _ := spec["apiBaseURL"].(string)
 
-	return releaseadapter.NewAPI(execadapter.New(), base, os.Getenv(tokenEnv))
+	return githubadapter.New(nil, base, os.Getenv(tokenEnv))
 }
 
 // publish carries out what the controller decided. The decision is not made
@@ -122,7 +124,8 @@ func publisherFor(spec map[string]any) releaseadapter.Publisher {
 func publish(
 	ctx context.Context,
 	ctrl *artifactcontroller.Controller,
-	publisher releaseadapter.Publisher,
+	git gitadapter.Git,
+	api githubadapter.API,
 	in citypes.ArtifactInput,
 ) (citypes.ArtifactOutput, error) {
 	plan, err := ctrl.Plan(in)
@@ -138,10 +141,14 @@ func publish(
 	// The release is created in a repo, and the workspace root is not one. It
 	// belongs in the repo that holds the workspace files, because that is what
 	// a release of the whole workspace is a release of.
-	home, _ := in.Spec["releaseIn"].(string)
+	//
+	// The pipeline names it. Reading it off a checkout's origin remote is one
+	// more thing that works until the checkout is not the one anybody meant,
+	// and every other engine here is told what it acts on.
+	home, _ := in.Spec["repo"].(string)
 	if home == "" {
-		return citypes.ArtifactOutput{Reason: "spec.releaseIn names no repo to create the release in"},
-			fmt.Errorf("releasing %s: spec.releaseIn is required", plan.Version)
+		return citypes.ArtifactOutput{Reason: "spec.repo names no repo to create the release in"},
+			fmt.Errorf("releasing %s: spec.repo is required", plan.Version)
 	}
 
 	out := citypes.ArtifactOutput{Tagged: []string{}}
@@ -153,7 +160,7 @@ func publish(
 	for _, tag := range plan.Tags {
 		dir := root + "/" + tag.Repo
 
-		at, found, err := publisher.TagAt(ctx, dir, plan.TagName)
+		at, found, err := git.TagAt(ctx, dir, plan.TagName)
 		if err != nil {
 			return out, fmt.Errorf("releasing %s: %w", tag.Repo, err)
 		}
@@ -173,7 +180,7 @@ func publish(
 				tag.Repo, plan.TagName, at, tag.SHA)
 		}
 
-		if err := publisher.Tag(ctx, dir, plan.TagName, tag.SHA); err != nil {
+		if err := git.Tag(ctx, dir, plan.TagName, tag.SHA); err != nil {
 			return out, fmt.Errorf("releasing %s: %w", plan.TagName, err)
 		}
 
@@ -194,13 +201,22 @@ func publish(
 	// the index that pins their digests, under the same tag the members
 	// carry - the workspace is one thing, built together and released
 	// together, under one number.
-	url, err := publisher.Release(ctx, filepath.Join(root, home), plan.TagName, assets)
+	release, err := api.CreateRelease(ctx, home, plan.TagName)
 	if err != nil {
 		return out, fmt.Errorf("releasing %s: %w", plan.Version, err)
 	}
 
+	// The upload URL comes from the release itself and is on a different
+	// host from the API base, which is why the client sends to a full URL
+	// rather than joining a path onto the base.
+	for _, asset := range assets {
+		if err := api.UploadAsset(ctx, release.UploadURL, asset); err != nil {
+			return out, fmt.Errorf("releasing %s: %w", plan.Version, err)
+		}
+	}
+
 	out.Published = true
-	out.URL = url
+	out.URL = release.HTMLURL
 
 	return out, nil
 }
@@ -274,12 +290,12 @@ func stageAssets(root string, plan artifactcontroller.Plan, uploads []string, re
 	digests := make([]artifactcontroller.UploadDigest, 0, len(uploads))
 
 	for _, upload := range uploads {
-		// Absolute, not merely joined. gh runs in <root>/<releaseIn>, one
-		// level below the root these paths are joined from, so a path that
-		// is still relative here resolves against the wrong directory and
-		// the release fails on "no matches found" for a file that is on
-		// disk. Joining is not enough on its own: filepath.Join("." , x)
-		// is a clean relative path and looks correct right up to the point
+		// Absolute, not merely joined. An asset is read from disk by this
+		// process, whose working directory is nobody's to promise, so a
+		// path that is still relative here is read against the wrong
+		// directory and the release fails on a file that is sitting there.
+		// Joining is not enough on its own: filepath.Join(".", x) is a
+		// clean relative path and looks correct right up to the point
 		// something else supplies the working directory.
 		//
 		// The driver absolutises the root already. This does not trust
@@ -290,7 +306,7 @@ func stageAssets(root string, plan artifactcontroller.Plan, uploads []string, re
 			return nil, fmt.Errorf("resolving upload %s: %w", upload, err)
 		}
 
-		digest, size, err := releaseadapter.DigestFile(path)
+		digest, size, err := fsadapter.Digest(path)
 		if err != nil {
 			return nil, err
 		}

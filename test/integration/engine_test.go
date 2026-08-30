@@ -406,7 +406,7 @@ func TestTheWatchTriggerDeclaresItsNotifyWorkflowsOverMCP(t *testing.T) {
 
 		content, ok := r.Spec["content"].(string)
 		require.True(t, ok, "content must survive the wire as a string")
-		require.Contains(t, content, "gh api repos/an-owner/a-factory/dispatches")
+		require.Contains(t, content, "https://api.github.com/repos/an-owner/a-factory/dispatches")
 		require.Contains(t, content, "${{ secrets.A_TOKEN }}")
 	}
 }

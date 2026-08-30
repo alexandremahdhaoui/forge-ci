@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -263,10 +264,15 @@ func (c *Controller) releaseVersion(
 	return next, nil
 }
 
-// releaseHome is the repo the version line lives in: the one the release is
-// created in, which the artifact engine names in releaseIn because a
-// workspace root is not a repo. It reports whether this pipeline releases at
-// all; one that does not has no line and needs no version.
+// releaseHome is the checkout the version line lives in: the one the release
+// is created in, because a workspace root is not a repo. It reports whether
+// this pipeline releases at all; one that does not has no line and needs no
+// version.
+//
+// The artifact engine names the remote as owner/name, and the checkout is
+// that name's last segment under the root - the same derivation the compute
+// engine makes from its own repo key. One declaration, so the repo the tags
+// are read from and the repo the release is created in can never disagree.
 func releaseHome(p config.Pipeline, index engineIndex, root string) (string, bool) {
 	for _, stage := range p.Stages {
 		if stage.Release == "" {
@@ -278,8 +284,8 @@ func releaseHome(p config.Pipeline, index engineIndex, root string) (string, boo
 			continue
 		}
 
-		if home, _ := engine.Spec["releaseIn"].(string); home != "" {
-			return filepath.Join(root, home), true
+		if repo, _ := engine.Spec["repo"].(string); repo != "" {
+			return filepath.Join(root, path.Base(repo)), true
 		}
 
 		return root, true

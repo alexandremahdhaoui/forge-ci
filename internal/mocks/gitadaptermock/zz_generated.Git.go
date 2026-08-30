@@ -699,6 +699,153 @@ func (_c *MockGit_SubjectsSince_Call) RunAndReturn(run func(ctx context.Context,
 	return _c
 }
 
+// Tag provides a mock function for the type MockGit
+func (_mock *MockGit) Tag(ctx context.Context, dir string, tag string, sha string) error {
+	ret := _mock.Called(ctx, dir, tag, sha)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Tag")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, string) error); ok {
+		r0 = returnFunc(ctx, dir, tag, sha)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockGit_Tag_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Tag'
+type MockGit_Tag_Call struct {
+	*mock.Call
+}
+
+// Tag is a helper method to define mock.On call
+//   - ctx context.Context
+//   - dir string
+//   - tag string
+//   - sha string
+func (_e *MockGit_Expecter) Tag(ctx any, dir any, tag any, sha any) *MockGit_Tag_Call {
+	return &MockGit_Tag_Call{Call: _e.mock.On("Tag", ctx, dir, tag, sha)}
+}
+
+func (_c *MockGit_Tag_Call) Run(run func(ctx context.Context, dir string, tag string, sha string)) *MockGit_Tag_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		var arg3 string
+		if args[3] != nil {
+			arg3 = args[3].(string)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+			arg3,
+		)
+	})
+	return _c
+}
+
+func (_c *MockGit_Tag_Call) Return(err error) *MockGit_Tag_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockGit_Tag_Call) RunAndReturn(run func(ctx context.Context, dir string, tag string, sha string) error) *MockGit_Tag_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// TagAt provides a mock function for the type MockGit
+func (_mock *MockGit) TagAt(ctx context.Context, dir string, tag string) (string, bool, error) {
+	ret := _mock.Called(ctx, dir, tag)
+
+	if len(ret) == 0 {
+		panic("no return value specified for TagAt")
+	}
+
+	var r0 string
+	var r1 bool
+	var r2 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) (string, bool, error)); ok {
+		return returnFunc(ctx, dir, tag)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) string); ok {
+		r0 = returnFunc(ctx, dir, tag)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string) bool); ok {
+		r1 = returnFunc(ctx, dir, tag)
+	} else {
+		r1 = ret.Get(1).(bool)
+	}
+	if returnFunc, ok := ret.Get(2).(func(context.Context, string, string) error); ok {
+		r2 = returnFunc(ctx, dir, tag)
+	} else {
+		r2 = ret.Error(2)
+	}
+	return r0, r1, r2
+}
+
+// MockGit_TagAt_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'TagAt'
+type MockGit_TagAt_Call struct {
+	*mock.Call
+}
+
+// TagAt is a helper method to define mock.On call
+//   - ctx context.Context
+//   - dir string
+//   - tag string
+func (_e *MockGit_Expecter) TagAt(ctx any, dir any, tag any) *MockGit_TagAt_Call {
+	return &MockGit_TagAt_Call{Call: _e.mock.On("TagAt", ctx, dir, tag)}
+}
+
+func (_c *MockGit_TagAt_Call) Run(run func(ctx context.Context, dir string, tag string)) *MockGit_TagAt_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *MockGit_TagAt_Call) Return(s string, b bool, err error) *MockGit_TagAt_Call {
+	_c.Call.Return(s, b, err)
+	return _c
+}
+
+func (_c *MockGit_TagAt_Call) RunAndReturn(run func(ctx context.Context, dir string, tag string) (string, bool, error)) *MockGit_TagAt_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // WorktreeHash provides a mock function for the type MockGit
 func (_mock *MockGit) WorktreeHash(ctx context.Context, dir string) (string, error) {
 	ret := _mock.Called(ctx, dir)

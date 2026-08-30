@@ -135,6 +135,25 @@ type WorkflowSpec struct {
 	// last step of a run that already built everything.
 	Packages bool `json:"packages,omitempty"`
 
+	// ReportFailure opens an issue when a run of this workflow fails, and
+	// grants the issues: write the step needs.
+	//
+	// Set it on a workflow nobody is watching. A scheduled run has no
+	// audience: nobody typed it and nobody is waiting on it, so a red run is
+	// a red icon on a page nobody opens - one instance failed every morning
+	// for eight days that way, and the first person to look found it by
+	// listing runs on a hunch.
+	//
+	// A repository_dispatch run has no audience either, and that is the easy
+	// one to get wrong. Somebody caused it, so it looks attended, but they
+	// caused it from another repo: a member push that fans out to a
+	// workspace pipeline is read by a person watching the member's own
+	// checks, not the workspace's.
+	//
+	// A push to this repo and a workflow_dispatch somebody typed both have a
+	// person already looking at these checks, so leave it off for those.
+	ReportFailure bool `json:"reportFailure,omitempty"`
+
 	// fan-out kind.
 	TagPattern string   `json:"tagPattern,omitempty"`
 	EventType  string   `json:"eventType,omitempty"`
@@ -227,6 +246,18 @@ func ParseSpec(raw map[string]any) (Spec, error) {
 				return Spec{}, fmt.Errorf("workflow %q: a fan-out workflow needs eventType, consumers and secret", w.Name)
 			}
 		case KindRelease:
+			// A release job stands the workspace up like every other, because
+			// a toolchain script does `cd <member> && go install` and needs
+			// the members on disk. That clone reaches private repos, so it
+			// needs the same credential, and a workflow that named none used
+			// to render `${{ secrets. }}` - an empty rewrite that fails on
+			// the first private member.
+			if w.Secret == "" {
+				return Spec{}, fmt.Errorf(
+					"workflow %q: a release workflow needs secret; it checks the workspace out to reach the toolchain", w.Name)
+			}
+
+			needsWorkspace = true
 		default:
 			return Spec{}, fmt.Errorf("workflow %q: unknown kind %q, want %s, %s or %s (or verbatim content)",
 				w.Name, w.Kind, KindCommand, KindFanOut, KindRelease)

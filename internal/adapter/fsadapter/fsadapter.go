@@ -1,6 +1,8 @@
 package fsadapter
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -129,4 +131,17 @@ func (OS) Remove(path string) error {
 	}
 
 	return nil
+}
+
+// Digest measures one file: its sha256 hex and its size. The distribution
+// index is built from these, so it never claims a byte nobody hashed.
+func Digest(path string) (string, int64, error) {
+	data, err := os.ReadFile(filepath.Clean(path))
+	if err != nil {
+		return "", 0, fmt.Errorf("digesting %s: %w", path, err)
+	}
+
+	sum := sha256.Sum256(data)
+
+	return hex.EncodeToString(sum[:]), int64(len(data)), nil
 }

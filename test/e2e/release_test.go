@@ -20,8 +20,10 @@ import (
 )
 
 // releaseFake is the GitHub API surface a release needs, recording what it
-// was sent. gh is absent on this host, so the engine's API fallback is what
-// executes - the same path a bare CI runner takes.
+// was sent. There is one path to GitHub and this is it: the engine speaks
+// the REST API with the token spec.tokenEnv names, in the repo spec.repo
+// names, on whatever host spec.apiBaseURL points at - which is what lets
+// this suite stay hermetic.
 type releaseFake struct {
 	server   *httptest.Server
 	releases map[string]string
@@ -123,7 +125,7 @@ engines:
     engine: "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-artifact-release@v0.1.0"
     manager: local
     spec:
-      releaseIn: demo-repo
+      repo: owner/demo-repo
       apiBaseURL: ` + apiBaseURL + `
       assets: ["demo-repo/build/dist/extra-tool_linux_*"]
 state: ci-state

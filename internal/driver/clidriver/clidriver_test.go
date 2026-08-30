@@ -402,14 +402,14 @@ func TestGraphPropagatesAnError(t *testing.T) {
 	require.ErrorIs(t, err, errBoom)
 }
 
-// The root reaches every engine as spec["root"]. The release engine builds
-// two things from it that only agree while it is absolute: the directory gh
-// runs in, <root>/<releaseIn>, and the asset paths gh is asked to upload.
+// The root reaches every engine as spec["root"]. An engine joins paths from
+// it that only mean one place while it is absolute: the member checkouts it
+// runs git in, and the asset files it reads to upload.
 //
-// With --root . both joins look clean and mean different places, because gh
-// runs one level down. A release then fails on "no matches found" for a file
-// that is on disk - at the last step, after the build and publish stages
-// passed and the tags are already cut.
+// With --root . every join looks clean and means whatever directory the
+// process happens to be in. A release then fails on a file that is on disk -
+// at the last step, after the build and publish stages passed and the tags
+// are already cut.
 //
 // --root . is the form the operator runbook prints, so this was reachable by
 // following the documentation. Deriving the root from the config file
@@ -448,7 +448,7 @@ func TestTheRootReachesTheEnginesAbsolute(t *testing.T) {
 
 			require.NoError(t, clidriver.New(&out, r).Run(context.Background(), args))
 			require.True(t, filepath.IsAbs(seen),
-				"engines join paths against this and gh runs one level down; got %q", seen)
+				"engines join paths against this from a working directory nobody promises; got %q", seen)
 		})
 	}
 }

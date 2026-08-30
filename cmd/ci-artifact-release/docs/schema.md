@@ -6,10 +6,10 @@ The `spec` block on this engine's entry in `forge-ci.yaml`.
 
 | Key | Type | Required | Means |
 |---|---|---|---|
-| `releaseIn` | string | yes | Repo the release is created in. The workspace root is not a repo, so a release of the whole workspace belongs in the repo that holds its files. |
+| `repo` | string | yes | Repo the release is created in, as owner/name. The workspace root is not a repo, so a release of the whole workspace belongs in the repo that holds its files. The pipeline names it rather than the engine reading it off a checkout's remote. |
 | `root` | string | no | Directory holding the repos. Defaults to the working directory. |
-| `apiBaseURL` | string | no | GitHub API base for the gh-less path. Defaults to https://api.github.com; a fake in tests, a mirror in an airgap. |
-| `tokenEnv` | string | no | Environment variable holding the token the gh-less path authenticates with. Defaults to GITHUB_TOKEN. |
+| `apiBaseURL` | string | no | GitHub API base. Defaults to https://api.github.com; a fake in tests, a mirror in an airgap. |
+| `tokenEnv` | string | no | Environment variable holding the token the release authenticates with. Defaults to GITHUB_TOKEN. |
 | `assets` | list of strings | no | Root-relative globs of extra files to publish - the door for cross-built binaries no artifact record carries. A glob that matches nothing fails the release, because a distribution never shrinks silently. |
 
 forge-ci never validates a spec. This engine does, because only it knows what the keys mean.

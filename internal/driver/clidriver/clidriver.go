@@ -10,7 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/alexandremahdhaoui/forge-ci/internal/controller/notifycontroller"
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/reconcilecontroller"
+	"github.com/alexandremahdhaoui/forge-ci/internal/controller/releasecontroller"
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 	"github.com/alexandremahdhaoui/forge-ci/pkg/config"
 )
@@ -20,9 +22,11 @@ const DefaultPath = "forge-ci.yaml"
 const EnvInApply = "FORGE_CI_IN_APPLY"
 
 var (
-	ErrUsage   = errors.New("usage: forge-ci <bootstrap|apply|status|poll|graph|validate> [--config path] [--root dir]")
+	ErrUsage = errors.New(
+		"usage: forge-ci <bootstrap|apply|status|poll|graph|validate|release|report-failure> [flags]")
 	ErrBlocked = errors.New("the pipeline did not advance")
 	ErrRecurse = errors.New("apply cannot run inside apply")
+	ErrNoGit   = errors.New("this build was wired without a GitHub client")
 )
 
 type Reconciler interface {
@@ -32,14 +36,41 @@ type Reconciler interface {
 	Poll(context.Context, config.Pipeline, string) (citypes.TriggerOutput, error)
 }
 
+// Publisher tags a commit and releases it. The generated release workflow
+// calls this rather than a CLI the image may not carry, so the idempotency
+// rule lives in a controller with a test instead of in a shell `if`.
+type Publisher interface {
+	Publish(ctx context.Context, dir, repo, tag, sha string) (releasecontroller.Report, error)
+}
+
+// Announcer files the issue that says a run nobody was watching failed.
+type Announcer interface {
+	Announce(ctx context.Context, repo, title, body string) (notifycontroller.Report, error)
+}
+
+// GitHubFor builds the two controllers that reach GitHub. It is a function
+// because the credential is named by a flag, so nothing can be constructed
+// until the flags are parsed - which is also what keeps the token out of
+// every code path that does not need one.
+type GitHubFor func(tokenEnv, apiBaseURL string) (Publisher, Announcer)
+
 type Driver struct {
 	out        io.Writer
 	reconciler Reconciler
+	github     GitHubFor
 	applying   bool
 }
 
 func New(out io.Writer, reconciler Reconciler) *Driver {
 	return &Driver{out: out, reconciler: reconciler}
+}
+
+// WithGitHub wires the verbs a generated workflow calls. A build without it
+// still runs every pipeline verb and refuses those two by name.
+func (d *Driver) WithGitHub(github GitHubFor) *Driver {
+	d.github = github
+
+	return d
 }
 
 func (d *Driver) AlreadyApplying(applying bool) *Driver {
@@ -54,6 +85,16 @@ func (d *Driver) Run(ctx context.Context, args []string) error {
 	}
 
 	verb := args[0]
+
+	// These two act on one repo somebody named and never read a pipeline, so
+	// they are answered before the config is loaded. A generated workflow
+	// calls them from a job that has a checkout and no forge-ci.yaml.
+	switch verb {
+	case "release":
+		return d.release(ctx, args[1:])
+	case "report-failure":
+		return d.reportFailure(ctx, args[1:])
+	}
 
 	p, root, err := d.load(verb, args[1:])
 	if err != nil {
@@ -121,16 +162,16 @@ func (d *Driver) load(verb string, args []string) (config.Pipeline, string, erro
 	}
 
 	// The root is absolute from here on, whichever way it arrived. It
-	// reaches every engine as spec["root"], and the release engine builds
-	// two things from it that only agree while it is absolute: the
-	// directory gh runs in, and the asset paths gh is asked to upload.
+	// reaches every engine as spec["root"], and an engine joins paths from
+	// it that only mean one place while it is absolute: the member
+	// checkouts it runs git in, and the asset files it reads to upload.
 	//
-	// With --root . both joins look clean and mean different places. gh
-	// runs in <root>/<releaseIn>, one level down, so a relative asset path
-	// joined from the same root resolves against THAT directory instead of
-	// the workspace root, and a release fails on "no matches found" for a
-	// file that is sitting on disk. It fails at the last step, after the
-	// build and publish stages have passed and the tags are already cut.
+	// With --root . every join looks clean and means whatever directory the
+	// process happens to be in. An engine that changed directory, or one
+	// started somewhere else, then resolves a relative asset path against
+	// the wrong place and the release fails on a file that is sitting on
+	// disk. It fails at the last step, after the build and publish stages
+	// have passed and the tags are already cut.
 	//
 	// Deriving the root from the config file already absolutised it. An
 	// explicit one took the other branch and stayed relative, which is the

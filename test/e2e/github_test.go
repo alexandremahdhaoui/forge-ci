@@ -111,6 +111,7 @@ engines:
       workflows:
         - name: release
           kind: release
+          secret: FORGE_CI_GITHUB_TOKEN
       runner:
         name: ci-runner
         secret: FORGE_CI_GITHUB_TOKEN
@@ -200,8 +201,10 @@ func TestTheGitHubSurfaceIsProvisionedAndConverged(t *testing.T) {
 
 	notify, err := os.ReadFile(notifyFile)
 	require.NoError(t, err)
-	require.Contains(t, string(notify), "gh api repos/acme/demo-factory/dispatches")
-	require.Contains(t, string(notify), "event_type=member-pushed")
+	require.Contains(t, string(notify), "https://api.github.com/repos/acme/demo-factory/dispatches")
+	require.Contains(t, string(notify), `"event_type":"member-pushed"`)
+	require.NotContains(t, string(notify), "gh api",
+		"a member repo carries no toolchain, so its notify workflow speaks the API through curl")
 
 	ownership, err := os.ReadFile(filepath.Join(root, "manager-github.json"))
 	require.NoError(t, err)

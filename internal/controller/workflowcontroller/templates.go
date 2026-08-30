@@ -45,7 +45,7 @@ func render(spec Spec, w WorkflowSpec) (string, error) {
 	case KindFanOut:
 		return renderFanOut(spec, w), nil
 	case KindRelease:
-		return renderRelease(), nil
+		return renderRelease(spec, w), nil
 	default:
 		return "", fmt.Errorf("workflow %q: nothing renders kind %q", w.Name, w.Kind)
 	}
@@ -88,7 +88,7 @@ func renderCommand(spec Spec, w WorkflowSpec) string {
 
 	b.WriteString("\npermissions:\n  contents: write\n")
 
-	if reportsFailure(w) {
+	if w.ReportFailure {
 		b.WriteString("  issues: write\n")
 	}
 
@@ -123,7 +123,7 @@ func renderCommand(spec Spec, w WorkflowSpec) string {
 	// in: engines inherit forge-ci's environment and nothing else, and the
 	// secrets a bootstrap seals into Actions are sealed on the operator's
 	// laptop and put nothing into a running job. So a release engine that
-	// shells out to gh, or pushes to a registry, had no credential at all.
+	// reaches the API, or pushes to a registry, had no credential at all.
 	//
 	// secrets.GITHUB_TOKEN is injected by Actions. There is no secret to
 	// create, seal or rotate.
@@ -165,36 +165,17 @@ func renderCommand(spec Spec, w WorkflowSpec) string {
 	return b.String()
 }
 
-// reportsFailure answers whether a workflow needs to raise its own alarm.
-//
-// A scheduled run has no audience: nobody typed it and nobody is waiting on
-// it, so a red run is a red icon on a page nobody opens. One instance failed
-// every morning for eight days that way, and the first person to look found
-// it by listing runs on a hunch.
-//
-// A repository_dispatch run has no audience either, and that is easy to get
-// wrong. Somebody caused it, so it looks attended - but they caused it from
-// another repo. A member push that fans out to a workspace pipeline is read
-// by a person watching the member's own checks, not the workspace's, and a
-// consumer filing an admission request never sees the register's run list at
-// all.
-//
-// What is left is a push to this repo and a workflow_dispatch somebody
-// typed. Both have a person already looking at this repo's checks, so they
-// file nothing.
-func reportsFailure(w WorkflowSpec) bool {
-	return w.Cron != "" || len(w.Events) > 0
-}
-
 // writeFailureReport renders the step that opens an issue when the run
 // fails. It uses the token every job already has, so a workflow needs no new
 // secret to be able to speak.
 //
-// It dedupes on the title: a job that fails daily should leave one issue
-// open, not thirty. Reopening after a green run is deliberate too, because a
-// failure that comes back is news again.
+// The step is a step and not an engine because it is the only thing that can
+// see a job which died before forge-ci was alive: a missing binary, a
+// checkout that failed, a container without git. What it no longer carries
+// is the decision. The dedupe - one open issue per workflow, not thirty -
+// lives in notifycontroller with a test, and this calls it.
 func writeFailureReport(b *strings.Builder, w WorkflowSpec) {
-	if !reportsFailure(w) {
+	if !w.ReportFailure {
 		return
 	}
 
@@ -202,15 +183,12 @@ func writeFailureReport(b *strings.Builder, w WorkflowSpec) {
       - name: Say that the run failed
         if: failure()
         env:
-          GH_TOKEN: ${{ github.token }}
-          TITLE: "%s is failing"
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
-          open=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "$TITLE in:title" --json number --jq length)
-          if [ "$open" -gt 0 ]; then
-            echo "an issue is already open for this; not filing another"
-            exit 0
-          fi
-          gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID failed. Nothing else reports this run, so it reports itself. Close this once a run goes green; a failure after that files a new one."
+          forge-ci report-failure \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "%s is failing" \
+            --body "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID failed. Nothing else reports this run, so it reports itself. Close this once a run goes green; a failure after that files a new one."
 `, w.Name)
 }
 
@@ -258,8 +236,27 @@ jobs:
 
 // renderRelease is fully generic: tag one commit and publish a release,
 // idempotently, with the workflow's own token.
-func renderRelease() string {
-	return `name: release
+//
+// It runs the toolchain rather than a CLI the runner happens to ship. Both
+// halves are separately idempotent and a tag that already points elsewhere
+// is refused, which is a rule with a test in releasecontroller rather than a
+// shell `if` in generated YAML that nothing can reach.
+//
+// Its prelude is the command job's, verbatim through the same three
+// helpers: the container when the factory names one, the toolchain install
+// otherwise, and the workspace checkout either way.
+//
+// The workspace is not optional here even though this job only writes one
+// tag. A toolchain script does `cd <member> && go install`, so it needs the
+// members on disk; a lone actions/checkout of this repo makes that step die
+// on a directory that does not exist, which is the failure this whole
+// mechanism was built to delete. Sharing the prelude is what stops the two
+// jobs drifting into one that works and one that does not.
+func renderRelease(spec Spec, w WorkflowSpec) string {
+	var b strings.Builder
+
+	b.WriteString(w.Header)
+	fmt.Fprintf(&b, `name: %s
 
 on:
   workflow_dispatch:
@@ -273,29 +270,27 @@ on:
 
 permissions:
   contents: write
+`, w.Name)
 
-jobs:
-  release:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - env:
-          GH_TOKEN: ${{ github.token }}
+	writeRunsOn(&b, spec, "release")
+	writeSetup(&b, spec)
+	writeWorkspaceCheckout(&b, spec, w.Secret)
+	writeToolchain(&b, spec)
+
+	// --dir is this repo's checkout inside the workspace, not the workspace
+	// root, because the root is not a repo and the tag belongs on the repo
+	// the workflow lives in.
+	fmt.Fprintf(&b, `
+      - name: Publish the release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag }}
           SHA: ${{ inputs.sha }}
         run: |
-          git config user.name "forge-release"
-          git config user.email "forge-release@users.noreply.github.com"
-          if ! git rev-parse "refs/tags/$TAG" >/dev/null 2>&1; then
-            git tag -a "$TAG" -m "release $TAG" "$SHA"
-            git push origin "$TAG"
-          fi
-          if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" --verify-tag --generate-notes
-          fi
-`
+          forge-ci release --repo "$GITHUB_REPOSITORY" --dir %s --tag "$TAG" --sha "$SHA"
+`, spec.Dir)
+
+	return b.String()
 }
 
 // renderRunner is the run tool's dispatch target: it builds the same
@@ -382,12 +377,27 @@ func writeSetup(b *strings.Builder, spec Spec) {
 // lines carried bugs and every scheduled run failed for a week. The seed
 // command already stands a workspace up in one call, so the reimplementation
 // is gone rather than repaired.
+// writeWorkspaceCheckout stands the workspace up around this repo.
+//
+// The insteadOf line is written only when there is a secret to write into
+// it. A workflow that named none used to render `${{ secrets. }}`, which
+// Actions expands to nothing: the rewrite then maps every ssh remote to an
+// unauthenticated https one and the clone of the first private member fails
+// on a credential that was never there. ParseSpec refuses that config, and
+// this refuses to render it either way, because a half-written credential
+// line is worse than an absent one.
 func writeWorkspaceCheckout(b *strings.Builder, spec Spec, secret string) {
-	fmt.Fprintf(b, `
+	b.WriteString(`
       - name: Check out the workspace around this repo
         run: |
-          git config --global url."https://x-access-token:${{ secrets.%s }}@github.com/".insteadOf "git@github.com:"
+`)
+
+	if secret != "" {
+		fmt.Fprintf(b,
+			`          git config --global url."https://x-access-token:${{ secrets.%s }}@github.com/".insteadOf "git@github.com:"
 `, secret)
+	}
+
 	writeIndented(b, spec.Workspace.BootstrapCommand)
 }
 
@@ -396,8 +406,8 @@ func writeWorkspaceCheckout(b *strings.Builder, spec Spec, secret string) {
 // A container image supplies the toolchain, so the install step disappears
 // with it - but not the checkout: a container carries tools and not a
 // workspace, and the members still have to be cloned. Only the two jobs that
-// build a workspace take one; a fan-out curls a dispatch and a release runs
-// gh, and both are content with whatever the runner ships.
+// build a workspace take one; a fan-out only curls a dispatch, so it is
+// content with whatever the runner ships.
 func writeRunsOn(b *strings.Builder, spec Spec, job string) {
 	fmt.Fprintf(b, "\njobs:\n  %s:\n    runs-on: ubuntu-latest\n", job)
 

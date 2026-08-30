@@ -24,6 +24,11 @@ type Git interface {
 	LatestTag(ctx context.Context, dir, prefix string) (string, error)
 	SubjectsSince(ctx context.Context, dir, tag string) ([]string, error)
 	WorktreeHash(ctx context.Context, dir string) (string, error)
+	// Tag points a tag at one commit and pushes it.
+	Tag(ctx context.Context, dir, tag, sha string) error
+	// TagAt answers the commit a tag points at, and whether dir carries the
+	// tag at all.
+	TagAt(ctx context.Context, dir, tag string) (string, bool, error)
 }
 
 type CLI struct {
@@ -238,4 +243,57 @@ func (g *CLI) SubjectsSince(ctx context.Context, dir, tag string) ([]string, err
 	}
 
 	return out, nil
+}
+
+// Tag points a tag at one commit and pushes it. It is idempotent by refusing
+// a tag that already exists rather than moving it, because a moved tag
+// changes what a consumer already pinned.
+func (g *CLI) Tag(ctx context.Context, dir, tag, sha string) error {
+	_, exists, err := g.TagAt(ctx, dir, tag)
+	if err != nil {
+		return err
+	}
+
+	if exists {
+		return fmt.Errorf("tagging %s: %s already exists and a tag is never moved", dir, tag)
+	}
+
+	// Annotated, with the tag as its message: a lightweight tag dies with
+	// "no tag message" on a machine whose global config signs tags, while an
+	// annotated tag works signed and unsigned alike.
+	//
+	// An annotated tag is an object git writes, so it needs a committer
+	// identity exactly as a commit does, and a runner has none.
+	args := append(gitident.Args(ctx, g.runner, dir), "tag", "-m", tag, tag, sha)
+
+	if _, err := g.run(ctx, dir, "tagging "+tag, args...); err != nil {
+		return err
+	}
+
+	_, err = g.run(ctx, dir, "pushing "+tag, "push", "origin", tag)
+
+	return err
+}
+
+// TagAt answers where a tag points, and whether the repo carries it. A repo
+// that does not have the tag is not an error: that is the ordinary case, and
+// it is what a first release of a member looks like.
+func (g *CLI) TagAt(ctx context.Context, dir, tag string) (string, bool, error) {
+	listed, err := g.run(ctx, dir, "reading tag "+tag, "tag", "--list", tag)
+	if err != nil {
+		return "", false, err
+	}
+
+	if strings.TrimSpace(listed.Stdout) == "" {
+		return "", false, nil
+	}
+
+	// An annotated tag's own object is not the commit, so rev-list asks for
+	// what it points at. It is a no-op on a lightweight tag.
+	res, err := g.run(ctx, dir, "resolving tag "+tag, "rev-list", "-n", "1", tag)
+	if err != nil {
+		return "", false, err
+	}
+
+	return strings.TrimSpace(res.Stdout), true, nil
 }

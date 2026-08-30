@@ -145,14 +145,23 @@ func renderNotify(repo string, n *NotifySpec) string {
 	b.WriteString("  dispatch:\n")
 	b.WriteString("    runs-on: ubuntu-latest\n")
 	b.WriteString("    steps:\n")
+	// curl, and not a CLI. This file lands in a member repo, which carries no
+	// toolchain of its own and never will - the whole point of the workflow
+	// is that nothing is built here. curl is the one client every runner and
+	// every image has, and it is what the fan-out workflow already uses, so
+	// the two dispatchers speak the same way.
+	//
+	// -f so a rejected dispatch fails the step. Without it curl reports a 404
+	// as a successful transfer and the member's checks stay green while the
+	// factory is never told anything moved.
 	b.WriteString("      - name: Tell " + n.Factory + " to run the pipeline\n")
-	b.WriteString("        env:\n")
-	b.WriteString("          GH_TOKEN: ${{ secrets." + n.Secret + " }}\n")
 	b.WriteString("        run: |\n")
-	b.WriteString("          gh api repos/" + n.Owner + "/" + n.Factory + "/dispatches \\\n")
-	b.WriteString("            --field event_type=" + n.EventType + " \\\n")
-	b.WriteString("            --field 'client_payload[repo]=${{ github.repository }}' \\\n")
-	b.WriteString("            --field 'client_payload[sha]=${{ github.sha }}'\n")
+	b.WriteString("          curl -fsS -X POST \\\n")
+	b.WriteString("            -H \"Authorization: Bearer ${{ secrets." + n.Secret + " }}\" \\\n")
+	b.WriteString("            -H \"Accept: application/vnd.github+json\" \\\n")
+	b.WriteString("            \"https://api.github.com/repos/" + n.Owner + "/" + n.Factory + "/dispatches\" \\\n")
+	b.WriteString("            -d '{\"event_type\":\"" + n.EventType +
+		"\",\"client_payload\":{\"repo\":\"${{ github.repository }}\",\"sha\":\"${{ github.sha }}\"}}'\n")
 
 	return b.String()
 }

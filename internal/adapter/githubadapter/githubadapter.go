@@ -41,6 +41,19 @@ type API interface {
 	ListRuns(ctx context.Context, repo, workflowFile string, createdAfter time.Time) ([]RunInfo, error)
 	// Run answers one run by id.
 	Run(ctx context.Context, repo string, id int64) (RunInfo, error)
+	// ReleaseByTag answers the release published under a tag, and whether
+	// the repo carries one. Absent is not an error.
+	ReleaseByTag(ctx context.Context, repo, tag string) (Release, bool, error)
+	// CreateRelease publishes the release for a tag already on the remote.
+	CreateRelease(ctx context.Context, repo, tag string) (Release, error)
+	// UploadAsset attaches one file through the URL the release answered,
+	// which is on a different host from the API base.
+	UploadAsset(ctx context.Context, uploadURL, file string) error
+	// OpenIssueByTitle answers the open issue with exactly this title, and
+	// whether one is open at all.
+	OpenIssueByTitle(ctx context.Context, repo, title string) (Issue, bool, error)
+	// CreateIssue opens one issue.
+	CreateIssue(ctx context.Context, repo, title, body string) (Issue, error)
 }
 
 // RunInfo is the slice of a workflow run the compute engine acts on.
@@ -216,11 +229,13 @@ func (w wireRun) info() RunInfo {
 	return RunInfo(w)
 }
 
-// do sends one request and decodes the answer. A 404 is ErrNotFound so a
-// caller can treat "not there yet" apart from "broken"; any other non-2xx
-// carries a body excerpt, which is where GitHub says why.
+// do sends one JSON request to a path on the API base and decodes the
+// answer.
 func (c *Client) do(ctx context.Context, method, path string, in, out any) error {
-	var body io.Reader
+	var (
+		body        []byte
+		contentType string
+	)
 
 	if in != nil {
 		payload, err := json.Marshal(in)
@@ -228,10 +243,31 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any) error
 			return fmt.Errorf("encoding the request: %w", err)
 		}
 
-		body = bytes.NewReader(payload)
+		body, contentType = payload, "application/json"
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, c.base+path, body)
+	return c.send(ctx, method, c.base+path, contentType, body, out)
+}
+
+// send is do against a full URL rather than a path on the API base, because
+// GitHub hands out absolute URLs of its own: a release's upload_url is on
+// uploads.github.com, a different host from api.github.com. Joining one of
+// those onto the base makes a URL that 404s, which reads like a missing
+// release rather than like a bug in the caller.
+//
+// A 404 is ErrNotFound so a caller can treat "not there yet" apart from
+// "broken"; any other non-2xx carries a body excerpt, which is where GitHub
+// says why.
+func (c *Client) send(
+	ctx context.Context, method, target, contentType string, body []byte, out any,
+) error {
+	var reader io.Reader
+
+	if body != nil {
+		reader = bytes.NewReader(body)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, target, reader)
 	if err != nil {
 		return fmt.Errorf("building the request: %w", err)
 	}
@@ -239,8 +275,8 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any) error
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("Authorization", "Bearer "+c.token)
 
-	if in != nil {
-		req.Header.Set("Content-Type", "application/json")
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
 	}
 
 	resp, err := c.client.Do(req)

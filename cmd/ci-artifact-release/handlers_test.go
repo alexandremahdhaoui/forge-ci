@@ -10,10 +10,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The release runs gh in <root>/<releaseIn>, one level below the root the
-// asset paths are joined from. While the root is absolute both agree. The
-// moment it is relative they mean different places, and the release fails on
-// "no matches found" for a file that is sitting on disk - at the last step,
+// The engine reads every asset off disk itself, and its working directory is
+// nobody's to promise. While the root is absolute the joins mean one place.
+// The moment it is relative they mean whatever directory the process is in,
+// and the release fails on a file that is sitting on disk - at the last step,
 // after the build and publish stages passed and the tags are already cut.
 //
 // `forge-ci apply --root .` is the form the operator runbook prints, so this
@@ -52,7 +52,7 @@ func TestAssetsResolveAbsolutelyWhateverTheRootLooksLike(t *testing.T) {
 
 			for _, a := range assets {
 				require.True(t, filepath.IsAbs(a),
-					"gh runs one directory down, so %q resolves against the wrong tree", a)
+					"the working directory is nobody's to promise, so %q resolves against the wrong tree", a)
 				require.FileExists(t, a)
 			}
 		})
