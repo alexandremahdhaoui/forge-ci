@@ -228,6 +228,22 @@ func describe(p config.Pipeline) string {
 func render(report reconcilecontroller.Report) string {
 	var b strings.Builder
 
+	// The superseded report comes first and reads as its own thing. It is
+	// not a failure and the exit status says so, so the only way an operator
+	// learns why no stage ran is by reading this.
+	if report.Superseded {
+		b.WriteString("reconcile changed this pipeline's own resources and settled them\n")
+		b.WriteString("this run is superseded by the run those changes trigger\n")
+
+		for _, action := range report.Actions {
+			for _, line := range strings.Split(strings.TrimRight(action, "\n"), "\n") {
+				fmt.Fprintf(&b, "  %s\n", line)
+			}
+		}
+
+		return b.String()
+	}
+
 	fmt.Fprintf(&b, "revision %s\n", report.Revision.ID)
 
 	for name, sha := range report.Revision.Repos {

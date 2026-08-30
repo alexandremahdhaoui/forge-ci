@@ -55,6 +55,12 @@ type ReconcileInput struct {
 type ReconcileOutput struct {
 	Owned   []Ownership `json:"owned"`
 	Actions []string    `json:"actions"`
+	// Changed says the manager found a difference between what was declared
+	// and what existed, and closed it. The caller stops the run: the tree it
+	// was about to measure is the tree this reconcile just rewrote, and the
+	// change is already durable, so the next run reads the corrected state
+	// and this is false.
+	Changed bool `json:"changed,omitempty"`
 }
 
 type RepoCheckout struct {

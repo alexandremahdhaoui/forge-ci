@@ -1,6 +1,7 @@
 package managercontroller
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,9 +13,43 @@ import (
 
 var ErrOwnedElsewhere = errors.New("resource is recorded as owned by a different manager")
 
+// Action is what a realizer did to one resource: a line for a human, and
+// whether the world actually moved.
+//
+// Changed is the whole point. A reconcile that rewrites the pipeline's own
+// files and then lets the run continue measures the tree it just wrote, so
+// the revision comes out dirty and the release refuses it. The caller stops
+// instead, and the run that the change triggers reads the corrected state.
+//
+// So a realizer must be honest about the difference between converging a
+// resource and finding it already correct. Reporting Changed for a resource
+// that already matched stops every run forever.
+type Action struct {
+	Text    string
+	Changed bool
+}
+
+// Kept is an action that found the resource already as declared.
+func Kept(text string) Action { return Action{Text: text} }
+
+// Did is an action that found a difference and closed it.
+func Did(text string) Action { return Action{Text: text, Changed: true} }
+
 type Realizer interface {
 	Kind() string
-	Realize(citypes.Resource) (string, error)
+	Realize(citypes.Resource) (Action, error)
+}
+
+// Settler is the optional half of a manager: making this reconcile's changes
+// durable, in whatever way this manager's world means durable. A manager
+// whose realize step was already durable - a file on local disk, a function
+// deployed through an API - implements nothing and still reports Changed.
+//
+// paths are the resource names this reconcile actually changed. Only those
+// may be touched. A settle that swept up everything uncommitted would commit
+// a human's unrelated work, which is not the pipeline's to publish.
+type Settler interface {
+	Settle(paths []string) (Action, error)
 }
 
 type Controller struct {
@@ -50,7 +85,10 @@ func (c *Controller) Reconcile(in citypes.ReconcileInput) (citypes.ReconcileOutp
 	// A malformed resource is still fatal on the spot: that is the caller
 	// handing over something that is not a resource, not a resource that
 	// could not be realized.
-	var failures []error
+	var (
+		failures []error
+		changed  []string
+	)
 
 	for _, r := range in.Resources {
 		if r.Kind == "" || r.Name == "" {
@@ -87,7 +125,30 @@ func (c *Controller) Reconcile(in citypes.ReconcileInput) (citypes.ReconcileOutp
 			continue
 		}
 
-		out.Actions = append(out.Actions, action)
+		out.Actions = append(out.Actions, action.Text)
+
+		if action.Changed {
+			out.Changed = true
+
+			changed = append(changed, r.Name)
+		}
+	}
+
+	// Everything is reconciled before anything settles. Settling at the first
+	// resource that moved would need one run per resource to converge a
+	// pipeline, so a thousand declared resources would take a thousand runs
+	// to update - and every one of those runs would report the same thing.
+	//
+	// A bootstrap settles nothing. It is run by an operator at a terminal who
+	// is about to look at what it wrote, and it runs no stages, so there is
+	// no run to supersede and nothing to protect from a tree it dirtied.
+	if settler, ok := c.realizer.(Settler); ok && !in.Bootstrap && len(changed) > 0 {
+		action, err := settler.Settle(changed)
+		if err != nil {
+			failures = append(failures, fmt.Errorf("settling what changed: %w", err))
+		} else if action.Text != "" {
+			out.Actions = append(out.Actions, action.Text)
+		}
 	}
 
 	sort.Slice(out.Owned, func(i, j int) bool { return out.Owned[i].Resource < out.Owned[j].Resource })
@@ -121,6 +182,14 @@ func (c *Controller) record(in citypes.ReconcileInput, out citypes.ReconcileOutp
 	}{in.Manager, c.realizer.Kind(), out.Owned, out.Actions}, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encoding manager state: %w", err)
+	}
+
+	// Written only when it would differ. This file sits inside a member
+	// checkout, so rewriting identical bytes every reconcile leaves the tree
+	// dirty on a run where nothing else moved - and a dirty tree is a dirty
+	// revision, which the release refuses.
+	if have, err := c.fs.ReadFile(path); err == nil && bytes.Equal(have, payload) {
+		return nil
 	}
 
 	if err := c.fs.WriteFile(path, payload); err != nil {

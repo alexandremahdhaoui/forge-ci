@@ -224,6 +224,45 @@ func TestAManagerRefusalStopsTheApply(t *testing.T) {
 	require.Contains(t, err.Error(), `manager "local"`)
 }
 
+// The whole reason the reconcile answers changed at all.
+//
+// Apply converges the pipeline's own resources and then resolves a revision
+// that hashes each repo's HEAD plus its uncommitted changes. Continuing would
+// measure the tree the reconcile just rewrote: the revision comes out dirty
+// and the release refuses it, on every run, because a fresh clone starts from
+// the same drift. Live run 33309087584 died exactly that way.
+func TestAChangedReconcileStopsTheApplyBeforeTheRevision(t *testing.T) {
+	f := newFakeEngines(t)
+	f.reconcileChanged = true
+
+	report, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(),
+		pipeline(stage("build", substage("default", []string{"build"}))), "/work")
+	require.NoError(t, err, "a corrected drift is not a failure")
+
+	require.True(t, report.Superseded)
+	require.Empty(t, report.Revision.ID, "no revision was resolved, so none can be dirty")
+	require.Empty(t, report.Stages)
+	require.False(t, report.Minted)
+	require.Equal(t, []string{"reconciled"}, report.Actions)
+	require.Equal(t, 0, f.counted(call{uriCompute, "run"}))
+
+	require.True(t, report.Advanced(),
+		"nothing blocked: no stage failed and no gate refused")
+}
+
+// The compatibility guarantee. A manager that reports no change leaves the
+// apply exactly as it was before any of this existed.
+func TestAnUnchangedReconcileRunsTheWholePipeline(t *testing.T) {
+	f := newFakeEngines(t)
+
+	report, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(),
+		pipeline(stage("build", substage("default", []string{"build"}))), "/work")
+	require.NoError(t, err)
+	require.False(t, report.Superseded)
+	require.NotEmpty(t, report.Revision.ID)
+	require.Len(t, report.Stages, 1)
+}
+
 func TestADeclareFailureNamesTheEngine(t *testing.T) {
 	f := newFakeEngines(t)
 	f.failOn[call{uriCompute, "declare"}] = errBoom

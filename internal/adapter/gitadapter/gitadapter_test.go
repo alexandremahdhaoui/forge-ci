@@ -462,3 +462,100 @@ func TestTagRefusesToMoveOne(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "never moved")
 }
+
+// A push the remote refuses is ErrRejected and not a generic failure. The
+// remote moved under this run, and merging is somebody's decision, never the
+// pipeline's, so the caller has to be able to tell this apart.
+func TestPushSeparatesARejectionFromABreakage(t *testing.T) {
+	stripIdentity(t)
+
+	g := gitadapter.New(execadapter.New())
+	ctx := context.Background()
+	exec := execadapter.New()
+
+	remote := filepath.Join(t.TempDir(), "origin.git")
+	dir := t.TempDir()
+
+	for _, args := range [][]string{
+		{"init", "--bare", "-q", "-b", "main", remote},
+	} {
+		res, err := exec.Run(ctx, "", "git", args...)
+		require.NoError(t, err)
+		require.Zero(t, res.ExitCode, res.Stderr)
+	}
+
+	res, err := exec.Run(ctx, dir, "git", "init", "-q", "-b", "main")
+	require.NoError(t, err)
+	require.Zero(t, res.ExitCode, res.Stderr)
+
+	has, err := g.HasRemote(ctx, dir)
+	require.NoError(t, err)
+	require.False(t, has, "no origin yet, and that is not an error")
+
+	res, err = exec.Run(ctx, dir, "git", "remote", "add", "origin", remote)
+	require.NoError(t, err)
+	require.Zero(t, res.ExitCode, res.Stderr)
+
+	has, err = g.HasRemote(ctx, dir)
+	require.NoError(t, err)
+	require.True(t, has)
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "a"), []byte("1\n"), 0o600))
+	require.NoError(t, g.Add(ctx, dir, "a"))
+	require.NoError(t, g.Commit(ctx, dir, "first"))
+
+	branch, err := g.Branch(ctx, dir)
+	require.NoError(t, err)
+	require.Equal(t, "main", branch)
+
+	require.NoError(t, g.Push(ctx, dir, branch))
+
+	// Somebody else pushes, then this checkout tries to push a commit that
+	// does not build on theirs.
+	other := t.TempDir()
+	res, err = exec.Run(ctx, "", "git", "clone", "-q", remote, other)
+	require.NoError(t, err)
+	require.Zero(t, res.ExitCode, res.Stderr)
+
+	require.NoError(t, os.WriteFile(filepath.Join(other, "b"), []byte("2\n"), 0o600))
+	require.NoError(t, g.Add(ctx, other, "b"))
+	require.NoError(t, g.Commit(ctx, other, "theirs"))
+	require.NoError(t, g.Push(ctx, other, "main"))
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "c"), []byte("3\n"), 0o600))
+	require.NoError(t, g.Add(ctx, dir, "c"))
+	require.NoError(t, g.Commit(ctx, dir, "mine"))
+
+	err = g.Push(ctx, dir, "main")
+	require.ErrorIs(t, err, gitadapter.ErrRejected)
+}
+
+// A detached HEAD is what a CI checkout of a tag looks like. There is no
+// branch to push, and inventing one would put the commit somewhere nobody
+// named.
+func TestBranchIsEmptyOnADetachedHead(t *testing.T) {
+	stripIdentity(t)
+
+	g := gitadapter.New(execadapter.New())
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	res, err := execadapter.New().Run(ctx, dir, "git", "init", "-q", "-b", "main")
+	require.NoError(t, err)
+	require.Zero(t, res.ExitCode, res.Stderr)
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "a"), []byte("1\n"), 0o600))
+	require.NoError(t, g.Add(ctx, dir, "a"))
+	require.NoError(t, g.Commit(ctx, dir, "first"))
+
+	sha, err := g.HeadSHA(ctx, dir)
+	require.NoError(t, err)
+
+	res, err = execadapter.New().Run(ctx, dir, "git", "checkout", "-q", "--detach", sha)
+	require.NoError(t, err)
+	require.Zero(t, res.ExitCode, res.Stderr)
+
+	branch, err := g.Branch(ctx, dir)
+	require.NoError(t, err)
+	require.Empty(t, branch)
+}

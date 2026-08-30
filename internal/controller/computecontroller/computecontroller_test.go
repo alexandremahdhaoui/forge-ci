@@ -357,7 +357,9 @@ func TestAWaveRunsItsMembersAtOnce(t *testing.T) {
 		out, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
 			Root: "/work",
 			Repos: []citypes.RepoCheckout{
-				{Name: "one"}, {Name: "two"}, {Name: "three"},
+				{Name: "one"},
+				{Name: "two"},
+				{Name: "three"},
 				{Name: "last", Needs: []string{"one", "two", "three"}},
 			},
 			Targets: []citypes.Target{{
@@ -405,7 +407,8 @@ func TestAFailedWaveFinishesAndStopsTheNext(t *testing.T) {
 	out, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
 		Root: "/work",
 		Repos: []citypes.RepoCheckout{
-			{Name: "one"}, {Name: "two"},
+			{Name: "one"},
+			{Name: "two"},
 			{Name: "last", Needs: []string{"one", "two"}},
 		},
 		Targets: []citypes.Target{{

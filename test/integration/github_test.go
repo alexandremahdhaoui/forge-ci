@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -92,6 +93,17 @@ func (f *fakeGitHub) handle(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{"number":1,"html_url":"http://fake/issues/1"}`)
 	case strings.HasSuffix(r.URL.Path, "/actions/secrets/public-key"):
 		fmt.Fprintf(w, `{"key_id":"k1","key":"%s"}`, base64.StdEncoding.EncodeToString(f.pub[:]))
+	case strings.Contains(r.URL.Path, "/actions/secrets/") && r.Method == http.MethodGet:
+		// The existence read. GitHub answers metadata and never the value,
+		// which is why existence is the only state a manager can compare
+		// against, and 404 when the repo does not carry it.
+		if _, ok := f.secrets[filepath.Base(r.URL.Path)]; !ok {
+			w.WriteHeader(http.StatusNotFound)
+
+			return
+		}
+
+		fmt.Fprintf(w, `{"name":"%s"}`, filepath.Base(r.URL.Path))
 	case strings.Contains(r.URL.Path, "/actions/secrets/"):
 		var in struct {
 			EncryptedValue string `json:"encrypted_value"`
@@ -100,6 +112,19 @@ func (f *fakeGitHub) handle(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewDecoder(r.Body).Decode(&in)
 		f.secrets[filepath.Base(r.URL.Path)] = in.EncryptedValue
 		w.WriteHeader(http.StatusCreated)
+	case strings.Contains(r.URL.Path, "/actions/workflows/") &&
+		strings.HasSuffix(r.URL.Path, ".yaml") && r.Method == http.MethodGet:
+		// The state read that stops the enable running every time. An
+		// enable of an already-enabled workflow succeeds, so without this a
+		// reconcile would report a change forever and no run would ever
+		// reach a stage.
+		if !slices.Contains(f.enabled, filepath.Base(r.URL.Path)) {
+			w.WriteHeader(http.StatusNotFound)
+
+			return
+		}
+
+		fmt.Fprint(w, `{"state":"active"}`)
 	case strings.HasSuffix(r.URL.Path, "/enable"):
 		parts := strings.Split(r.URL.Path, "/")
 		f.enabled = append(f.enabled, parts[len(parts)-2])
@@ -166,6 +191,54 @@ func TestTheGitHubManagerRealizesEveryKindOverMCP(t *testing.T) {
 	require.Equal(t, "pat-under-test", fake.open(t, fake.secrets["FORGE_CI_GITHUB_TOKEN"]),
 		"the sealed secret must decrypt to the token the environment carried")
 	require.Equal(t, []string{"intake.yaml"}, fake.enabled)
+
+	// A bool is the field a handler drops without a compile error, and the
+	// whole stop mechanism rides on this one. In process it passed while the
+	// wire carried false; only this can tell.
+	require.True(t, out.Changed, "nothing existed, so every kind converged something")
+}
+
+// The second half, and the one that decides whether a pipeline ever runs
+// again: over the same fake, with everything already as declared, the
+// manager must answer changed false. A file it kept, a workflow already
+// active and a secret that already exists are all no-ops, and each of the
+// three has a shape that succeeds while changing nothing.
+func TestTheGitHubManagerReportsNoChangeWhenEverythingAlreadyMatchesOverMCP(t *testing.T) {
+	_, srv := newFakeGitHub(t, "success")
+	t.Setenv("GITHUB_TOKEN", "pat-under-test")
+
+	file := filepath.Join(t.TempDir(), ".github", "workflows", "intake.yaml")
+
+	resources := []citypes.Resource{
+		{Kind: "file-content", Name: file, Spec: map[string]any{"content": "on: push\n"}},
+		{
+			Kind: "actions-secret", Name: "o/r/FORGE_CI_GITHUB_TOKEN",
+			Spec: map[string]any{"repo": "o/r", "secret": "FORGE_CI_GITHUB_TOKEN"},
+		},
+		{
+			Kind: "workflow-enabled", Name: "o/r/intake.yaml",
+			Spec: map[string]any{"repo": "o/r", "workflow": "intake.yaml"},
+		},
+	}
+
+	in := citypes.ReconcileInput{
+		Manager:   "github",
+		Spec:      map[string]any{"apiBaseURL": srv.URL},
+		Resources: resources,
+	}
+
+	var first citypes.ReconcileOutput
+
+	require.NoError(t, caller().Call(context.Background(), githubManagerURI, "reconcile", in, &first))
+	require.True(t, first.Changed)
+
+	in.Owned = first.Owned
+
+	var second citypes.ReconcileOutput
+
+	require.NoError(t, caller().Call(context.Background(), githubManagerURI, "reconcile", in, &second))
+	require.False(t, second.Changed,
+		"a second reconcile over converged state must let the run reach its stages")
 }
 
 func TestTheGitHubComputeDeclaresItsSurfaceOverMCP(t *testing.T) {

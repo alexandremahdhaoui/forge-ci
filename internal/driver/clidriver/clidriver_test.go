@@ -118,6 +118,34 @@ func TestApplyRendersTheWholeReport(t *testing.T) {
 	require.Contains(t, text, "forge unit passed 37 tests 96.4% coverage")
 }
 
+// A superseded run exits 0. It is not a failure - nothing broke, the drift
+// is corrected and pushed, and the run that correction triggers does the
+// work. So the report on stdout is the only way an operator learns why no
+// stage ran, which is why it leads and says both halves.
+func TestASupersededApplyReportsLoudlyAndDoesNotFail(t *testing.T) {
+	var out bytes.Buffer
+
+	r := clidrivermock.NewMockReconciler(t)
+	r.EXPECT().Apply(mock.Anything, mock.Anything, mock.Anything).Return(reconcilecontroller.Report{
+		Superseded: true,
+		Actions: []string{
+			"converged file golden-go/.github/workflows/notify.yaml",
+			"committed and pushed golden-go @ 3f1c9a2b4d5e to main",
+		},
+	}, nil).Once()
+
+	err := clidriver.New(&out, r).Run(context.Background(), []string{"apply", "--config", write(t, minimal)})
+	require.NoError(t, err)
+
+	text := out.String()
+	require.Contains(t, text, "reconcile changed this pipeline's own resources and settled them")
+	require.Contains(t, text, "superseded by the run those changes trigger")
+	require.Contains(t, text, "converged file golden-go/.github/workflows/notify.yaml")
+	require.Contains(t, text, "committed and pushed golden-go @ 3f1c9a2b4d5e to main")
+	require.NotContains(t, text, "revision ",
+		"no revision was resolved, so printing an empty one would read as a bug")
+}
+
 func TestApplyFailsWhenThePipelineDidNotAdvance(t *testing.T) {
 	var out bytes.Buffer
 

@@ -39,7 +39,8 @@ func TestAWaveIsBackgroundedAndWaitedFor(t *testing.T) {
 	script, err := scriptFor(citypes.RunInput{
 		Revision: "abc",
 		Repos: []citypes.RepoCheckout{
-			{Name: "one"}, {Name: "two"},
+			{Name: "one"},
+			{Name: "two"},
 			{Name: "last", Needs: []string{"one", "two"}},
 		},
 		Targets: []citypes.Target{{
@@ -65,7 +66,8 @@ func TestAWaveQuotesEveryDir(t *testing.T) {
 	script, err := scriptFor(citypes.RunInput{
 		Revision: "abc",
 		Repos: []citypes.RepoCheckout{
-			{Name: "a b"}, {Name: "c"},
+			{Name: "a b"},
+			{Name: "c"},
 			{Name: "last", Needs: []string{"a b", "c"}},
 		},
 		Targets: []citypes.Target{{

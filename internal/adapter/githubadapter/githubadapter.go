@@ -28,9 +28,16 @@ type API interface {
 	// PublicKey answers the repo's Actions public key: its id and the
 	// base64 key material a secret is sealed against.
 	PublicKey(ctx context.Context, repo string) (keyID, keyB64 string, err error)
+	// SecretExists answers whether the repo carries the secret. GitHub
+	// returns the secret's metadata and never its value, so existence is
+	// the only actual state a caller can read back. Absent is not an error.
+	SecretExists(ctx context.Context, repo, name string) (bool, error)
 	// PutSecret writes one sealed Actions secret. The API is write-only:
 	// a PUT is convergence, and GitHub never returns the value.
 	PutSecret(ctx context.Context, repo, name, keyID, sealedB64 string) error
+	// WorkflowState answers the workflow's state, which is "active" once it
+	// is enabled. ErrNotFound means the remote has never seen the file.
+	WorkflowState(ctx context.Context, repo, workflowFile string) (string, error)
 	// EnableWorkflow enables a workflow by file name.
 	EnableWorkflow(ctx context.Context, repo, workflowFile string) error
 	// Dispatch fires a workflow_dispatch. GitHub answers 204 with no run
@@ -137,6 +144,19 @@ func (c *Client) PublicKey(ctx context.Context, repo string) (string, string, er
 	return out.KeyID, out.Key, nil
 }
 
+func (c *Client) SecretExists(ctx context.Context, repo, name string) (bool, error) {
+	err := c.do(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/actions/secrets/%s", repo, name), nil, nil)
+	if errors.Is(err, ErrNotFound) {
+		return false, nil
+	}
+
+	if err != nil {
+		return false, fmt.Errorf("reading whether secret %q exists on %q: %w", name, repo, err)
+	}
+
+	return true, nil
+}
+
 func (c *Client) PutSecret(ctx context.Context, repo, name, keyID, sealedB64 string) error {
 	in := map[string]string{"encrypted_value": sealedB64, "key_id": keyID}
 
@@ -146,6 +166,23 @@ func (c *Client) PutSecret(ctx context.Context, repo, name, keyID, sealedB64 str
 	}
 
 	return nil
+}
+
+// StateActive is the state GitHub reports for a workflow that is enabled.
+const StateActive = "active"
+
+func (c *Client) WorkflowState(ctx context.Context, repo, workflowFile string) (string, error) {
+	var out struct {
+		State string `json:"state"`
+	}
+
+	err := c.do(ctx, http.MethodGet,
+		fmt.Sprintf("/repos/%s/actions/workflows/%s", repo, workflowFile), nil, &out)
+	if err != nil {
+		return "", fmt.Errorf("reading the state of workflow %q on %q: %w", workflowFile, repo, err)
+	}
+
+	return out.State, nil
 }
 
 func (c *Client) EnableWorkflow(ctx context.Context, repo, workflowFile string) error {

@@ -361,18 +361,23 @@ var (
 // resource ids it was told to. It exists so a test can decide which resource
 // breaks and then assert on what happened to the ones after it.
 type countingRealizer struct {
-	seen []string
-	fail map[string]error
+	seen    []string
+	fail    map[string]error
+	changes bool
 }
 
 func (countingRealizer) Kind() string { return "counting" }
 
-func (c *countingRealizer) Realize(res citypes.Resource) (string, error) {
+func (c *countingRealizer) Realize(res citypes.Resource) (managercontroller.Action, error) {
 	c.seen = append(c.seen, res.Name)
 
 	if err, ok := c.fail[res.ID()]; ok {
-		return "", err
+		return managercontroller.Action{}, err
 	}
 
-	return "realized " + res.ID(), nil
+	if c.changes {
+		return managercontroller.Did("realized " + res.ID()), nil
+	}
+
+	return managercontroller.Kept("realized " + res.ID()), nil
 }

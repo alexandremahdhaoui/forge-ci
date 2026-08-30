@@ -19,19 +19,35 @@ notes: 'It knows three kinds. `file-content` converges a file on the local
 
   checkout to the declared content - drift included, unlike the local manager''s
 
-  `file`, which keeps what exists; the pipeline''s own push delivers it to the
+  `file`, which keeps what exists. `actions-secret` seals the value of the named
 
-  remote. `actions-secret` seals the value of the named environment variable
+  environment variable (default GITHUB_TOKEN) against the repo key and puts it -
 
-  (default GITHUB_TOKEN) against the repo key and puts it every reconcile - the
+  the secrets API is write-only, so the put is the convergence, and existence is
 
-  secrets API is write-only, so the put is the convergence. `workflow-enabled`
+  the only state it can read back. `workflow-enabled` enables a workflow by file
 
-  enables a workflow by file name; a workflow not yet on the remote reports
+  name; a workflow not yet on the remote reports pending instead of failing, and
 
-  pending instead of failing, and the reconcile after the first push completes
+  the reconcile after the first push completes it.
 
-  it.
+
+  A reconcile that changed anything answers `changed: true`, and it makes the
+
+  change durable before it answers: the converged files are committed and pushed
+
+  on the branch each checkout is on, staging only the paths that changed. A
+
+  checkout with no origin or a detached HEAD is committed and not pushed, and
+
+  says so. A caller stops the run on `changed`, because the tree it was about to
+
+  measure is the tree this reconcile just rewrote.
+
+
+  A bootstrap converges and never commits. It is run by an operator who is about
+
+  to look at what it wrote, and it runs no stages, so there is nothing to stop.
 
 
   There is no delete path: a resource dropped from a spec stays as it is,

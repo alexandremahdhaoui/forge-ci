@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/fsadapter"
+	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/gitadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/githubadapter"
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 )
@@ -36,6 +37,7 @@ type GitHubRealizer struct {
 	ctx  context.Context
 	fs   fsadapter.FS
 	api  githubadapter.API
+	git  gitadapter.Git
 	root string
 }
 
@@ -45,8 +47,15 @@ var _ Realizer = GitHubRealizer{}
 // call of one reconcile; root is the pipeline root a relative file name
 // resolves against, so realization lands in the same place wherever
 // forge-ci was started from. Empty means the working directory.
-func NewGitHubRealizer(ctx context.Context, fs fsadapter.FS, api githubadapter.API, root string) GitHubRealizer {
-	return GitHubRealizer{ctx: ctx, fs: fs, api: api, root: root}
+//
+// git is how this manager makes a converged file durable, which is what
+// Settle does. A nil one settles nothing and still reports what changed:
+// the run stops either way, and a manager that cannot push is a manager
+// whose operator commits by hand, not a broken one.
+func NewGitHubRealizer(
+	ctx context.Context, fs fsadapter.FS, api githubadapter.API, git gitadapter.Git, root string,
+) GitHubRealizer {
+	return GitHubRealizer{ctx: ctx, fs: fs, api: api, git: git, root: root}
 }
 
 // Kind names the realizer.
@@ -55,7 +64,7 @@ func (GitHubRealizer) Kind() string {
 }
 
 // Realize converges one resource.
-func (r GitHubRealizer) Realize(res citypes.Resource) (string, error) {
+func (r GitHubRealizer) Realize(res citypes.Resource) (Action, error) {
 	switch res.Kind {
 	case KindFileContent:
 		return r.realizeFile(res)
@@ -64,7 +73,7 @@ func (r GitHubRealizer) Realize(res citypes.Resource) (string, error) {
 	case KindWorkflowEnabled:
 		return r.realizeEnable(res)
 	default:
-		return "", fmt.Errorf("the github manager cannot realize kind %q, it knows %s, %s and %s",
+		return Action{}, fmt.Errorf("the github manager cannot realize kind %q, it knows %s, %s and %s",
 			res.Kind, KindFileContent, KindActionsSecret, KindWorkflowEnabled)
 	}
 }
@@ -72,10 +81,10 @@ func (r GitHubRealizer) Realize(res citypes.Resource) (string, error) {
 // realizeFile writes the declared content when the file is missing or
 // differs, and keeps it when it already matches. The pipeline's own push
 // delivers the file to the remote; this manager converges the checkout.
-func (r GitHubRealizer) realizeFile(res citypes.Resource) (string, error) {
+func (r GitHubRealizer) realizeFile(res citypes.Resource) (Action, error) {
 	want, _ := res.Spec["content"].(string)
 	if want == "" {
-		return "", errors.New("spec.content is required")
+		return Action{}, errors.New("spec.content is required")
 	}
 
 	path := res.Name
@@ -85,32 +94,38 @@ func (r GitHubRealizer) realizeFile(res citypes.Resource) (string, error) {
 
 	have, err := r.fs.ReadFile(path)
 	if err == nil && string(have) == want {
-		return "kept file " + res.Name, nil
+		return Kept("kept file " + res.Name), nil
 	}
 
 	if dir := filepath.Dir(path); dir != "." {
 		if err := r.fs.MkdirAll(dir); err != nil {
-			return "", err
+			return Action{}, err
 		}
 	}
 
 	if err := r.fs.WriteFile(path, []byte(want)); err != nil {
-		return "", err
+		return Action{}, err
 	}
 
-	return "converged file " + res.Name, nil
+	return Did("converged file " + res.Name), nil
 }
 
 // realizeSecret seals the value from the named environment variable
 // against the repo key and puts it. An empty source variable is an error:
 // a bootstrap that silently writes an empty secret looks green and fails
 // at the first workflow run.
-func (r GitHubRealizer) realizeSecret(res citypes.Resource) (string, error) {
+//
+// The secrets API never returns a value, so existence is the only actual
+// state there is to read back, and it is what decides whether this changed
+// anything. A put over a secret that already existed is a rotation: it moves
+// nothing in any checkout, so it does not stop the run. A secret that did
+// not exist is a change, and it does.
+func (r GitHubRealizer) realizeSecret(res citypes.Resource) (Action, error) {
 	repo, _ := res.Spec["repo"].(string)
 	secret, _ := res.Spec["secret"].(string)
 
 	if repo == "" || secret == "" {
-		return "", errors.New("spec.repo and spec.secret are required")
+		return Action{}, errors.New("spec.repo and spec.secret are required")
 	}
 
 	fromEnv, _ := res.Spec["fromEnv"].(string)
@@ -120,42 +135,59 @@ func (r GitHubRealizer) realizeSecret(res citypes.Resource) (string, error) {
 
 	value := os.Getenv(fromEnv)
 	if value == "" {
-		return "", fmt.Errorf("environment variable %s is empty; export it (.envrc) before bootstrapping", fromEnv)
+		return Action{}, fmt.Errorf(
+			"environment variable %s is empty; export it (.envrc) before bootstrapping", fromEnv)
+	}
+
+	existed, err := r.api.SecretExists(r.ctx, repo, secret)
+	if err != nil {
+		return Action{}, explainSecretsDenial(err)
 	}
 
 	keyID, keyB64, err := r.api.PublicKey(r.ctx, repo)
 	if err != nil {
-		// The one failure worth naming. GitHub excludes a workflow run's own
-		// injected token from the secrets API entirely - no permissions:
-		// block grants it, on purpose, so a workflow cannot use its own
-		// token to rewrite or read back the secrets it runs under. The
-		// token variable defaults to GITHUB_TOKEN, which means an operator's
-		// PAT on a laptop and that excluded token in a runner, so the same
-		// spec works in one place and 403s in the other. Three CI runs went
-		// into reading that message as a permissions problem.
-		if strings.Contains(err.Error(), "403") {
-			return "", fmt.Errorf(
-				"%w: a run's own GITHUB_TOKEN can never manage repository secrets, "+
-					"whatever permissions: says. Point this manager at a PAT with "+
-					"spec.tokenEnv on the manager; it defaults to GITHUB_TOKEN, "+
-					"which is an operator's PAT on a laptop and the excluded token "+
-					"in a runner",
-				err)
-		}
-
-		return "", err
+		return Action{}, explainSecretsDenial(err)
 	}
 
 	sealed, err := githubadapter.Seal(keyB64, value)
 	if err != nil {
-		return "", err
+		return Action{}, err
 	}
 
 	if err := r.api.PutSecret(r.ctx, repo, secret, keyID, sealed); err != nil {
-		return "", err
+		return Action{}, err
 	}
 
-	return fmt.Sprintf("sealed secret %s on %s from $%s", secret, repo, fromEnv), nil
+	text := fmt.Sprintf("sealed secret %s on %s from $%s", secret, repo, fromEnv)
+	if existed {
+		return Kept(text + " (it already existed)"), nil
+	}
+
+	return Did(text), nil
+}
+
+// explainSecretsDenial names the one failure of the secrets API worth
+// naming, and it wraps every call to that API rather than one of them.
+//
+// GitHub excludes a workflow run's own injected token from the secrets API
+// entirely - no permissions: block grants it, on purpose, so a workflow
+// cannot use its own token to rewrite or read back the secrets it runs
+// under. The token variable defaults to GITHUB_TOKEN, which means an
+// operator's PAT on a laptop and that excluded token in a runner, so the
+// same spec works in one place and 403s in the other. Three CI runs went
+// into reading that message as a permissions problem.
+func explainSecretsDenial(err error) error {
+	if !strings.Contains(err.Error(), "403") {
+		return err
+	}
+
+	return fmt.Errorf(
+		"%w: a run's own GITHUB_TOKEN can never manage repository secrets, "+
+			"whatever permissions: says. Point this manager at a PAT with "+
+			"spec.tokenEnv on the manager; it defaults to GITHUB_TOKEN, "+
+			"which is an operator's PAT on a laptop and the excluded token "+
+			"in a runner",
+		err)
 }
 
 // realizeEnable enables the workflow by file name. A file the pipeline has
@@ -168,22 +200,39 @@ func (r GitHubRealizer) realizeSecret(res citypes.Resource) (string, error) {
 // is the answer a first bootstrap actually gets - tolerating only the 404
 // killed the run on its first repo. A real permission denial is 403 as well
 // and stays fatal; the adapter separates them.
-func (r GitHubRealizer) realizeEnable(res citypes.Resource) (string, error) {
+func (r GitHubRealizer) realizeEnable(res citypes.Resource) (Action, error) {
 	repo, _ := res.Spec["repo"].(string)
 	workflow, _ := res.Spec["workflow"].(string)
 
 	if repo == "" || workflow == "" {
-		return "", errors.New("spec.repo and spec.workflow are required")
+		return Action{}, errors.New("spec.repo and spec.workflow are required")
 	}
 
-	err := r.api.EnableWorkflow(r.ctx, repo, workflow)
+	// The state is read first, and it is not an optimisation. Enabling a
+	// workflow that is already enabled succeeds, so a realizer that always
+	// enabled would report a change on every single run, and a run that
+	// reports a change stops. The pipeline would never reach a stage again.
+	state, err := r.api.WorkflowState(r.ctx, repo, workflow)
+	if err == nil && state == githubadapter.StateActive {
+		return Kept(fmt.Sprintf("workflow %s already enabled on %s", workflow, repo)), nil
+	}
+
+	if err != nil && !errors.Is(err, githubadapter.ErrNotFound) {
+		return Action{}, err
+	}
+
+	err = r.api.EnableWorkflow(r.ctx, repo, workflow)
 	if errors.Is(err, githubadapter.ErrNotFound) || errors.Is(err, githubadapter.ErrInactive) {
-		return fmt.Sprintf("workflow %s not on the remote yet; enabled on a later reconcile", workflow), nil
+		// Nothing was enabled, so nothing changed. The file that will make
+		// this succeed is the one the file-content resource just wrote, and
+		// that resource is what stops the run.
+		return Kept(fmt.Sprintf(
+			"workflow %s not on the remote yet; enabled on a later reconcile", workflow)), nil
 	}
 
 	if err != nil {
-		return "", err
+		return Action{}, err
 	}
 
-	return fmt.Sprintf("enabled workflow %s on %s", workflow, repo), nil
+	return Did(fmt.Sprintf("enabled workflow %s on %s", workflow, repo)), nil
 }

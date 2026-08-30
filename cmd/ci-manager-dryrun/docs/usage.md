@@ -38,3 +38,6 @@ engines:
 
 It realizes nothing, so it accepts any kind. It still refuses when a resource is
 owned by a different manager, because that check lives in the controller.
+
+It never answers `changed`. Nothing moved, so a run that would have been
+stopped by a real manager continues here, which is the point of a dry run.

@@ -100,6 +100,72 @@ func (_c *MockGit_Add_Call) RunAndReturn(run func(ctx context.Context, dir strin
 	return _c
 }
 
+// Branch provides a mock function for the type MockGit
+func (_mock *MockGit) Branch(ctx context.Context, dir string) (string, error) {
+	ret := _mock.Called(ctx, dir)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Branch")
+	}
+
+	var r0 string
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (string, error)); ok {
+		return returnFunc(ctx, dir)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) string); ok {
+		r0 = returnFunc(ctx, dir)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = returnFunc(ctx, dir)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockGit_Branch_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Branch'
+type MockGit_Branch_Call struct {
+	*mock.Call
+}
+
+// Branch is a helper method to define mock.On call
+//   - ctx context.Context
+//   - dir string
+func (_e *MockGit_Expecter) Branch(ctx any, dir any) *MockGit_Branch_Call {
+	return &MockGit_Branch_Call{Call: _e.mock.On("Branch", ctx, dir)}
+}
+
+func (_c *MockGit_Branch_Call) Run(run func(ctx context.Context, dir string)) *MockGit_Branch_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockGit_Branch_Call) Return(s string, err error) *MockGit_Branch_Call {
+	_c.Call.Return(s, err)
+	return _c
+}
+
+func (_c *MockGit_Branch_Call) RunAndReturn(run func(ctx context.Context, dir string) (string, error)) *MockGit_Branch_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Clone provides a mock function for the type MockGit
 func (_mock *MockGit) Clone(ctx context.Context, url string, dir string) error {
 	ret := _mock.Called(ctx, url, dir)
@@ -222,6 +288,72 @@ func (_c *MockGit_Commit_Call) Return(err error) *MockGit_Commit_Call {
 }
 
 func (_c *MockGit_Commit_Call) RunAndReturn(run func(ctx context.Context, dir string, message string) error) *MockGit_Commit_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// HasRemote provides a mock function for the type MockGit
+func (_mock *MockGit) HasRemote(ctx context.Context, dir string) (bool, error) {
+	ret := _mock.Called(ctx, dir)
+
+	if len(ret) == 0 {
+		panic("no return value specified for HasRemote")
+	}
+
+	var r0 bool
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (bool, error)); ok {
+		return returnFunc(ctx, dir)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) bool); ok {
+		r0 = returnFunc(ctx, dir)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = returnFunc(ctx, dir)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockGit_HasRemote_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'HasRemote'
+type MockGit_HasRemote_Call struct {
+	*mock.Call
+}
+
+// HasRemote is a helper method to define mock.On call
+//   - ctx context.Context
+//   - dir string
+func (_e *MockGit_Expecter) HasRemote(ctx any, dir any) *MockGit_HasRemote_Call {
+	return &MockGit_HasRemote_Call{Call: _e.mock.On("HasRemote", ctx, dir)}
+}
+
+func (_c *MockGit_HasRemote_Call) Run(run func(ctx context.Context, dir string)) *MockGit_HasRemote_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockGit_HasRemote_Call) Return(b bool, err error) *MockGit_HasRemote_Call {
+	_c.Call.Return(b, err)
+	return _c
+}
+
+func (_c *MockGit_HasRemote_Call) RunAndReturn(run func(ctx context.Context, dir string) (bool, error)) *MockGit_HasRemote_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -483,6 +615,69 @@ func (_c *MockGit_LatestTag_Call) Return(s string, err error) *MockGit_LatestTag
 }
 
 func (_c *MockGit_LatestTag_Call) RunAndReturn(run func(ctx context.Context, dir string, prefix string) (string, error)) *MockGit_LatestTag_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// Push provides a mock function for the type MockGit
+func (_mock *MockGit) Push(ctx context.Context, dir string, branch string) error {
+	ret := _mock.Called(ctx, dir, branch)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Push")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) error); ok {
+		r0 = returnFunc(ctx, dir, branch)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockGit_Push_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Push'
+type MockGit_Push_Call struct {
+	*mock.Call
+}
+
+// Push is a helper method to define mock.On call
+//   - ctx context.Context
+//   - dir string
+//   - branch string
+func (_e *MockGit_Expecter) Push(ctx any, dir any, branch any) *MockGit_Push_Call {
+	return &MockGit_Push_Call{Call: _e.mock.On("Push", ctx, dir, branch)}
+}
+
+func (_c *MockGit_Push_Call) Run(run func(ctx context.Context, dir string, branch string)) *MockGit_Push_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *MockGit_Push_Call) Return(err error) *MockGit_Push_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockGit_Push_Call) RunAndReturn(run func(ctx context.Context, dir string, branch string) error) *MockGit_Push_Call {
 	_c.Call.Return(run)
 	return _c
 }

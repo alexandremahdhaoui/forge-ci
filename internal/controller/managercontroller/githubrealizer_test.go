@@ -26,7 +26,7 @@ func githubRealizer(t *testing.T) (managercontroller.GitHubRealizer, *githubadap
 
 	api := githubadaptermock.NewMockAPI(t)
 
-	return managercontroller.NewGitHubRealizer(t.Context(), fsadapter.New(), api, ""), api
+	return managercontroller.NewGitHubRealizer(t.Context(), fsadapter.New(), api, nil, ""), api
 }
 
 func TestGitHubRealizerConvergesAFile(t *testing.T) {
@@ -39,15 +39,18 @@ func TestGitHubRealizerConvergesAFile(t *testing.T) {
 		Spec: map[string]any{"content": "on: push\n"},
 	}
 
-	// Missing: written.
+	// Missing: written, and that is a change.
 	action, err := r.Realize(res)
 	require.NoError(t, err)
-	assert.Equal(t, "converged file .github/workflows/ci.yaml", action)
+	assert.Equal(t, "converged file .github/workflows/ci.yaml", action.Text)
+	assert.True(t, action.Changed)
 
-	// Equal: kept.
+	// Equal: kept, and nothing changed. This is what lets a second run reach
+	// the stages instead of stopping again.
 	action, err = r.Realize(res)
 	require.NoError(t, err)
-	assert.Equal(t, "kept file .github/workflows/ci.yaml", action)
+	assert.Equal(t, "kept file .github/workflows/ci.yaml", action.Text)
+	assert.False(t, action.Changed)
 
 	// Drifted by hand: converged back. This is the point of the kind.
 	fs := fsadapter.New()
@@ -55,7 +58,8 @@ func TestGitHubRealizerConvergesAFile(t *testing.T) {
 
 	action, err = r.Realize(res)
 	require.NoError(t, err)
-	assert.Equal(t, "converged file .github/workflows/ci.yaml", action)
+	assert.Equal(t, "converged file .github/workflows/ci.yaml", action.Text)
+	assert.True(t, action.Changed)
 
 	got, err := fs.ReadFile(".github/workflows/ci.yaml")
 	require.NoError(t, err)
@@ -66,7 +70,7 @@ func TestGitHubRealizerRefusesAFileWithoutContent(t *testing.T) {
 	t.Parallel()
 
 	api := githubadaptermock.NewMockAPI(t)
-	r := managercontroller.NewGitHubRealizer(t.Context(), fsadapter.New(), api, "")
+	r := managercontroller.NewGitHubRealizer(t.Context(), fsadapter.New(), api, nil, "")
 
 	_, err := r.Realize(citypes.Resource{Kind: managercontroller.KindFileContent, Name: "x"})
 	require.ErrorContains(t, err, "spec.content is required")
@@ -79,6 +83,7 @@ func TestGitHubRealizerSealsASecret(t *testing.T) {
 	t.Setenv("TEST_SECRET_SOURCE", "hunter2")
 
 	r, api := githubRealizer(t)
+	api.EXPECT().SecretExists(mock.Anything, "o/r", "FORGE_CI_GITHUB_TOKEN").Return(false, nil)
 	api.EXPECT().PublicKey(mock.Anything, "o/r").
 		Return("k1", base64.StdEncoding.EncodeToString(pub[:]), nil)
 	api.EXPECT().PutSecret(mock.Anything, "o/r", "FORGE_CI_GITHUB_TOKEN", "k1", mock.Anything).
@@ -99,7 +104,33 @@ func TestGitHubRealizerSealsASecret(t *testing.T) {
 		Spec: map[string]any{"repo": "o/r", "secret": "FORGE_CI_GITHUB_TOKEN", "fromEnv": "TEST_SECRET_SOURCE"},
 	})
 	require.NoError(t, err)
-	assert.Equal(t, "sealed secret FORGE_CI_GITHUB_TOKEN on o/r from $TEST_SECRET_SOURCE", action)
+	assert.Equal(t, "sealed secret FORGE_CI_GITHUB_TOKEN on o/r from $TEST_SECRET_SOURCE", action.Text)
+	assert.True(t, action.Changed, "the secret did not exist, so this created one")
+}
+
+// Rotating a secret that already exists is not a change worth stopping for.
+// The API never returns a value, so existence is the only state there is to
+// read back, and nothing in any checkout moved.
+func TestGitHubRealizerRotatingAnExistingSecretIsNotAChange(t *testing.T) {
+	pub, _, err := box.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	t.Setenv("ROTATION_SOURCE", "new-value")
+
+	r, api := githubRealizer(t)
+	api.EXPECT().SecretExists(mock.Anything, "o/r", "S").Return(true, nil)
+	api.EXPECT().PublicKey(mock.Anything, "o/r").
+		Return("k1", base64.StdEncoding.EncodeToString(pub[:]), nil)
+	api.EXPECT().PutSecret(mock.Anything, "o/r", "S", "k1", mock.Anything).Return(nil)
+
+	action, err := r.Realize(citypes.Resource{
+		Kind: managercontroller.KindActionsSecret,
+		Name: "o/r/S",
+		Spec: map[string]any{"repo": "o/r", "secret": "S", "fromEnv": "ROTATION_SOURCE"},
+	})
+	require.NoError(t, err)
+	assert.False(t, action.Changed)
+	assert.Contains(t, action.Text, "it already existed")
 }
 
 func TestGitHubRealizerRefusesAnEmptySecretSource(t *testing.T) {
@@ -122,6 +153,7 @@ func TestGitHubRealizerSecretDefaultsToGithubToken(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "pat")
 
 	r, api := githubRealizer(t)
+	api.EXPECT().SecretExists(mock.Anything, "o/r", "S").Return(false, nil)
 	api.EXPECT().PublicKey(mock.Anything, "o/r").
 		Return("k1", base64.StdEncoding.EncodeToString(pub[:]), nil)
 	api.EXPECT().PutSecret(mock.Anything, "o/r", "S", "k1", mock.Anything).Return(nil)
@@ -132,13 +164,15 @@ func TestGitHubRealizerSecretDefaultsToGithubToken(t *testing.T) {
 		Spec: map[string]any{"repo": "o/r", "secret": "S"},
 	})
 	require.NoError(t, err)
-	assert.Contains(t, action, "from $GITHUB_TOKEN")
+	assert.Contains(t, action.Text, "from $GITHUB_TOKEN")
 }
 
 func TestGitHubRealizerEnablesAWorkflow(t *testing.T) {
 	t.Parallel()
 
 	r, api := githubRealizer(t)
+	api.EXPECT().WorkflowState(mock.Anything, "o/r", "intake.yaml").
+		Return("disabled_manually", nil)
 	api.EXPECT().EnableWorkflow(mock.Anything, "o/r", "intake.yaml").Return(nil)
 
 	action, err := r.Realize(citypes.Resource{
@@ -147,7 +181,29 @@ func TestGitHubRealizerEnablesAWorkflow(t *testing.T) {
 		Spec: map[string]any{"repo": "o/r", "workflow": "intake.yaml"},
 	})
 	require.NoError(t, err)
-	assert.Equal(t, "enabled workflow intake.yaml on o/r", action)
+	assert.Equal(t, "enabled workflow intake.yaml on o/r", action.Text)
+	assert.True(t, action.Changed)
+}
+
+// Enabling a workflow that is already enabled succeeds, so a realizer that
+// always enabled would report a change on every run - and a run that reports
+// a change stops. The pipeline would never reach a stage again. The state is
+// read first for exactly that reason.
+func TestGitHubRealizerDoesNotEnableAWorkflowThatIsAlreadyActive(t *testing.T) {
+	t.Parallel()
+
+	r, api := githubRealizer(t)
+	api.EXPECT().WorkflowState(mock.Anything, "o/r", "intake.yaml").
+		Return(githubadapter.StateActive, nil)
+
+	action, err := r.Realize(citypes.Resource{
+		Kind: managercontroller.KindWorkflowEnabled,
+		Name: "o/r/intake.yaml",
+		Spec: map[string]any{"repo": "o/r", "workflow": "intake.yaml"},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "workflow intake.yaml already enabled on o/r", action.Text)
+	assert.False(t, action.Changed)
 }
 
 func TestGitHubRealizerEnableIsPendingBeforeTheFirstPush(t *testing.T) {
@@ -157,6 +213,8 @@ func TestGitHubRealizerEnableIsPendingBeforeTheFirstPush(t *testing.T) {
 	// delivered the workflow file, so the enable 404s. That is pending,
 	// not broken: the next reconcile after the push completes it.
 	r, api := githubRealizer(t)
+	api.EXPECT().WorkflowState(mock.Anything, "o/r", "new.yaml").
+		Return("", githubadapter.ErrNotFound)
 	api.EXPECT().EnableWorkflow(mock.Anything, "o/r", "new.yaml").
 		Return(githubadapter.ErrNotFound)
 
@@ -166,7 +224,8 @@ func TestGitHubRealizerEnableIsPendingBeforeTheFirstPush(t *testing.T) {
 		Spec: map[string]any{"repo": "o/r", "workflow": "new.yaml"},
 	})
 	require.NoError(t, err)
-	assert.Contains(t, action, "not on the remote yet")
+	assert.Contains(t, action.Text, "not on the remote yet")
+	assert.False(t, action.Changed, "nothing was enabled, so nothing changed")
 }
 
 func TestGitHubRealizerRefusesAnUnknownKind(t *testing.T) {
@@ -195,7 +254,7 @@ func TestGitHubRealizerResolvesRelativeFilesAgainstTheRoot(t *testing.T) {
 
 	root := t.TempDir()
 	api := githubadaptermock.NewMockAPI(t)
-	r := managercontroller.NewGitHubRealizer(t.Context(), fsadapter.New(), api, root)
+	r := managercontroller.NewGitHubRealizer(t.Context(), fsadapter.New(), api, nil, root)
 
 	// The resource name stays root-relative (that is the ownership id);
 	// realization must land under the root, not under the process cwd.
@@ -220,8 +279,11 @@ func TestGitHubRealizerResolvesRelativeFilesAgainstTheRoot(t *testing.T) {
 func TestA403OnTheSecretsAPINamesTheRealCause(t *testing.T) {
 	r, api := githubRealizer(t)
 
-	api.EXPECT().PublicKey(mock.Anything, "owner/repo").
-		Return("", "", errors.New(`status 403: {"message":"Resource not accessible by integration"}`)).Once()
+	// The denial lands on the first call the realizer makes, which is the
+	// existence read, not the key fetch. Both go through the same
+	// explanation for exactly that reason.
+	api.EXPECT().SecretExists(mock.Anything, "owner/repo", "FORGE_CI_GITHUB_TOKEN").
+		Return(false, errors.New(`status 403: {"message":"Resource not accessible by integration"}`)).Once()
 
 	t.Setenv("A_PAT", "value-to-seal")
 
@@ -243,6 +305,8 @@ func TestGitHubRealizerEnableIsPendingWhenTheWorkflowIsNotActiveYet(t *testing.T
 	t.Parallel()
 
 	r, api := githubRealizer(t)
+	api.EXPECT().WorkflowState(mock.Anything, "o/r", "fresh.yaml").
+		Return("", githubadapter.ErrNotFound)
 	api.EXPECT().EnableWorkflow(mock.Anything, "o/r", "fresh.yaml").
 		Return(fmt.Errorf("%w: not active", githubadapter.ErrInactive))
 
@@ -252,7 +316,8 @@ func TestGitHubRealizerEnableIsPendingWhenTheWorkflowIsNotActiveYet(t *testing.T
 		Spec: map[string]any{"repo": "o/r", "workflow": "fresh.yaml"},
 	})
 	require.NoError(t, err)
-	assert.Contains(t, action, "not on the remote yet")
+	assert.Contains(t, action.Text, "not on the remote yet")
+	assert.False(t, action.Changed)
 }
 
 // A denied token must still stop the run. Tolerating every 403 would turn a
@@ -262,6 +327,8 @@ func TestGitHubRealizerEnableStillFailsOnARealDenial(t *testing.T) {
 	t.Parallel()
 
 	r, api := githubRealizer(t)
+	api.EXPECT().WorkflowState(mock.Anything, "o/r", "denied.yaml").
+		Return("", githubadapter.ErrNotFound)
 	api.EXPECT().EnableWorkflow(mock.Anything, "o/r", "denied.yaml").
 		Return(errors.New("status 403: Resource not accessible by personal access token"))
 

@@ -508,8 +508,10 @@ func TestTheNeedsGraphOrdersDirsOverMCP(t *testing.T) {
 			Repos: []citypes.RepoCheckout{
 				{Name: "first", Path: filepath.Join(dir, "first"), SHA: "a"},
 				{Name: "second", Path: filepath.Join(dir, "second"), SHA: "b"},
-				{Name: "last", Path: filepath.Join(dir, "last"), SHA: "c",
-					Needs: []string{"first", "second"}},
+				{
+					Name: "last", Path: filepath.Join(dir, "last"), SHA: "c",
+					Needs: []string{"first", "second"},
+				},
 			},
 		}, &runOut)
 	require.NoError(t, err)

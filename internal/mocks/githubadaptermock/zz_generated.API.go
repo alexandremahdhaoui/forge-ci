@@ -626,6 +626,78 @@ func (_c *MockAPI_Run_Call) RunAndReturn(run func(ctx context.Context, repo stri
 	return _c
 }
 
+// SecretExists provides a mock function for the type MockAPI
+func (_mock *MockAPI) SecretExists(ctx context.Context, repo string, name string) (bool, error) {
+	ret := _mock.Called(ctx, repo, name)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SecretExists")
+	}
+
+	var r0 bool
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) (bool, error)); ok {
+		return returnFunc(ctx, repo, name)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) bool); ok {
+		r0 = returnFunc(ctx, repo, name)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string) error); ok {
+		r1 = returnFunc(ctx, repo, name)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockAPI_SecretExists_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SecretExists'
+type MockAPI_SecretExists_Call struct {
+	*mock.Call
+}
+
+// SecretExists is a helper method to define mock.On call
+//   - ctx context.Context
+//   - repo string
+//   - name string
+func (_e *MockAPI_Expecter) SecretExists(ctx any, repo any, name any) *MockAPI_SecretExists_Call {
+	return &MockAPI_SecretExists_Call{Call: _e.mock.On("SecretExists", ctx, repo, name)}
+}
+
+func (_c *MockAPI_SecretExists_Call) Run(run func(ctx context.Context, repo string, name string)) *MockAPI_SecretExists_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *MockAPI_SecretExists_Call) Return(b bool, err error) *MockAPI_SecretExists_Call {
+	_c.Call.Return(b, err)
+	return _c
+}
+
+func (_c *MockAPI_SecretExists_Call) RunAndReturn(run func(ctx context.Context, repo string, name string) (bool, error)) *MockAPI_SecretExists_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // UploadAsset provides a mock function for the type MockAPI
 func (_mock *MockAPI) UploadAsset(ctx context.Context, uploadURL string, file string) error {
 	ret := _mock.Called(ctx, uploadURL, file)
@@ -685,6 +757,78 @@ func (_c *MockAPI_UploadAsset_Call) Return(err error) *MockAPI_UploadAsset_Call 
 }
 
 func (_c *MockAPI_UploadAsset_Call) RunAndReturn(run func(ctx context.Context, uploadURL string, file string) error) *MockAPI_UploadAsset_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// WorkflowState provides a mock function for the type MockAPI
+func (_mock *MockAPI) WorkflowState(ctx context.Context, repo string, workflowFile string) (string, error) {
+	ret := _mock.Called(ctx, repo, workflowFile)
+
+	if len(ret) == 0 {
+		panic("no return value specified for WorkflowState")
+	}
+
+	var r0 string
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) (string, error)); ok {
+		return returnFunc(ctx, repo, workflowFile)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) string); ok {
+		r0 = returnFunc(ctx, repo, workflowFile)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string) error); ok {
+		r1 = returnFunc(ctx, repo, workflowFile)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockAPI_WorkflowState_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'WorkflowState'
+type MockAPI_WorkflowState_Call struct {
+	*mock.Call
+}
+
+// WorkflowState is a helper method to define mock.On call
+//   - ctx context.Context
+//   - repo string
+//   - workflowFile string
+func (_e *MockAPI_Expecter) WorkflowState(ctx any, repo any, workflowFile any) *MockAPI_WorkflowState_Call {
+	return &MockAPI_WorkflowState_Call{Call: _e.mock.On("WorkflowState", ctx, repo, workflowFile)}
+}
+
+func (_c *MockAPI_WorkflowState_Call) Run(run func(ctx context.Context, repo string, workflowFile string)) *MockAPI_WorkflowState_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *MockAPI_WorkflowState_Call) Return(s string, err error) *MockAPI_WorkflowState_Call {
+	_c.Call.Return(s, err)
+	return _c
+}
+
+func (_c *MockAPI_WorkflowState_Call) RunAndReturn(run func(ctx context.Context, repo string, workflowFile string) (string, error)) *MockAPI_WorkflowState_Call {
 	_c.Call.Return(run)
 	return _c
 }

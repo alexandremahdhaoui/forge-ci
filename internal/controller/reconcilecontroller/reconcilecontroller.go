@@ -68,8 +68,21 @@ type Report struct {
 
 	// Released is where each release landed, one per stage that declared one.
 	Released []citypes.ArtifactOutput `json:"released,omitempty"`
+
+	// Superseded says a manager found drift in the pipeline's own resources,
+	// corrected it, and made the correction durable. Nothing ran after that.
+	//
+	// This is not a failure. The run was measuring a tree that the reconcile
+	// it just performed had rewritten, so continuing would prove the wrong
+	// thing: the revision would carry the pipeline's own uncommitted output
+	// and the release would refuse it. The change is already durable, so the
+	// run it triggers reads the corrected state and reconciles to no change.
+	Superseded bool `json:"superseded,omitempty"`
 }
 
+// Advanced reports whether anything blocked. A superseded report did not
+// block: no stage failed, no gate refused, and the run that follows is the
+// one carrying the work.
 func (r Report) Advanced() bool {
 	for _, s := range r.Stages {
 		if !s.Advance {
@@ -101,9 +114,27 @@ func (c *Controller) Apply(ctx context.Context, p config.Pipeline, root string) 
 
 	// false: an apply converges what can be converged and leaves credentials
 	// alone. Only a bootstrap is responsible for those.
-	actions, err := c.reconcileResources(ctx, p, index, root, false)
+	actions, changed, err := c.reconcileResources(ctx, p, index, root, false)
 	if err != nil {
 		return Report{}, err
+	}
+
+	// A reconcile that changed something ends the run here, before the
+	// revision is resolved.
+	//
+	// The reconcile above writes into the member checkouts, and the revision
+	// below hashes each member's HEAD plus its uncommitted changes. Resolving
+	// after converging measures the tree this run just rewrote: the revision
+	// comes out dirty, the release refuses it, and every run repeats that
+	// forever because a fresh clone starts from the same drift. Live run
+	// 33309087584 died exactly this way.
+	//
+	// So the reconcile is complete - every resource, never one per run - and
+	// the manager has already made its changes durable. The run those changes
+	// trigger starts from the corrected state, finds no drift, and does the
+	// work.
+	if changed {
+		return Report{Actions: actions, Superseded: true}, nil
 	}
 
 	// The revision is resolved here because a run record is keyed by it. It is
@@ -525,10 +556,10 @@ func (c *Controller) reconcileResources(
 	index engineIndex,
 	root string,
 	bootstrap bool,
-) ([]string, error) {
+) ([]string, bool, error) {
 	owned, err := c.readOwnership(ctx, index)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	byManager := map[string][]citypes.Resource{}
@@ -538,7 +569,7 @@ func (c *Controller) reconcileResources(
 
 		if err := c.caller.Call(ctx, engine.Engine, ToolDeclare,
 			map[string]any{"spec": orEmpty(engine.Spec)}, &declared); err != nil {
-			return nil, fmt.Errorf("asking engine %q what it needs: %w", engine.Alias, err)
+			return nil, false, fmt.Errorf("asking engine %q what it needs: %w", engine.Alias, err)
 		}
 
 		// Everything declared is handed over, bootstrapOnly included. The
@@ -556,16 +587,21 @@ func (c *Controller) reconcileResources(
 	sort.Strings(aliases)
 
 	actions := []string{}
+	changed := false
 	merged := map[string]citypes.Ownership{}
 
 	for _, o := range owned {
 		merged[o.Resource] = o
 	}
 
+	// Every manager is reconciled, and a manager that reported a change does
+	// not cut the loop short. Converging one resource per run would need one
+	// run per resource: a pipeline declaring a thousand resources would take
+	// a thousand runs to update, each one reporting the same thing.
 	for _, alias := range aliases {
 		manager, err := index.manager(alias)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 
 		var out citypes.ReconcileOutput
@@ -583,10 +619,14 @@ func (c *Controller) reconcileResources(
 			Bootstrap: bootstrap,
 			Spec:      spec,
 		}, &out); err != nil {
-			return nil, fmt.Errorf("manager %q: %w", alias, err)
+			return nil, false, fmt.Errorf("manager %q: %w", alias, err)
 		}
 
 		actions = append(actions, out.Actions...)
+
+		if out.Changed {
+			changed = true
+		}
 
 		for _, o := range out.Owned {
 			merged[o.Resource] = o
@@ -594,10 +634,10 @@ func (c *Controller) reconcileResources(
 	}
 
 	if err := c.writeOwnership(ctx, index, merged); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
-	return actions, nil
+	return actions, changed, nil
 }
 
 func (c *Controller) resolveRevision(

@@ -68,6 +68,25 @@ tree dirty, so every apply is a new revision and the loop never settles.
 `TestUntrackedBuildOutputNeverSettles` pins that, and it is a real footgun for a
 repo that does not ignore its own `.forge/`.
 
+**A reconcile that changed something must stop the run.** The reconcile writes
+generated files into the member checkouts and the revision hashes each member's
+HEAD plus its uncommitted changes, so continuing measures the tree the run just
+rewrote: the revision comes out `-dirty` and the release refuses it, forever,
+because a fresh clone starts from the same drift. Run 33309087584 died that way.
+
+So a realizer answers `Action{Text, Changed}` and must be honest about the
+difference between converging a resource and finding it already correct. Two
+shapes get this wrong in a way that reads as working code: enabling a workflow
+that is already enabled succeeds, and putting a write-only secret always
+succeeds. Both would report a change on every run, and a run that reports a
+change stops, so the pipeline would never reach a stage again. Read the actual
+state first. Where nothing can be read, existence is the state.
+
+The manager settles, not the core. What durable means belongs to the world a
+manager talks to, and the core learns one bool. Only the paths that changed may
+be staged: `git add -A` in a reconcile publishes a human's half-finished work
+under the pipeline's name.
+
 **A go.work hides an incomplete go.sum until CI.** This repo shipped four tags
 that did not build. `go.sum` held 13 of the 36 lines it needed, and the
 workspace let it borrow the rest from sibling modules. A pristine clone failed

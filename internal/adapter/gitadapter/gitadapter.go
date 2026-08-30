@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -29,7 +30,26 @@ type Git interface {
 	// TagAt answers the commit a tag points at, and whether dir carries the
 	// tag at all.
 	TagAt(ctx context.Context, dir, tag string) (string, bool, error)
+	// HasRemote reports whether dir has an origin to push to. A checkout
+	// with none is a legitimate state, not a failure.
+	HasRemote(ctx context.Context, dir string) (bool, error)
+	// Branch answers the branch HEAD is on. A detached HEAD answers an
+	// empty string, which nothing can push.
+	Branch(ctx context.Context, dir string) (string, error)
+	// Push sends the branch to origin. A rejected push is ErrRejected: the
+	// remote moved, and only a human can decide what wins.
+	Push(ctx context.Context, dir, branch string) error
 }
+
+// ErrNoRemote marks a checkout with no origin. It is not a failure: a
+// workspace on a laptop has one, a scratch fixture does not, and a manager
+// that settles by pushing simply has nowhere to send it.
+var ErrNoRemote = errors.New("the checkout has no origin to push to")
+
+// ErrRejected marks a push the remote refused, which is a remote that moved
+// under this run. Merging is somebody's decision and never the pipeline's,
+// so this is fatal and stays fatal.
+var ErrRejected = errors.New("the remote rejected the push")
 
 type CLI struct {
 	runner execadapter.Runner
@@ -273,6 +293,50 @@ func (g *CLI) Tag(ctx context.Context, dir, tag, sha string) error {
 	_, err = g.run(ctx, dir, "pushing "+tag, "push", "origin", tag)
 
 	return err
+}
+
+func (g *CLI) HasRemote(ctx context.Context, dir string) (bool, error) {
+	res, err := g.runner.Run(ctx, dir, "git", "remote", "get-url", "origin")
+	if err != nil {
+		return false, fmt.Errorf("reading the origin of %s: %w", dir, err)
+	}
+
+	return res.ExitCode == 0 && strings.TrimSpace(res.Stdout) != "", nil
+}
+
+func (g *CLI) Branch(ctx context.Context, dir string) (string, error) {
+	res, err := g.run(ctx, dir, "reading the branch of "+dir, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		return "", err
+	}
+
+	name := strings.TrimSpace(res.Stdout)
+	if name == "HEAD" {
+		// A detached HEAD is what a CI checkout of a tag looks like. There
+		// is no branch to push, and inventing one would put the commit
+		// somewhere nobody asked for.
+		return "", nil
+	}
+
+	return name, nil
+}
+
+func (g *CLI) Push(ctx context.Context, dir, branch string) error {
+	res, err := g.runner.Run(ctx, dir, "git", "push", "origin", "HEAD:"+branch)
+	if err != nil {
+		return fmt.Errorf("pushing %s of %s: %w", branch, dir, err)
+	}
+
+	if res.ExitCode != 0 {
+		out := strings.TrimSpace(res.Stderr)
+		if strings.Contains(out, "rejected") || strings.Contains(out, "non-fast-forward") {
+			return fmt.Errorf("pushing %s of %s: %w: %s", branch, dir, ErrRejected, out)
+		}
+
+		return fmt.Errorf("pushing %s of %s: git exited %d: %s", branch, dir, res.ExitCode, out)
+	}
+
+	return nil
 }
 
 // TagAt answers where a tag points, and whether the repo carries it. A repo

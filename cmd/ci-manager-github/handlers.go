@@ -4,7 +4,9 @@ import (
 	"context"
 	"os"
 
+	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/execadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/fsadapter"
+	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/gitadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/githubadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/managercontroller"
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
@@ -22,7 +24,9 @@ func NewHandlers() Handlers {
 		Reconcile: func(ctx context.Context, in ReconcileInput) (*ReconcileOutput, error) {
 			api := githubadapter.New(nil, baseURL(in.Spec), os.Getenv(tokenEnv(in.Spec)))
 			root, _ := in.Spec["root"].(string)
-			ctrl := managercontroller.New(managercontroller.NewGitHubRealizer(ctx, fs, api, root), fs)
+			git := gitadapter.New(execadapter.New())
+			ctrl := managercontroller.New(
+				managercontroller.NewGitHubRealizer(ctx, fs, api, git, root), fs)
 
 			out, err := ctrl.Reconcile(toReconcileInput(in))
 			if err != nil {
@@ -82,5 +86,5 @@ func fromReconcileOutput(out citypes.ReconcileOutput) *ReconcileOutput {
 		actions = []string{}
 	}
 
-	return &ReconcileOutput{Owned: owned, Actions: actions}
+	return &ReconcileOutput{Owned: owned, Actions: actions, Changed: out.Changed}
 }

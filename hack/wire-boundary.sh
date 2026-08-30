@@ -59,6 +59,30 @@ for dir in cmd/ci-*; do
     done
 done
 
+# The manager engines answer outward, so the mapping runs the other way and
+# the loops above cannot see it. Changed is one bool and it decides whether a
+# run stops: dropped, the pipeline converges its own resources, measures the
+# tree it just rewrote, and mints a dirty revision the release then refuses.
+# That shipped, and it read as a broken release rather than a dropped field.
+for dir in cmd/ci-*; do
+    handlers="$dir/handlers.go"
+    spec="$dir/zz_generated.spec.go"
+
+    [ -f "$handlers" ] && [ -f "$spec" ] || continue
+
+    grep -q 'ReconcileOutput{' "$handlers" || continue
+
+    for field in Changed; do
+        grep -q "	$field bool" "$spec" || continue
+
+        if ! grep -qE "$field: *out\.$field" "$handlers"; then
+            echo "$handlers drops ReconcileOutput.$field: the internal type carries it and the mapping does not copy it." >&2
+            echo "  A missing field here is not a compile error, it is a zero value at runtime." >&2
+            fail=1
+        fi
+    done
+done
+
 if [ "$fail" -eq 0 ]; then
     echo "every engine copies the fields its wire type carries into the internal one"
 fi
