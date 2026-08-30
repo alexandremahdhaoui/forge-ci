@@ -8,6 +8,5 @@ The `spec` block on this engine's entry in `forge-ci.yaml`.
 |---|---|---|---|
 | `path` | string | yes | The state repo. Created and initialised if it is not a repo yet. |
 | `kinds` | list of string | no | Extra record kinds, each stored under a directory of its own name. This engine never learns what a caller stores in them. |
-| `push` | boolean | no | Whether to push the store to its remote after a commit. Off by default. A CI run is a fresh clone, so without it every record it writes dies with the runner - and forge-factory reads a revision record from this repo's remote to pin a remote run's member shas. A store with no origin, or on a detached HEAD, skips the push. A push the remote refuses is rebased onto it once and retried, because each record is a file of its own. |
 
 forge-ci never validates a spec. This engine does, because only it knows what the keys mean.

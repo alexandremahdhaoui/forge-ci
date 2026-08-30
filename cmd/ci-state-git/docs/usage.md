@@ -17,7 +17,7 @@ nothing. It is a normal repo. Read it with `git log`.
 |---|---|
 | `declare` | Report the directories the state repo needs. |
 | `get` | Read one record. |
-| `put` | Write one record and commit it. |
+| `put` | Write one record, commit it, and push it when the store has a remote. |
 | `list` | List the keys under one kind. |
 
 ## By hand
@@ -38,7 +38,6 @@ engines:
     spec:
       path: <string>
       kinds: <list of string>
-      push: <boolean>
 ```
 
 ## Worth knowing

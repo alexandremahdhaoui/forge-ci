@@ -55,7 +55,7 @@ func TestAPushedRecordIsOnTheRemoteWhereForgeFactoryLooksForIt(t *testing.T) {
 
 	_, err := c.Put(t.Context(), citypes.StatePutInput{
 		Kind: "revision", Key: "abc123def456", Payload: `{"id":"abc123def456"}`,
-		Spec: map[string]any{"path": root, "push": true},
+		Spec: map[string]any{"path": root},
 	})
 	require.NoError(t, err)
 
@@ -63,22 +63,6 @@ func TestAPushedRecordIsOnTheRemoteWhereForgeFactoryLooksForIt(t *testing.T) {
 		gitRun(t, remote, "show", "main:revisions/abc123def456.json"),
 		"abc123def456",
 		"a fresh clone must find the record, which is the whole point of a store")
-}
-
-// Off by default, so a pipeline that declared no push behaves exactly as it
-// did before this existed.
-func TestWithoutTheDeclarationNothingIsPushed(t *testing.T) {
-	root, remote, c := store(t)
-
-	_, err := c.Put(t.Context(), citypes.StatePutInput{
-		Kind: "revision", Key: "abc", Payload: `{"id":"abc"}`,
-		Spec: map[string]any{"path": root},
-	})
-	require.NoError(t, err)
-
-	assert.NotContains(t, gitRun(t, root, "status", "--porcelain"), "revisions",
-		"it is committed locally, as it always was")
-	assert.Empty(t, gitRun(t, remote, "log", "--oneline", "-1", "--", "revisions"))
 }
 
 // A remote that moved under this run is not a conflict to resolve by
@@ -99,7 +83,7 @@ func TestAPushTheRemoteRefusedIsRebasedAndRetried(t *testing.T) {
 
 	_, err := c.Put(t.Context(), citypes.StatePutInput{
 		Kind: "revision", Key: "mine", Payload: `{"id":"mine"}`,
-		Spec: map[string]any{"path": root, "push": true},
+		Spec: map[string]any{"path": root},
 	})
 	require.NoError(t, err)
 
@@ -116,7 +100,7 @@ func TestAStoreWithNoRemoteCommitsAndDoesNotFail(t *testing.T) {
 
 	_, err := c.Put(t.Context(), citypes.StatePutInput{
 		Kind: "revision", Key: "abc", Payload: `{"id":"abc"}`,
-		Spec: map[string]any{"path": root, "push": true},
+		Spec: map[string]any{"path": root},
 	})
 	require.NoError(t, err)
 
@@ -131,7 +115,7 @@ func TestAnIdenticalRecordCommitsNothingAndPushesNothing(t *testing.T) {
 
 	in := citypes.StatePutInput{
 		Kind: "revision", Key: "abc", Payload: `{"id":"abc"}`,
-		Spec: map[string]any{"path": root, "push": true},
+		Spec: map[string]any{"path": root},
 	}
 
 	_, err := c.Put(t.Context(), in)

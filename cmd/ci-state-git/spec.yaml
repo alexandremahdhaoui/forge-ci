@@ -11,7 +11,7 @@ tools:
 - name: get
   does: Read one record.
 - name: put
-  does: Write one record and commit it.
+  does: Write one record, commit it, and push it when the store has a remote.
 - name: list
   does: List the keys under one kind.
 example:
@@ -40,12 +40,3 @@ spec:
   required: false
   means: Extra record kinds, each stored under a directory of its own name. This
     engine never learns what a caller stores in them.
-- key: push
-  type: boolean
-  required: false
-  means: Whether to push the store to its remote after a commit. Off by default.
-    A CI run is a fresh clone, so without it every record it writes dies with
-    the runner - and forge-factory reads a revision record from this repo's
-    remote to pin a remote run's member shas. A store with no origin, or on a
-    detached HEAD, skips the push. A push the remote refuses is rebased onto
-    it once and retried, because each record is a file of its own.

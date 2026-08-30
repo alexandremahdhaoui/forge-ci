@@ -148,7 +148,7 @@ func (c *Controller) Put(ctx context.Context, in citypes.StatePutInput) (citypes
 	}
 
 	if committed {
-		if err := c.push(ctx, root, in.Spec); err != nil {
+		if err := c.push(ctx, root); err != nil {
 			return citypes.StateGetOutput{}, fmt.Errorf("recording %s %q: %w", in.Kind, in.Key, err)
 		}
 	}
@@ -166,11 +166,12 @@ func (c *Controller) Put(ctx context.Context, in citypes.StatePutInput) (citypes
 // shas, so the record was never found and every remote run fell back to
 // floating tags with only a log line to say so.
 //
-// Declared, and off by default, so a store nobody declared a push for keeps
-// behaving as it did.
-func (c *Controller) push(ctx context.Context, root string, spec map[string]any) error {
-	want, _ := spec["push"].(bool)
-	if !want || c.git == nil {
+// There is no flag for this. A store that does not persist is not a store,
+// and a knob to turn persistence off is a knob that configures the bug
+// above. The remote is the declaration: a store that has one is pushed, and
+// one that does not is a scratch store and is left alone.
+func (c *Controller) push(ctx context.Context, root string) error {
+	if c.git == nil {
 		return nil
 	}
 

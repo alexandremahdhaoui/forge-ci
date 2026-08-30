@@ -24,11 +24,16 @@ func setup(t *testing.T) (*statecontroller.Controller, *gitadaptermock.MockGit, 
 	return statecontroller.New(fsadapter.New(), git), git, spec
 }
 
+// expectCommit allows the write path a record takes. The push half answers
+// "no remote", which is the scratch store every fixture here is: the real
+// push is proved against real git in push_test.go, because a mock cannot
+// tell whether a record reached a remote.
 func expectCommit(git *gitadaptermock.MockGit, dirty bool) {
 	git.EXPECT().IsRepo(mock1(), mock2()).Return(true, nil).Maybe()
 	git.EXPECT().Add(mock1(), mock2(), mock.Anything).Return(nil).Maybe()
 	git.EXPECT().Staged(mock1(), mock2()).Return(dirty, nil).Maybe()
 	git.EXPECT().Commit(mock1(), mock2(), mock3()).Return(nil).Maybe()
+	git.EXPECT().HasRemote(mock1(), mock2()).Return(false, nil).Maybe()
 }
 
 func TestPutThenGetRoundTrips(t *testing.T) {
@@ -152,6 +157,7 @@ func TestAnEmptyRepoIsInitialised(t *testing.T) {
 	git.EXPECT().Add(mock1(), mock2(), mock.Anything).Return(nil).Once()
 	git.EXPECT().Staged(mock1(), mock2()).Return(true, nil).Once()
 	git.EXPECT().Commit(mock1(), mock2(), "ci: revision abc").Return(nil).Once()
+	git.EXPECT().HasRemote(mock1(), mock2()).Return(false, nil).Once()
 
 	_, err := c.Put(context.Background(), citypes.StatePutInput{
 		Kind: statecontroller.KindRevision, Key: "abc", Payload: `{}`, Spec: spec,
