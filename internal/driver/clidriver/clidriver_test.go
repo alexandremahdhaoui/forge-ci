@@ -154,7 +154,7 @@ func TestPollSaysWhenNothingMoved(t *testing.T) {
 	var out bytes.Buffer
 
 	r := clidrivermock.NewMockReconciler(t)
-	r.EXPECT().Poll(mock.Anything, mock.Anything).Return(citypes.TriggerOutput{}, nil).Once()
+	r.EXPECT().Poll(mock.Anything, mock.Anything, mock.Anything).Return(citypes.TriggerOutput{}, nil).Once()
 
 	err := clidriver.New(&out, r).Run(context.Background(), []string{"poll", "--config", write(t, minimal)})
 	require.NoError(t, err)
@@ -165,7 +165,7 @@ func TestPollSaysWhatMoved(t *testing.T) {
 	var out bytes.Buffer
 
 	r := clidrivermock.NewMockReconciler(t)
-	r.EXPECT().Poll(mock.Anything, mock.Anything).
+	r.EXPECT().Poll(mock.Anything, mock.Anything, mock.Anything).
 		Return(citypes.TriggerOutput{Changed: true, Reason: "on-change: the watched repos moved"}, nil).Once()
 
 	err := clidriver.New(&out, r).Run(context.Background(), []string{"poll", "--config", write(t, minimal)})
@@ -189,7 +189,7 @@ func TestEveryVerbPropagatesAnError(t *testing.T) {
 				r.EXPECT().Status(mock.Anything, mock.Anything, mock.Anything).
 					Return(reconcilecontroller.Report{}, errBoom).Once()
 			case "poll":
-				r.EXPECT().Poll(mock.Anything, mock.Anything).
+				r.EXPECT().Poll(mock.Anything, mock.Anything, mock.Anything).
 					Return(citypes.TriggerOutput{}, errBoom).Once()
 			}
 

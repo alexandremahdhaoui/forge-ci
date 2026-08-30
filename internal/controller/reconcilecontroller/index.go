@@ -16,7 +16,15 @@ type engineIndex struct {
 	stateSpec  map[string]any
 }
 
-func newIndex(p config.Pipeline) engineIndex {
+// newIndex reads the pipeline into lookups, and hands the state engine the
+// pipeline root the same way the manager gets it.
+//
+// Without that the state engine resolved spec.path against the process's
+// working directory while every managed resource resolved against --root, so
+// running from inside a member wrote the state repo one level too deep. The
+// generated CI does exactly that - `cd <member>` then `--root ..` - and the
+// member's own .gitignore then swallowed the records, silently.
+func newIndex(p config.Pipeline, root string) engineIndex {
 	idx := engineIndex{
 		engines:   map[string]config.Engine{},
 		managers:  map[string]config.Manager{},
@@ -44,6 +52,13 @@ func newIndex(p config.Pipeline) engineIndex {
 	}
 
 	idx.stateSpec = orEmpty(idx.stateSpec)
+
+	// An explicit root in the spec wins, so an instance can still say where
+	// its store is. Otherwise the pipeline's own root, which is "." for the
+	// ordinary case and joins to a no-op there.
+	if _, ok := idx.stateSpec["root"]; !ok && root != "" {
+		idx.stateSpec["root"] = root
+	}
 
 	return idx
 }

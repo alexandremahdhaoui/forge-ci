@@ -120,12 +120,12 @@ func TestPollIsChangedTheFirstTimeAndQuietAfter(t *testing.T) {
 
 	c := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock())
 
-	first, err := c.Poll(context.Background(), p)
+	first, err := c.Poll(context.Background(), p, "")
 	require.NoError(t, err)
 	require.True(t, first.Changed)
 	require.Contains(t, first.Reason, "on-change:")
 
-	second, err := c.Poll(context.Background(), p)
+	second, err := c.Poll(context.Background(), p, "")
 	require.NoError(t, err)
 	require.False(t, second.Changed)
 }
@@ -134,7 +134,7 @@ func TestPollWithNoTriggersIsQuiet(t *testing.T) {
 	f := newFakeEngines(t)
 
 	out, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Poll(context.Background(),
-		pipeline(stage("build", substage("default", []string{"build"}))))
+		pipeline(stage("build", substage("default", []string{"build"}))), "")
 	require.NoError(t, err)
 	require.False(t, out.Changed)
 }
@@ -144,7 +144,7 @@ func TestPollReportsAnUnknownTrigger(t *testing.T) {
 	p := pipeline(stage("build", substage("default", []string{"build"})))
 	p.Triggers = []string{"ghost"}
 
-	_, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Poll(context.Background(), p)
+	_, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Poll(context.Background(), p, "")
 	require.ErrorIs(t, err, reconcilecontroller.ErrEngine)
 }
 
@@ -153,7 +153,7 @@ func TestPollReportsAnEngineFailure(t *testing.T) {
 	f.failOn[call{uriTrigger, "poll"}] = errBoom
 
 	_, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Poll(context.Background(),
-		withTrigger(pipeline(stage("build", substage("default", []string{"build"})))))
+		withTrigger(pipeline(stage("build", substage("default", []string{"build"})))), "")
 	require.ErrorIs(t, err, errBoom)
 }
 
@@ -162,7 +162,7 @@ func TestPollReportsAStateFailure(t *testing.T) {
 	f.failOn[call{uriState, "get"}] = errBoom
 
 	_, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Poll(context.Background(),
-		withTrigger(pipeline(stage("build", substage("default", []string{"build"})))))
+		withTrigger(pipeline(stage("build", substage("default", []string{"build"})))), "")
 	require.ErrorIs(t, err, errBoom)
 }
 
@@ -171,6 +171,6 @@ func TestPollReportsAFailureWritingTheFingerprint(t *testing.T) {
 	f.failOn[call{uriState, "put"}] = errBoom
 
 	_, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Poll(context.Background(),
-		withTrigger(pipeline(stage("build", substage("default", []string{"build"})))))
+		withTrigger(pipeline(stage("build", substage("default", []string{"build"})))), "")
 	require.ErrorIs(t, err, errBoom)
 }

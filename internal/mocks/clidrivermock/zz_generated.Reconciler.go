@@ -185,8 +185,8 @@ func (_c *MockReconciler_Bootstrap_Call) RunAndReturn(run func(context1 context.
 }
 
 // Poll provides a mock function for the type MockReconciler
-func (_mock *MockReconciler) Poll(context1 context.Context, pipeline config.Pipeline) (citypes.TriggerOutput, error) {
-	ret := _mock.Called(context1, pipeline)
+func (_mock *MockReconciler) Poll(context1 context.Context, pipeline config.Pipeline, s string) (citypes.TriggerOutput, error) {
+	ret := _mock.Called(context1, pipeline, s)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Poll")
@@ -194,16 +194,16 @@ func (_mock *MockReconciler) Poll(context1 context.Context, pipeline config.Pipe
 
 	var r0 citypes.TriggerOutput
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, config.Pipeline) (citypes.TriggerOutput, error)); ok {
-		return returnFunc(context1, pipeline)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, config.Pipeline, string) (citypes.TriggerOutput, error)); ok {
+		return returnFunc(context1, pipeline, s)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, config.Pipeline) citypes.TriggerOutput); ok {
-		r0 = returnFunc(context1, pipeline)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, config.Pipeline, string) citypes.TriggerOutput); ok {
+		r0 = returnFunc(context1, pipeline, s)
 	} else {
 		r0 = ret.Get(0).(citypes.TriggerOutput)
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, config.Pipeline) error); ok {
-		r1 = returnFunc(context1, pipeline)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, config.Pipeline, string) error); ok {
+		r1 = returnFunc(context1, pipeline, s)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -218,11 +218,12 @@ type MockReconciler_Poll_Call struct {
 // Poll is a helper method to define mock.On call
 //   - context1 context.Context
 //   - pipeline config.Pipeline
-func (_e *MockReconciler_Expecter) Poll(context1 any, pipeline any) *MockReconciler_Poll_Call {
-	return &MockReconciler_Poll_Call{Call: _e.mock.On("Poll", context1, pipeline)}
+//   - s string
+func (_e *MockReconciler_Expecter) Poll(context1 any, pipeline any, s any) *MockReconciler_Poll_Call {
+	return &MockReconciler_Poll_Call{Call: _e.mock.On("Poll", context1, pipeline, s)}
 }
 
-func (_c *MockReconciler_Poll_Call) Run(run func(context1 context.Context, pipeline config.Pipeline)) *MockReconciler_Poll_Call {
+func (_c *MockReconciler_Poll_Call) Run(run func(context1 context.Context, pipeline config.Pipeline, s string)) *MockReconciler_Poll_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -232,9 +233,14 @@ func (_c *MockReconciler_Poll_Call) Run(run func(context1 context.Context, pipel
 		if args[1] != nil {
 			arg1 = args[1].(config.Pipeline)
 		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
 		run(
 			arg0,
 			arg1,
+			arg2,
 		)
 	})
 	return _c
@@ -245,7 +251,7 @@ func (_c *MockReconciler_Poll_Call) Return(triggerOutput citypes.TriggerOutput, 
 	return _c
 }
 
-func (_c *MockReconciler_Poll_Call) RunAndReturn(run func(context1 context.Context, pipeline config.Pipeline) (citypes.TriggerOutput, error)) *MockReconciler_Poll_Call {
+func (_c *MockReconciler_Poll_Call) RunAndReturn(run func(context1 context.Context, pipeline config.Pipeline, s string) (citypes.TriggerOutput, error)) *MockReconciler_Poll_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -404,3 +404,50 @@ func TestEveryCommitFailureIsReported(t *testing.T) {
 		})
 	}
 }
+
+// spec.path is relative to the pipeline root, not to whatever directory
+// forge-ci started in. Every managed resource already resolved against
+// --root; the state engine resolved against the process's cwd, so a run
+// started inside a member wrote the store one level too deep - and that
+// member's .gitignore then swallowed every record, silently.
+//
+// The generated CI does exactly that: `cd <member>` then `--root ..`.
+func TestTheStorePathIsRelativeToTheRootAndNotTheWorkingDirectory(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	git := gitadaptermock.NewMockGit(t)
+	expectCommit(git, true)
+	c := statecontroller.New(fsadapter.New(), git)
+
+	spec := map[string]any{"path": "a-state", "root": root}
+
+	_, err := c.Put(context.Background(), citypes.StatePutInput{
+		Kind: "owned", Key: "resources", Payload: "{}", Spec: spec,
+	})
+	require.NoError(t, err)
+
+	require.FileExists(t, filepath.Join(root, "a-state", "owned", "resources.json"),
+		"the store belongs under the pipeline root")
+	require.NoFileExists(t, filepath.Join("a-state", "owned", "resources.json"),
+		"and never under the working directory")
+}
+
+// No root keeps the old behaviour exactly, so a caller that passes none is
+// unchanged, and an absolute path is taken as written because an instance
+// naming one means it.
+func TestAnAbsolutePathAndAnAbsentRootAreTakenAsWritten(t *testing.T) {
+	t.Parallel()
+
+	abs := t.TempDir()
+	git := gitadaptermock.NewMockGit(t)
+	expectCommit(git, true)
+	c := statecontroller.New(fsadapter.New(), git)
+
+	_, err := c.Put(context.Background(), citypes.StatePutInput{
+		Kind: "owned", Key: "resources", Payload: "{}",
+		Spec: map[string]any{"path": abs, "root": t.TempDir()},
+	})
+	require.NoError(t, err)
+	require.FileExists(t, filepath.Join(abs, "owned", "resources.json"))
+}

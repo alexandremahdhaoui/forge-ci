@@ -8,7 +8,7 @@ import (
 )
 
 func (c *Controller) Bootstrap(ctx context.Context, p config.Pipeline, root string) (Report, error) {
-	index := newIndex(p)
+	index := newIndex(p, root)
 
 	// true: the bootstrap is the one ceremony that writes credentials.
 	actions, err := c.reconcileResources(ctx, p, index, root, true)
@@ -29,7 +29,7 @@ func (c *Controller) Bootstrap(ctx context.Context, p config.Pipeline, root stri
 }
 
 func (c *Controller) Status(ctx context.Context, p config.Pipeline, root string) (Report, error) {
-	index := newIndex(p)
+	index := newIndex(p, root)
 
 	revision, err := c.resolveRevision(ctx, p, root)
 	if err != nil {
@@ -76,8 +76,8 @@ func (c *Controller) Status(ctx context.Context, p config.Pipeline, root string)
 	return report, nil
 }
 
-func (c *Controller) Poll(ctx context.Context, p config.Pipeline) (citypes.TriggerOutput, error) {
-	index := newIndex(p)
+func (c *Controller) Poll(ctx context.Context, p config.Pipeline, root string) (citypes.TriggerOutput, error) {
+	index := newIndex(p, root)
 
 	combined := citypes.TriggerOutput{}
 

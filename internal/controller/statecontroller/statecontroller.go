@@ -253,11 +253,26 @@ func (c *Controller) pathFor(spec map[string]any, kind, key string) (string, err
 	return filepath.Join(root, dir, filepath.FromSlash(clean)+".json"), nil
 }
 
+// rootOf answers where the state repo is on disk.
+//
+// spec.path is relative to the pipeline root, not to whatever directory
+// forge-ci happened to start in. The core passes that root in spec.root, and
+// joining is a no-op for the ordinary case where they are the same. Where
+// they are not - the generated CI does `cd <member>` then `--root ..` - the
+// store used to land one level too deep, inside a member whose .gitignore
+// then swallowed every record.
+//
+// An absolute path is taken as written; an instance naming one means it.
 func rootOf(spec map[string]any) (string, error) {
-	root, _ := spec["path"].(string)
-	if strings.TrimSpace(root) == "" {
+	dir, _ := spec["path"].(string)
+	if strings.TrimSpace(dir) == "" {
 		return "", ErrPath
 	}
 
-	return root, nil
+	root, _ := spec["root"].(string)
+	if root == "" || filepath.IsAbs(dir) {
+		return dir, nil
+	}
+
+	return filepath.Join(root, dir), nil
 }

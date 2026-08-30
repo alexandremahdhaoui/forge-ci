@@ -96,7 +96,7 @@ func New(caller engineadapter.Caller, git gitadapter.Git, now func() time.Time) 
 }
 
 func (c *Controller) Apply(ctx context.Context, p config.Pipeline, root string) (Report, error) {
-	index := newIndex(p)
+	index := newIndex(p, root)
 
 	// false: an apply converges what can be converged and leaves credentials
 	// alone. Only a bootstrap is responsible for those.

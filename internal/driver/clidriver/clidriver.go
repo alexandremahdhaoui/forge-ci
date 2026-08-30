@@ -29,7 +29,7 @@ type Reconciler interface {
 	Bootstrap(context.Context, config.Pipeline, string) (reconcilecontroller.Report, error)
 	Apply(context.Context, config.Pipeline, string) (reconcilecontroller.Report, error)
 	Status(context.Context, config.Pipeline, string) (reconcilecontroller.Report, error)
-	Poll(context.Context, config.Pipeline) (citypes.TriggerOutput, error)
+	Poll(context.Context, config.Pipeline, string) (citypes.TriggerOutput, error)
 }
 
 type Driver struct {
@@ -89,7 +89,7 @@ func (d *Driver) Run(ctx context.Context, args []string) error {
 
 		return d.write(mermaid(p, report))
 	case "poll":
-		out, err := d.reconciler.Poll(ctx, p)
+		out, err := d.reconciler.Poll(ctx, p, root)
 		if err != nil {
 			return err
 		}
