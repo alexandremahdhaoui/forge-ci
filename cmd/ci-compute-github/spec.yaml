@@ -74,11 +74,15 @@ spec:
 - key: workspace
   type: object
   required: false
-  means: 'The checkout preamble every command workflow and the runner share: bootstrapCommand (one verbatim command that stands the whole workspace up in the working directory, naming its own factory), toolchainScript (verbatim install block). Required once any command workflow or the runner exists. bootstrapCommand is always required; toolchainScript only when spec.container is unset, because an image supplies the toolchain instead.'
+  means: 'The checkout preamble every command workflow and the runner share: bootstrapCommand (one verbatim command that stands the whole workspace up in the working directory, naming its own factory), toolchainScript (verbatim install block). Required once any command workflow or the runner exists. bootstrapCommand is always required; toolchainScript only when spec.container and spec.containerFile are both unset, because an image supplies the toolchain instead.'
 - key: container
   type: string
   required: false
-  means: 'The image every job that builds a workspace runs inside, so its tools arrive prebuilt and no install step is rendered. It replaces the toolchain install and not the checkout: an image carries tools, not members, so bootstrapCommand still runs. Fan-out and release jobs never take one - they build no workspace. Empty runs on the runner itself, which is what a factory that PUBLISHES an image needs: a pipeline running inside the image it builds could not publish a fixed one after a bad release.'
+  means: 'The image every job that builds a workspace runs inside, so its tools arrive prebuilt and no install step is rendered. It replaces the toolchain install and not the checkout: an image carries tools, not members, so bootstrapCommand still runs. Fan-out and release jobs never take one - they build no workspace. Empty runs on the runner itself, which is what a factory that PUBLISHES an image needs: a pipeline running inside the image it builds could not publish a fixed one after a bad release. Exactly one of container or containerFile may be set.'
+- key: containerFile
+  type: string
+  required: false
+  means: 'A file under the pipeline root holding the full image reference, tag included - the file a workspace sync generates from its resolved toolchain pin. The alternative to typing the pin into container: the workspace resolver owns the version and this engine only reads it at declare time, so a register-advanced pin reaches the rendered workflows on the next reconcile with nobody editing a pipeline file.'
 - key: secrets
   type: list
   required: false

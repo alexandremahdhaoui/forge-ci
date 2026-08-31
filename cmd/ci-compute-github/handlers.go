@@ -21,7 +21,7 @@ func NewHandlers() Handlers {
 
 	return Handlers{
 		Declare: func(_ context.Context, in DeclareInput) (*DeclareOutput, error) {
-			out, err := ctrl.Declare(in.Spec)
+			out, err := ctrl.Declare(in.Spec, in.Root)
 			if err != nil {
 				return nil, err
 			}

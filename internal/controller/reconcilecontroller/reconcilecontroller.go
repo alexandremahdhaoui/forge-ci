@@ -722,8 +722,12 @@ func (c *Controller) reconcileResources(
 	for _, engine := range p.Engines {
 		var declared citypes.DeclareOutput
 
+		// The root rides along so an engine whose spec names workspace
+		// files - a resolved pin a sync generated - can read them at
+		// declare time. Optional on the wire: an engine that reads nothing
+		// validates without it.
 		if err := c.caller.Call(ctx, engine.Engine, ToolDeclare,
-			map[string]any{"spec": orEmpty(engine.Spec)}, &declared); err != nil {
+			map[string]any{"spec": orEmpty(engine.Spec), "root": root}, &declared); err != nil {
 			return nil, false, fmt.Errorf("asking engine %q what it needs: %w", engine.Alias, err)
 		}
 

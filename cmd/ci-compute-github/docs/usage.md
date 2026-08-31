@@ -45,6 +45,7 @@ engines:
       setup: <list>
       workspace: <object>
       container: <string>
+      containerFile: <string>
       secrets: <list>
       workflows: <list>
       runner: <object>

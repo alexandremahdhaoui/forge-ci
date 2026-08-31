@@ -183,6 +183,79 @@ func TestAContainerReplacesTheToolchainInstallAndNotTheCheckout(t *testing.T) {
 		"a fan-out only curls a dispatch, so it needs no toolchain image")
 }
 
+// A containerFile keeps the version out of the pipeline file entirely: the
+// workspace sync resolves the pin into a generated file, and declare reads
+// it from there, so a register-advanced pin reaches the rendered workflows
+// on the next reconcile with nobody editing yaml.
+func TestAContainerFileResolvesThePinFromTheWorkspace(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, ".forge"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, ".forge", "toolchain-image"),
+		[]byte("ghcr.io/an-owner/a-toolchain:v9.9.9\n"), 0o600))
+
+	c := workflowcontroller.New(nil, nil, nil)
+
+	spec := specMap(t)
+	spec["containerFile"] = ".forge/toolchain-image"
+	spec["workspace"] = map[string]any{"bootstrapCommand": "true"}
+
+	out, err := c.Declare(spec, root)
+	require.NoError(t, err)
+
+	rendered := false
+
+	for _, r := range out.Resources {
+		content, _ := r.Spec["content"].(string)
+		if strings.Contains(content, "image: ghcr.io/an-owner/a-toolchain:v9.9.9") {
+			rendered = true
+		}
+	}
+
+	assert.True(t, rendered, "the resolved pin must reach a rendered workflow's container block")
+}
+
+func TestAMissingContainerFileNamesTheSyncThatWritesIt(t *testing.T) {
+	t.Parallel()
+
+	c := workflowcontroller.New(nil, nil, nil)
+
+	spec := specMap(t)
+	spec["containerFile"] = ".forge/toolchain-image"
+
+	_, err := c.Declare(spec, t.TempDir())
+	require.ErrorContains(t, err, "sync first")
+}
+
+func TestAnEmptyContainerFileIsRefused(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, ".forge"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, ".forge", "toolchain-image"),
+		[]byte("\n"), 0o600))
+
+	c := workflowcontroller.New(nil, nil, nil)
+
+	spec := specMap(t)
+	spec["containerFile"] = ".forge/toolchain-image"
+
+	_, err := c.Declare(spec, root)
+	require.ErrorContains(t, err, "is empty")
+}
+
+func TestContainerAndContainerFileRefuseEachOther(t *testing.T) {
+	t.Parallel()
+
+	spec := specMap(t)
+	spec["container"] = "an-image:v1"
+	spec["containerFile"] = ".forge/toolchain-image"
+
+	_, err := workflowcontroller.ParseSpec(spec)
+	require.ErrorContains(t, err, "exactly one of spec.container or spec.containerFile")
+}
+
 func TestRenderHonorsAVerbatimOverride(t *testing.T) {
 	t.Parallel()
 
@@ -286,7 +359,7 @@ func TestDeclareEmitsEveryGitHubResource(t *testing.T) {
 		map[string]any{"name": "release", "kind": "release", "secret": "FORGE_CI_GITHUB_TOKEN"},
 	}
 
-	out, err := c.Declare(spec)
+	out, err := c.Declare(spec, "")
 	require.NoError(t, err)
 
 	ids := make([]string, 0, len(out.Resources))
@@ -498,7 +571,7 @@ func TestDeclareRefusesANamelessSecret(t *testing.T) {
 	spec := specMap(t)
 	spec["secrets"] = []any{map[string]any{"fromEnv": "X"}}
 
-	_, err := c.Declare(spec)
+	_, err := c.Declare(spec, "")
 	require.ErrorContains(t, err, "secrets entry has no name")
 }
 

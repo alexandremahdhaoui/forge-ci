@@ -16,9 +16,11 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/fsadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/githubadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/computecontroller"
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/managercontroller"
@@ -58,6 +60,12 @@ type Spec struct {
 	// publishing the image needs: a pipeline that ran inside the image it
 	// builds could not publish a fixed one after a bad release.
 	Container string `json:"container,omitempty"`
+	// ContainerFile names a file under the pipeline root holding the full
+	// image reference, tag included - the file a workspace sync generates
+	// from its resolved toolchain pin. It is the alternative to typing the
+	// pin into this spec: the resolver owns the version and this engine
+	// only reads it. Exactly one of container or containerFile may be set.
+	ContainerFile string `json:"containerFile,omitempty"`
 	// Secrets are the Actions secrets the workflows read.
 	Secrets []SecretSpec `json:"secrets,omitempty"`
 	// Workflows are the files this engine owns under .github/workflows.
@@ -276,11 +284,17 @@ func ParseSpec(raw map[string]any) (Spec, error) {
 					"a container image supplies tools and not a workspace, so the members still need cloning")
 		}
 
-		if ws.ToolchainScript == "" && s.Container == "" {
+		if ws.ToolchainScript == "" && s.Container == "" && s.ContainerFile == "" {
 			return Spec{}, errors.New(
-				"workspace.toolchainScript is required unless spec.container names an image the jobs run in, " +
-					"which is what supplies the toolchain instead")
+				"workspace.toolchainScript is required unless spec.container or spec.containerFile names " +
+					"an image the jobs run in, which is what supplies the toolchain instead")
 		}
+	}
+
+	if s.Container != "" && s.ContainerFile != "" {
+		return Spec{}, errors.New(
+			"exactly one of spec.container or spec.containerFile pins the image: " +
+				"a literal reference, or the file the workspace sync resolves one into")
 	}
 
 	if s.Runner.PollIntervalSeconds <= 0 {
@@ -297,6 +311,7 @@ func ParseSpec(raw map[string]any) (Spec, error) {
 // Controller answers declare and run for the github compute engine.
 type Controller struct {
 	api   func(spec Spec) githubadapter.API
+	fs    fsadapter.FS
 	now   func() time.Time
 	sleep func(time.Duration)
 }
@@ -315,16 +330,34 @@ func New(
 		sleep = time.Sleep
 	}
 
-	return &Controller{api: api, now: now, sleep: sleep}
+	return &Controller{api: api, fs: fsadapter.New(), now: now, sleep: sleep}
 }
 
 // Declare answers every GitHub resource the spec implies: one converged
 // file per owned workflow (runner included), one Actions secret per
-// declared secret, and enablement for every owned workflow file.
-func (c *Controller) Declare(raw map[string]any) (citypes.DeclareOutput, error) {
+// declared secret, and enablement for every owned workflow file. root is
+// where the pipeline runs, so a containerFile resolves against the
+// workspace the sync wrote it into.
+func (c *Controller) Declare(raw map[string]any, root string) (citypes.DeclareOutput, error) {
 	spec, err := ParseSpec(raw)
 	if err != nil {
 		return citypes.DeclareOutput{}, err
+	}
+
+	if spec.ContainerFile != "" {
+		pin, err := c.fs.ReadFile(filepath.Join(root, filepath.FromSlash(spec.ContainerFile)))
+		if err != nil {
+			return citypes.DeclareOutput{}, fmt.Errorf(
+				"reading spec.containerFile %s: %w (the workspace sync writes it; sync first)",
+				spec.ContainerFile, err)
+		}
+
+		spec.Container = strings.TrimSpace(string(pin))
+		if spec.Container == "" {
+			return citypes.DeclareOutput{}, fmt.Errorf(
+				"spec.containerFile %s is empty: it must hold one image reference, tag included",
+				spec.ContainerFile)
+		}
 	}
 
 	resources := []citypes.Resource{}
