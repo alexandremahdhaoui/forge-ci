@@ -135,6 +135,14 @@ What was decided, why, and what it costs. A ↩ marks one that reversed an earli
 
 **Costs.** The state schema is coupled to forge's. A forge type change ripples into recorded history.
 
+### A correction to the state-push change's record
+
+**Decided.** The commit that introduced spec.push claimed every minted revision, run record and ownership record "died with the container". Too strong: forge-self-state's remote already carried CI-authored commits from inside run windows before that change, so some records were surviving through a path that commit did not identify. The durable-by-declaration mechanism stands; the claim that nothing survived before it does not.
+
+**Why.** A commit message is history and cannot be amended once pushed, so a wrong claim in one is corrected here, where the next reader of the decision looks. Leaving it uncorrected sends whoever debugs state durability hunting for a total loss that never happened.
+
+**Costs.** The correction lives apart from the claim it corrects; a reader of the commit alone still sees the original wording.
+
 
 ## Shipping
 
