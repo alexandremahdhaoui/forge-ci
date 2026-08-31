@@ -142,6 +142,11 @@ type Substage struct {
 	Targets []string          `json:"targets"`
 	Gates   []string          `json:"gates,omitempty"`
 	Params  map[string]string `json:"params,omitempty"`
+	// Sync makes the compute engine converge the workspace - manifests,
+	// then the dependency closure - before this substage's targets run. A
+	// multi-repo workspace builds against generated manifests, so at least
+	// one substage must set it; Validate enforces that.
+	Sync bool `json:"sync,omitempty"`
 }
 
 func Parse(data []byte) (Pipeline, error) {
@@ -386,6 +391,28 @@ func (p Pipeline) Validate() error {
 			for _, g := range sub.Gates {
 				requirePort(subWhere+": gates", g, PortGate)
 			}
+		}
+	}
+
+	// A multi-repo workspace builds against generated manifests, so a
+	// pipeline that never converges them is building what nobody wrote. The
+	// rule is structural: it knows a sync must happen somewhere, not which
+	// substage needs it. A single-repo pipeline is exempt - there is no
+	// workspace to converge.
+	if len(p.Repos) > 1 {
+		synced := false
+
+		for _, s := range p.Stages {
+			for _, sub := range s.Substages {
+				if sub.Sync {
+					synced = true
+				}
+			}
+		}
+
+		if !synced {
+			add("stages: a pipeline over %d repos converges its workspace nowhere; "+
+				"set sync: true on the substage that builds", len(p.Repos))
 		}
 	}
 

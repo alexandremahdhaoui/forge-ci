@@ -513,6 +513,14 @@ func scriptFor(in citypes.RunInput) (string, error) {
 		fmt.Fprintf(&b, "git -C %s checkout --detach %s\n", quote(repo.Name), quote(repo.SHA))
 	}
 
+	// The workspace converges on the runner before anything builds:
+	// manifests first, then the dependency closure. The bootstrap synced at
+	// checkout, but the pins above may have moved members under it, and the
+	// closure is never resolved by a sync at all.
+	if in.Sync {
+		b.WriteString("forge-factory sync\nforge-factory lock\n")
+	}
+
 	for _, target := range in.Targets {
 		binary, expanded, err := computecontroller.CommandFor(target, in.Params)
 		if err != nil {

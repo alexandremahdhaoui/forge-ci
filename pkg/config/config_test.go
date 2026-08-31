@@ -238,10 +238,40 @@ func needsPipeline(repos ...config.Repo) config.Pipeline {
 		Stages: []config.Stage{{
 			Name: "build",
 			Substages: []config.Substage{
-				{Name: "default", Engine: "here", Manager: "local", Targets: []string{"t"}},
+				// Sync satisfies the multi-repo rule so these tests stay
+				// about the needs graph; the rule has tests of its own.
+				{Name: "default", Engine: "here", Manager: "local", Targets: []string{"t"}, Sync: true},
 			},
 		}},
 	}
+}
+
+// A multi-repo workspace builds against generated manifests, so a pipeline
+// that never converges them is building what nobody wrote. The rule is
+// structural: some substage must sync; which one is the pipeline's call.
+func TestAMultiRepoPipelineThatNeverSyncsIsRejected(t *testing.T) {
+	t.Parallel()
+
+	p := needsPipeline(
+		config.Repo{Name: "one", URL: "u"},
+		config.Repo{Name: "two", URL: "u"},
+	)
+	p.Stages[0].Substages[0].Sync = false
+
+	err := p.Validate()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "converges its workspace nowhere")
+}
+
+// A single-repo pipeline has no workspace to converge, so the rule stays
+// out of its way - golden-register is exactly this shape.
+func TestASingleRepoPipelineNeedsNoSync(t *testing.T) {
+	t.Parallel()
+
+	p := needsPipeline(config.Repo{Name: "one", URL: "u"})
+	p.Stages[0].Substages[0].Sync = false
+
+	require.NoError(t, p.Validate())
 }
 
 func TestAValidNeedsGraphParses(t *testing.T) {

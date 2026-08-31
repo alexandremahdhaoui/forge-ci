@@ -71,6 +71,7 @@ func toRunInput(in RunInput) citypes.RunInput {
 		Version:  in.Version,
 		Stage:    in.Stage,
 		Substage: in.Substage,
+		Sync:     in.Sync,
 		Targets:  targets,
 		Params:   in.Params,
 		Repos:    repos,

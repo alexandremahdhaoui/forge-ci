@@ -472,6 +472,7 @@ func (c *Controller) applySubstage(
 		Version:  version,
 		Stage:    stage.Name,
 		Substage: sub.Name,
+		Sync:     sub.Sync,
 		Targets:  index.targets(p, sub.Targets),
 		Params:   sub.Params,
 		Repos:    checkouts(p, root, revision),

@@ -62,6 +62,31 @@ func (c *Controller) Run(ctx context.Context, in citypes.RunInput) (citypes.RunO
 		env["FORGE_CI_VERSION"] = in.Version
 	}
 
+	// The workspace converges before anything builds: manifests first, then
+	// the dependency closure. It happens here, in the engine, because this
+	// is the machine the targets actually run on - a core-side exec would
+	// converge the operator's machine and never a remote runner's.
+	if in.Sync {
+		for _, verb := range []string{"sync", "lock"} {
+			res, err := c.runner.RunEnv(ctx, in.Root, env, "forge-factory", verb)
+			if err != nil {
+				return citypes.RunOutput{}, fmt.Errorf("converging the workspace (forge-factory %s): %w", verb, err)
+			}
+
+			fmt.Fprintf(&log, "$ forge-factory %s (in %s)\n%s%s", verb, in.Root, res.Stdout, res.Stderr)
+
+			// A convergence that fails is a failed run, not a broken runner:
+			// the machinery worked and the workspace said no.
+			if res.ExitCode != 0 {
+				out.Status = citypes.StatusFailed
+				out.Message = fmt.Sprintf("forge-factory %s exited %d in %s", verb, res.ExitCode, in.Root)
+				out.Output = log.String()
+
+				return out, nil
+			}
+		}
+	}
+
 	// One mutex over everything a wave's members share: the log, the status
 	// and the harvested artifacts. A wave runs its dirs at once, so all three
 	// are written concurrently.

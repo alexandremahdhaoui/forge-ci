@@ -39,6 +39,7 @@ The question an engine answers. The list is closed.
 | `state` | Alias of the engine whose type is state. |
 | `strategy` | Which number moves. Absent means bump-patch-version. |
 | `substages` | Independent units inside a stage. They run at the same time. |
+| `sync` | Converge the workspace before this substage's targets run - manifests first, then the dependency closure. A multi-repo pipeline must set it on at least one substage; that rule is semantic and checked in a second pass. |
 | `tagPrefix` | Goes in front of the semver, joined with a dash. Absent means no prefix, which is what every factory does: v0.50.0. Set it only when one repo is released by more than one factory, so the two lines do not read each other's tags. |
 | `targets` | Named units of work. A target names a forge target or a forge-ci verb. This is the only place a forge target appears. |
 | `triggers` | Aliases of engines whose type is trigger. |

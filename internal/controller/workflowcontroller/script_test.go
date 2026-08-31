@@ -1,6 +1,7 @@
 package workflowcontroller
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
@@ -27,6 +28,34 @@ func TestWithNoNeedsTheScriptIsPlainSubshells(t *testing.T) {
 	assert.Contains(t, script, "(cd 'one' && 'forge' 'test-all')\n(cd 'two' && 'forge' 'test-all')")
 	assert.NotContains(t, script, "wave_rc", "nothing declared, so nothing to coordinate")
 	assert.NotContains(t, script, "jobs -p")
+	assert.NotContains(t, script, "forge-factory",
+		"nothing converges unless the substage asked; an existing script must not change")
+}
+
+// A syncing substage converges the runner's workspace before its first
+// target: manifests, then the dependency closure. The bootstrap synced at
+// checkout, but the sha pins above may have moved members under it, and a
+// sync never resolves the closure at all.
+func TestASyncingSubstageConvergesTheRunnerFirst(t *testing.T) {
+	t.Parallel()
+
+	script, err := scriptFor(citypes.RunInput{
+		Revision: "abc",
+		Sync:     true,
+		Repos:    []citypes.RepoCheckout{{Name: "one", SHA: "aaa"}},
+		Targets: []citypes.Target{{
+			Alias: "build", Forge: "test-all", In: []string{"one"},
+		}},
+	})
+	require.NoError(t, err)
+
+	sync := strings.Index(script, "forge-factory sync\nforge-factory lock\n")
+	pin := strings.Index(script, "git -C 'one' checkout --detach 'aaa'")
+	target := strings.Index(script, "(cd 'one' && 'forge' 'test-all')")
+
+	require.GreaterOrEqual(t, sync, 0, script)
+	assert.Greater(t, sync, pin, "the pins move members, so the convergence follows them")
+	assert.Greater(t, target, sync, "no target may run on an unconverged workspace")
 }
 
 // A wave backgrounds its members and waits. set -eu does not fail a script on

@@ -96,14 +96,20 @@ type RunInput struct {
 	// the first stage. A compute target stamps it into what it builds, so a
 	// binary reports the release it shipped in rather than the nearest tag
 	// its own repo happens to carry.
-	Version  string            `json:"version,omitempty"`
-	Stage    string            `json:"stage"`
-	Substage string            `json:"substage"`
-	Targets  []Target          `json:"targets"`
-	Params   map[string]string `json:"params,omitempty"`
-	Repos    []RepoCheckout    `json:"repos,omitempty"`
-	Root     string            `json:"root"`
-	Spec     map[string]any    `json:"spec,omitempty"`
+	Version  string `json:"version,omitempty"`
+	Stage    string `json:"stage"`
+	Substage string `json:"substage"`
+	// Sync asks the compute engine to converge the workspace before any
+	// target runs: manifests first (sync), then the dependency closure
+	// (lock). On the wire rather than a core shell-out because the machine
+	// that must converge is the one the engine runs targets on - a remote
+	// runner would never be reached by anything the core executed here.
+	Sync    bool              `json:"sync,omitempty"`
+	Targets []Target          `json:"targets"`
+	Params  map[string]string `json:"params,omitempty"`
+	Repos   []RepoCheckout    `json:"repos,omitempty"`
+	Root    string            `json:"root"`
+	Spec    map[string]any    `json:"spec,omitempty"`
 }
 
 type ForgeResult struct {

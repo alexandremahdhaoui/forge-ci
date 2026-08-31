@@ -34,6 +34,19 @@ for dir in cmd/ci-*; do
         fi
     done
 
+    # Sync is a bool, so the string loop above cannot see it. Same defect
+    # class: dropped at the boundary it is a zero value, and a substage that
+    # declared sync: true builds against a workspace nothing converged.
+    for field in Sync; do
+        grep -qE "	$field +bool" "$spec" || continue
+
+        if ! grep -qE "$field: *in\.$field" "$handlers"; then
+            echo "$handlers drops $field: the wire carries it and the mapping does not copy it." >&2
+            echo "  A missing field here is not a compile error, it is a zero value at runtime." >&2
+            fail=1
+        fi
+    done
+
     # RepoCheckout is nested inside RunInput, so the loop above cannot see it:
     # its fields are on another type and not all of them are strings. The
     # checkout list is what carries the needs graph, and a dropped Needs makes

@@ -49,6 +49,73 @@ func TestForgeTargetRunsInTheNamedRepo(t *testing.T) {
 	require.Contains(t, out.Output, "$ forge test-all (in /work/golden-rust)")
 }
 
+// Sync converges the workspace before any target: manifests, then the
+// dependency closure. It happens in the engine because this is the machine
+// the targets run on.
+func TestSyncConvergesTheWorkspaceBeforeAnyTarget(t *testing.T) {
+	runner := execadaptermock.NewMockRunner(t)
+
+	var order []string
+
+	record := func(what string) func(context.Context, string, map[string]string, string, ...string) (execadapter.Result, error) {
+		return func(context.Context, string, map[string]string, string, ...string) (execadapter.Result, error) {
+			order = append(order, what)
+
+			return passing(), nil
+		}
+	}
+
+	runner.EXPECT().RunEnv(mock.Anything, "/work", mock.Anything, "forge-factory", "sync").
+		RunAndReturn(record("sync")).Once()
+	runner.EXPECT().RunEnv(mock.Anything, "/work", mock.Anything, "forge-factory", "lock").
+		RunAndReturn(record("lock")).Once()
+	runner.EXPECT().RunEnv(mock.Anything, "/work/golden-rust", mock.Anything, "forge", "test-all").
+		RunAndReturn(record("target")).Once()
+
+	out, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
+		Root:    "/work",
+		Sync:    true,
+		Targets: []citypes.Target{{Alias: "build", Forge: "test-all", In: []string{"golden-rust"}}},
+	})
+	require.NoError(t, err)
+	require.Equal(t, citypes.StatusPassed, out.Status)
+	require.Equal(t, []string{"sync", "lock", "target"}, order,
+		"manifests first, then the closure, then the build")
+}
+
+// A convergence that fails is a failed run, not a broken runner: the
+// machinery worked and the workspace said no. No target may run after it.
+func TestAFailingConvergenceFailsTheRunAndStopsIt(t *testing.T) {
+	runner := execadaptermock.NewMockRunner(t)
+	runner.EXPECT().RunEnv(mock.Anything, "/work", mock.Anything, "forge-factory", "sync").
+		Return(execadapter.Result{ExitCode: 1, Stderr: "no engine is registered\n"}, nil).Once()
+
+	out, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
+		Root:    "/work",
+		Sync:    true,
+		Targets: []citypes.Target{{Alias: "build", Forge: "test-all", In: []string{"golden-rust"}}},
+	})
+	require.NoError(t, err, "a red convergence is a failed run, never an error")
+	require.Equal(t, citypes.StatusFailed, out.Status)
+	require.Contains(t, out.Message, "forge-factory sync exited 1")
+	require.Contains(t, out.Output, "no engine is registered")
+}
+
+// Without the flag nothing converges: the engine must not decide on its own.
+func TestNoSyncMeansNoConvergence(t *testing.T) {
+	runner := execadaptermock.NewMockRunner(t)
+	runner.EXPECT().RunEnv(mock.Anything, "/work/golden-rust", mock.Anything, "forge", "test-all").
+		Return(passing(), nil).Once()
+
+	out, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
+		Root:    "/work",
+		Targets: []citypes.Target{{Alias: "build", Forge: "test-all", In: []string{"golden-rust"}}},
+	})
+	require.NoError(t, err)
+	require.Equal(t, citypes.StatusPassed, out.Status)
+	require.NotContains(t, out.Output, "forge-factory")
+}
+
 func TestNoRepoMeansTheRoot(t *testing.T) {
 	runner := execadaptermock.NewMockRunner(t)
 	runner.EXPECT().RunEnv(mock.Anything, "/work", mock.Anything, "forge-ci", "apply").Return(passing(), nil).Once()
