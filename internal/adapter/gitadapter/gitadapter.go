@@ -34,6 +34,11 @@ type Git interface {
 	// TagAt answers the commit a tag points at, and whether dir carries the
 	// tag at all.
 	TagAt(ctx context.Context, dir, tag string) (string, bool, error)
+	// RemoteTagAt answers where origin's copy of the tag points, and whether
+	// origin carries it. The local list is not the authority: a CI checkout
+	// is a fresh clone with no tags, so only the remote knows what was
+	// already published. An unreachable remote is an error, never "absent".
+	RemoteTagAt(ctx context.Context, dir, tag string) (string, bool, error)
 	// HasRemote reports whether dir has an origin to push to. A checkout
 	// with none is a legitimate state, not a failure.
 	HasRemote(ctx context.Context, dir string) (bool, error)
@@ -293,34 +298,117 @@ func (g *CLI) SubjectsSince(ctx context.Context, dir, tag string) ([]string, err
 	return out, nil
 }
 
-// Tag points a tag at one commit and pushes it. It is idempotent by refusing
-// a tag that already exists rather than moving it, because a moved tag
-// changes what a consumer already pinned.
+// Tag converges origin's tag onto one commit. It decides on the union of
+// local and remote state, because the local list alone lied: a CI checkout
+// is a fresh clone with no tags, so a re-run of an already-published
+// revision read "absent", re-created the tag, and the push was rejected by
+// the only party that actually knew.
+//
+//   - remote carries the tag at sha: convergence, a no-op.
+//   - remote carries it elsewhere: refused. A moved tag changes what a
+//     consumer already pinned.
+//   - remote absent: create the tag if the checkout lacks it, then push.
+//     A local tag already at sha is an interrupted run's leftover, and the
+//     push is what finishes that job.
+//
+// A checkout with no origin skips the remote read and the push: a scratch
+// repo is a legitimate state, and a test fixture is always in it.
 func (g *CLI) Tag(ctx context.Context, dir, tag, sha string) error {
-	_, exists, err := g.TagAt(ctx, dir, tag)
+	hasRemote, err := g.HasRemote(ctx, dir)
 	if err != nil {
 		return err
 	}
 
-	if exists {
-		return fmt.Errorf("tagging %s: %s already exists and a tag is never moved", dir, tag)
+	if hasRemote {
+		remoteAt, onRemote, err := g.RemoteTagAt(ctx, dir, tag)
+		if err != nil {
+			// Never fall through to "absent": re-creating the tag on a
+			// remote this run could not read is the exact mistake reading
+			// the remote exists to remove.
+			return err
+		}
+
+		if onRemote {
+			if remoteAt == sha {
+				return nil
+			}
+
+			return fmt.Errorf(
+				"tagging %s: %s already points at %s on origin, not %s, and a tag is never moved",
+				dir, tag, remoteAt, sha)
+		}
 	}
 
-	// Annotated, with the tag as its message: a lightweight tag dies with
-	// "no tag message" on a machine whose global config signs tags, while an
-	// annotated tag works signed and unsigned alike.
-	//
-	// An annotated tag is an object git writes, so it needs a committer
-	// identity exactly as a commit does, and a runner has none.
-	args := append(gitident.Args(ctx, g.runner, dir), "tag", "-m", tag, tag, sha)
-
-	if _, err := g.run(ctx, dir, "tagging "+tag, args...); err != nil {
+	localAt, exists, err := g.TagAt(ctx, dir, tag)
+	if err != nil {
 		return err
+	}
+
+	if exists && localAt != sha {
+		return fmt.Errorf(
+			"tagging %s: %s already points at %s, not %s, and a tag is never moved",
+			dir, tag, localAt, sha)
+	}
+
+	if !exists {
+		// Annotated, with the tag as its message: a lightweight tag dies with
+		// "no tag message" on a machine whose global config signs tags, while an
+		// annotated tag works signed and unsigned alike.
+		//
+		// An annotated tag is an object git writes, so it needs a committer
+		// identity exactly as a commit does, and a runner has none.
+		args := append(gitident.Args(ctx, g.runner, dir), "tag", "-m", tag, tag, sha)
+
+		if _, err := g.run(ctx, dir, "tagging "+tag, args...); err != nil {
+			return err
+		}
+	}
+
+	if !hasRemote {
+		return nil
 	}
 
 	_, err = g.run(ctx, dir, "pushing "+tag, "push", "origin", tag)
 
 	return err
+}
+
+// RemoteTagAt reads origin's copy of one tag with ls-remote, asking for the
+// peeled ^{} ref alongside the tag so an annotated tag answers the commit it
+// wraps rather than its own object. Absent is the ordinary first-release
+// case; a remote that cannot be read is an error, because treating it as
+// absent would re-create a tag that may already exist.
+func (g *CLI) RemoteTagAt(ctx context.Context, dir, tag string) (string, bool, error) {
+	res, err := g.run(ctx, dir, "reading tag "+tag+" of origin",
+		"ls-remote", "origin", "refs/tags/"+tag, "refs/tags/"+tag+"^{}")
+	if err != nil {
+		return "", false, err
+	}
+
+	var plain, peeled string
+
+	for _, line := range strings.Split(res.Stdout, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+
+		if strings.HasSuffix(fields[1], "^{}") {
+			peeled = fields[0]
+		} else {
+			plain = fields[0]
+		}
+	}
+
+	if peeled != "" {
+		return peeled, true, nil
+	}
+
+	if plain != "" {
+		return plain, true, nil
+	}
+
+	return "", false, nil
 }
 
 func (g *CLI) HasRemote(ctx context.Context, dir string) (bool, error) {

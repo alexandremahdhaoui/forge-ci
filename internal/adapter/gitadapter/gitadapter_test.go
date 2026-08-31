@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/execadapter"
@@ -456,11 +457,184 @@ func TestTagRefusesToMoveOne(t *testing.T) {
 	sha, err := g.HeadSHA(ctx, dir)
 	require.NoError(t, err)
 
-	_ = g.Tag(ctx, dir, "v0.2.0", sha)
+	require.NoError(t, g.Tag(ctx, dir, "v0.2.0", sha))
 
-	err = g.Tag(ctx, dir, "v0.2.0", sha)
+	// The same sha is convergence, not a move: refusing it is what made a
+	// re-run of an already-tagged member terminal instead of idempotent.
+	require.NoError(t, g.Tag(ctx, dir, "v0.2.0", sha))
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "a-file"), []byte("y\n"), 0o600))
+	require.NoError(t, g.Add(ctx, dir, "a-file"))
+	require.NoError(t, g.Commit(ctx, dir, "second"))
+
+	moved, err := g.HeadSHA(ctx, dir)
+	require.NoError(t, err)
+
+	err = g.Tag(ctx, dir, "v0.2.0", moved)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "never moved")
+}
+
+// tagFixture stands up a checkout with one commit and a bare origin, which is
+// the shape every release actually runs against: the remote exists and is the
+// only party that knows what was already published.
+func tagFixture(t *testing.T) (g *gitadapter.CLI, dir, sha string) {
+	t.Helper()
+
+	stripIdentity(t)
+
+	ctx := context.Background()
+	g = gitadapter.New(execadapter.New())
+	exec := execadapter.New()
+	dir = filepath.Join(t.TempDir(), "checkout")
+	bare := filepath.Join(t.TempDir(), "origin.git")
+
+	run := func(wd string, args ...string) {
+		t.Helper()
+
+		res, err := exec.Run(ctx, wd, "git", args...)
+		require.NoError(t, err)
+		require.Zero(t, res.ExitCode, "git %v: %s", args, res.Stderr)
+	}
+
+	run("", "init", "-q", "--bare", bare)
+	run("", "init", "-q", "-b", "main", dir)
+	run(dir, "remote", "add", "origin", bare)
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "a-file"), []byte("x\n"), 0o600))
+	require.NoError(t, g.Add(ctx, dir, "a-file"))
+	require.NoError(t, g.Commit(ctx, dir, "first"))
+	run(dir, "push", "-q", "origin", "main")
+
+	sha, err := g.HeadSHA(ctx, dir)
+	require.NoError(t, err)
+
+	return g, dir, sha
+}
+
+// The defect this pins: run 35 published v0.45.9, run 36 was a fresh clone
+// whose local tag list said "absent", so it re-created the tag and the push
+// was rejected by the only party that knew. The remote is the authority, and
+// a tag already there at the same commit is convergence, not work.
+func TestATagOnTheRemoteButNotInTheCheckoutConverges(t *testing.T) {
+	g, dir, sha := tagFixture(t)
+	ctx := context.Background()
+
+	require.NoError(t, g.Tag(ctx, dir, "v0.9.0", sha))
+
+	// A second checkout of the same origin: no local tags, like every CI
+	// re-run. The old code re-created the tag here and died on the push.
+	fresh := filepath.Join(t.TempDir(), "fresh")
+
+	urlRes, err := execadapter.New().Run(ctx, dir, "git", "remote", "get-url", "origin")
+	require.NoError(t, err)
+	origin := strings.TrimSpace(urlRes.Stdout)
+
+	cloneRes, err := execadapter.New().Run(ctx, "", "git", "clone", "-q", "--no-tags", origin, fresh)
+	require.NoError(t, err)
+	require.Zero(t, cloneRes.ExitCode, cloneRes.Stderr)
+
+	_, found, err := g.TagAt(ctx, fresh, "v0.9.0")
+	require.NoError(t, err)
+	require.False(t, found, "the fixture must have no local tag, or this test proves nothing")
+
+	require.NoError(t, g.Tag(ctx, fresh, "v0.9.0", sha))
+
+	at, found, err := g.RemoteTagAt(ctx, fresh, "v0.9.0")
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, sha, at)
+}
+
+// A remote tag at another commit refuses loudly: moving it would change what
+// a consumer already pinned, and no fresh clone may decide that.
+func TestARemoteTagAtAnotherCommitRefuses(t *testing.T) {
+	g, dir, sha := tagFixture(t)
+	ctx := context.Background()
+
+	require.NoError(t, g.Tag(ctx, dir, "v0.9.0", sha))
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "a-file"), []byte("y\n"), 0o600))
+	require.NoError(t, g.Add(ctx, dir, "a-file"))
+	require.NoError(t, g.Commit(ctx, dir, "second"))
+
+	moved, err := g.HeadSHA(ctx, dir)
+	require.NoError(t, err)
+
+	// Delete the local tag so only origin's copy can refuse - that is the
+	// CI shape, and the refusal must name origin as the authority.
+	res, err := execadapter.New().Run(ctx, dir, "git", "tag", "-d", "v0.9.0")
+	require.NoError(t, err)
+	require.Zero(t, res.ExitCode, res.Stderr)
+
+	err = g.Tag(ctx, dir, "v0.9.0", moved)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "never moved")
+	require.Contains(t, err.Error(), "origin")
+}
+
+// An unreadable remote is an error, never "absent". Treating it as absent
+// would re-create a tag the remote may hold, which is the exact mistake
+// reading the remote exists to remove.
+func TestAnUnreadableRemoteIsAnErrorNotAbsent(t *testing.T) {
+	g, dir, sha := tagFixture(t)
+	ctx := context.Background()
+
+	res, err := execadapter.New().Run(ctx, dir, "git", "remote", "set-url", "origin",
+		filepath.Join(t.TempDir(), "gone.git"))
+	require.NoError(t, err)
+	require.Zero(t, res.ExitCode, res.Stderr)
+
+	_, _, err = g.RemoteTagAt(ctx, dir, "v0.9.0")
+	require.Error(t, err)
+
+	err = g.Tag(ctx, dir, "v0.9.0", sha)
+	require.Error(t, err)
+
+	_, found, tagErr := g.TagAt(ctx, dir, "v0.9.0")
+	require.NoError(t, tagErr)
+	require.False(t, found, "an unreadable remote must stop the tag before it is created")
+}
+
+// A local tag left behind by an interrupted run - tagged, then the push was
+// lost - is finished by the next run, not refused: the remote lacks it, the
+// checkout has it at the right commit, and the push is the remaining half.
+func TestALeftoverLocalTagIsPushedNotRefused(t *testing.T) {
+	g, dir, sha := tagFixture(t)
+	ctx := context.Background()
+	exec := execadapter.New()
+
+	res, err := exec.Run(ctx, dir, "git",
+		"-c", "user.name=t", "-c", "user.email=t@t", "tag", "-m", "v0.9.0", "v0.9.0", sha)
+	require.NoError(t, err)
+	require.Zero(t, res.ExitCode, res.Stderr)
+
+	_, found, err := g.RemoteTagAt(ctx, dir, "v0.9.0")
+	require.NoError(t, err)
+	require.False(t, found, "the fixture's origin must lack the tag, or this proves nothing")
+
+	require.NoError(t, g.Tag(ctx, dir, "v0.9.0", sha))
+
+	at, found, err := g.RemoteTagAt(ctx, dir, "v0.9.0")
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, sha, at)
+}
+
+// RemoteTagAt must answer the commit an annotated tag wraps, not the tag
+// object's own sha - the same peel TagAt does with rev-list, done remotely
+// with the ^{} ref. Without it every already-published member reads as
+// pointing somewhere else and the release refuses to converge.
+func TestRemoteTagAtPeelsAnAnnotatedTag(t *testing.T) {
+	g, dir, sha := tagFixture(t)
+	ctx := context.Background()
+
+	require.NoError(t, g.Tag(ctx, dir, "v0.9.0", sha))
+
+	at, found, err := g.RemoteTagAt(ctx, dir, "v0.9.0")
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, sha, at, "an annotated tag must answer the commit it wraps")
 }
 
 // A push the remote refuses is ErrRejected and not a generic failure. The

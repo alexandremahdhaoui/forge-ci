@@ -836,6 +836,84 @@ func (_c *MockGit_RemoteSHA_Call) RunAndReturn(run func(ctx context.Context, url
 	return _c
 }
 
+// RemoteTagAt provides a mock function for the type MockGit
+func (_mock *MockGit) RemoteTagAt(ctx context.Context, dir string, tag string) (string, bool, error) {
+	ret := _mock.Called(ctx, dir, tag)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RemoteTagAt")
+	}
+
+	var r0 string
+	var r1 bool
+	var r2 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) (string, bool, error)); ok {
+		return returnFunc(ctx, dir, tag)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) string); ok {
+		r0 = returnFunc(ctx, dir, tag)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string) bool); ok {
+		r1 = returnFunc(ctx, dir, tag)
+	} else {
+		r1 = ret.Get(1).(bool)
+	}
+	if returnFunc, ok := ret.Get(2).(func(context.Context, string, string) error); ok {
+		r2 = returnFunc(ctx, dir, tag)
+	} else {
+		r2 = ret.Error(2)
+	}
+	return r0, r1, r2
+}
+
+// MockGit_RemoteTagAt_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoteTagAt'
+type MockGit_RemoteTagAt_Call struct {
+	*mock.Call
+}
+
+// RemoteTagAt is a helper method to define mock.On call
+//   - ctx context.Context
+//   - dir string
+//   - tag string
+func (_e *MockGit_Expecter) RemoteTagAt(ctx any, dir any, tag any) *MockGit_RemoteTagAt_Call {
+	return &MockGit_RemoteTagAt_Call{Call: _e.mock.On("RemoteTagAt", ctx, dir, tag)}
+}
+
+func (_c *MockGit_RemoteTagAt_Call) Run(run func(ctx context.Context, dir string, tag string)) *MockGit_RemoteTagAt_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *MockGit_RemoteTagAt_Call) Return(s string, b bool, err error) *MockGit_RemoteTagAt_Call {
+	_c.Call.Return(s, b, err)
+	return _c
+}
+
+func (_c *MockGit_RemoteTagAt_Call) RunAndReturn(run func(ctx context.Context, dir string, tag string) (string, bool, error)) *MockGit_RemoteTagAt_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Staged provides a mock function for the type MockGit
 func (_mock *MockGit) Staged(ctx context.Context, dir string, paths ...string) (bool, error) {
 	// string

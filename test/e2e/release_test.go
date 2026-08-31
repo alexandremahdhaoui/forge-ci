@@ -50,6 +50,19 @@ func newReleaseFake(t *testing.T) *releaseFake {
 			"upload_url": f.server.URL + "/uploads{?name,label}",
 		})
 	})
+	mux.HandleFunc("GET /repos/{owner}/{repo}/releases/tags/{tag}", func(w http.ResponseWriter, r *http.Request) {
+		tag, ok := f.releases[r.PathValue("owner")+"/"+r.PathValue("repo")]
+		if !ok || tag != r.PathValue("tag") {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{}`))
+
+			return
+		}
+
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"html_url": f.server.URL + "/releases/" + tag,
+		})
+	})
 	mux.HandleFunc("POST /uploads", func(w http.ResponseWriter, r *http.Request) {
 		data, err := io.ReadAll(r.Body)
 		require.NoError(t, err)
@@ -222,6 +235,68 @@ func TestAGreenBuildReleasesTheAggregatedDistribution(t *testing.T) {
 	sum := sha256.Sum256(binary)
 	require.Equal(t, "sha256:"+hex.EncodeToString(sum[:]),
 		index.Tools[0].Platforms["linux/amd64"].Digest)
+}
+
+// A second release of an already-published revision converges instead of
+// dying on the tag push. Live case: run 35 published v0.45.9, run 36 was a
+// fresh clone whose local tag list said "absent", so it re-created the tag
+// and the remote - the only party that knew - rejected the push. The remote
+// is the authority, and a tag already there at the same commit is
+// convergence, not work.
+func TestASecondReleaseOfTheSameRevisionConverges(t *testing.T) {
+	fake := newReleaseFake(t)
+
+	root := t.TempDir()
+	repo := filepath.Join(root, "demo-repo")
+	statePath := filepath.Join(root, "state")
+
+	require.NoError(t, os.MkdirAll(repo, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "forge.yaml"), []byte(releaseForgeYAML), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(repo, ".envrc"), nil, 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(repo, ".gitignore"),
+		[]byte("/.forge/\n.envrc\n/build/\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "README.md"), []byte("one"), 0o600))
+
+	mustRun(t, repo, "git", "init", "-b", "main")
+	mustRun(t, repo, "git", "config", "user.email", "e2e@example.com")
+	mustRun(t, repo, "git", "config", "user.name", "e2e")
+	mustRun(t, repo, "git", "add", ".")
+	mustRun(t, repo, "git", "commit", "-m", "first")
+
+	origin := filepath.Join(root, "remotes", "owner", "demo-repo.git")
+	require.NoError(t, os.MkdirAll(origin, 0o750))
+	mustRun(t, origin, "git", "init", "--bare")
+	mustRun(t, origin, "git", "symbolic-ref", "HEAD", "refs/heads/main")
+	mustRun(t, repo, "git", "remote", "add", "origin", origin)
+	mustRun(t, repo, "git", "push", "origin", "main")
+
+	require.NoError(t, os.WriteFile(filepath.Join(root, "forge-ci.yaml"),
+		[]byte(releasePipelineYAML(root, statePath, fake.server.URL)), 0o600))
+
+	mustRun(t, root, "forge-ci", "bootstrap", "--config", "forge-ci.yaml", "--root", ".")
+	mustRun(t, root, "forge-ci", "apply", "--config", "forge-ci.yaml", "--root", ".")
+	require.Equal(t, "v0.1.0", fake.releases["owner/demo-repo"])
+
+	// The re-run's checkout is a FRESH clone, tagless like every CI clone:
+	// actions/checkout fetches with --no-tags, which is exactly why the
+	// local tag list was never the authority.
+	require.NoError(t, os.RemoveAll(repo))
+	mustRun(t, root, "git", "clone", "--no-tags", origin, "demo-repo")
+	mustRun(t, repo, "git", "config", "user.email", "e2e@example.com")
+	mustRun(t, repo, "git", "config", "user.name", "e2e")
+	require.NoError(t, os.WriteFile(filepath.Join(repo, ".envrc"), nil, 0o600))
+
+	local := mustRun(t, repo, "git", "tag")
+	require.Empty(t, strings.TrimSpace(local),
+		"the fresh clone must carry no tags, or this test proves nothing")
+
+	out := mustRun(t, root, "forge-ci", "apply", "--config", "forge-ci.yaml", "--root", ".")
+	require.NotContains(t, strings.ToLower(out), "rejected")
+
+	// Exactly one tag on the remote, still at its original commit: the
+	// second run stacked nothing and moved nothing.
+	tags := strings.Fields(mustRun(t, origin, "git", "tag"))
+	require.Equal(t, []string{"v0.1.0"}, tags)
 }
 
 func assetNames(f *releaseFake) []string {

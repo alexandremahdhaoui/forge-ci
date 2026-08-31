@@ -160,31 +160,66 @@ func publish(
 	for _, tag := range plan.Tags {
 		dir := root + "/" + tag.Repo
 
-		at, found, err := git.TagAt(ctx, dir, plan.TagName)
+		// The remote is the authority, not the local tag list: a CI checkout
+		// is a fresh clone that carries no tags, so reading only the local
+		// list re-created an already-published tag and the push was rejected
+		// by the only party that knew. A remote that cannot be read is an
+		// error, never "absent" - falling through would repeat that mistake.
+		hasRemote, err := git.HasRemote(ctx, dir)
 		if err != nil {
 			return out, fmt.Errorf("releasing %s: %w", tag.Repo, err)
 		}
 
-		if found {
-			// Same commit: this member is already released at this
-			// version and a re-run stacks nothing on it.
-			if at == tag.SHA {
-				continue
+		if hasRemote {
+			at, found, err := git.RemoteTagAt(ctx, dir, plan.TagName)
+			if err != nil {
+				return out, fmt.Errorf("releasing %s: %w", tag.Repo, err)
 			}
 
-			// Different commit: the version is being re-pointed, which
-			// changes what a consumer already pinned. Refuse it and
-			// name both commits rather than moving the tag.
-			return out, fmt.Errorf(
-				"releasing %s: %s already points at %s, not %s, and a tag is never moved",
-				tag.Repo, plan.TagName, at, tag.SHA)
+			if found {
+				// Same commit: this member is already released at this
+				// version and a re-run stacks nothing on it. Converged.
+				if at == tag.SHA {
+					continue
+				}
+
+				// Different commit: the version is being re-pointed, which
+				// changes what a consumer already pinned. Refuse it and
+				// name both commits rather than moving the tag.
+				return out, fmt.Errorf(
+					"releasing %s: %s already points at %s, not %s, and a tag is never moved",
+					tag.Repo, plan.TagName, at, tag.SHA)
+			}
 		}
 
+		// Tag re-decides on the union of local and remote: a leftover local
+		// tag at the same commit is an interrupted run, and the push is what
+		// finishes it; one at a different commit is refused there.
 		if err := git.Tag(ctx, dir, plan.TagName, tag.SHA); err != nil {
 			return out, fmt.Errorf("releasing %s: %w", plan.TagName, err)
 		}
 
 		out.Tagged = append(out.Tagged, tag.Repo)
+	}
+
+	// A revision already fully published converges rather than re-releasing:
+	// every member's tag was already on its remote and the release exists,
+	// so there is no work left and no build output to demand - a re-run's
+	// fresh clone has none, its substages were skipped as already passed.
+	// An interrupted run - tags pushed, release missing - falls through and
+	// finishes the job.
+	if len(plan.Tags) > 0 && len(out.Tagged) == 0 {
+		existing, found, err := api.ReleaseByTag(ctx, home, plan.TagName)
+		if err != nil {
+			return out, fmt.Errorf("releasing %s: %w", plan.Version, err)
+		}
+
+		if found {
+			out.URL = existing.HTMLURL
+			out.Reason = plan.Version + " is already released; converged"
+
+			return out, nil
+		}
 	}
 
 	uploads, err := expandAssets(root, plan.Uploads, in.Spec)

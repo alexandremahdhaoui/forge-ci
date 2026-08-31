@@ -59,16 +59,34 @@ func (c *Controller) Publish(ctx context.Context, dir, repo, tag, sha string) (R
 
 	out := Report{}
 
-	at, found, err := c.git.TagAt(ctx, dir, tag)
+	// The remote is the authority on what was already published: a fresh
+	// checkout carries no tags, so the local list answers "absent" for a tag
+	// the remote holds, and re-creating it gets the push rejected. A remote
+	// that cannot be read is an error, never "absent".
+	hasRemote, err := c.git.HasRemote(ctx, dir)
 	if err != nil {
 		return out, fmt.Errorf("publishing %s: %w", tag, err)
 	}
 
-	switch {
-	case found && at != sha:
-		return out, fmt.Errorf(
-			"publishing %s: it already points at %s, not %s, and a tag is never moved", tag, at, sha)
-	case !found:
+	onRemote := false
+	if hasRemote {
+		at, found, err := c.git.RemoteTagAt(ctx, dir, tag)
+		if err != nil {
+			return out, fmt.Errorf("publishing %s: %w", tag, err)
+		}
+
+		if found && at != sha {
+			return out, fmt.Errorf(
+				"publishing %s: it already points at %s, not %s, and a tag is never moved", tag, at, sha)
+		}
+
+		onRemote = found
+	}
+
+	if !onRemote {
+		// Tag decides on the union of local and remote: a leftover local tag
+		// at this commit is an interrupted run whose push this finishes, and
+		// one at another commit is refused there.
 		if err := c.git.Tag(ctx, dir, tag, sha); err != nil {
 			return out, fmt.Errorf("publishing %s: %w", tag, err)
 		}
