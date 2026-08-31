@@ -8,5 +8,6 @@ The `spec` block on this engine's entry in `forge-ci.yaml`.
 |---|---|---|---|
 | `path` | string | yes | The state repo. Created and initialised if it is not a repo yet. |
 | `kinds` | list of string | no | Extra record kinds, each stored under a directory of its own name. This engine never learns what a caller stores in them. |
+| `lfs` | list of string | no | Kinds whose payloads ride git LFS. Each named kind's directory gets a .gitattributes filter rule committed beside its first record, and the LFS filters are wired into the repo before the first add. Every name must be a declared kind, and the machine needs git-lfs installed. For records whose content only has to persist and verify by hash - a dependency lock, say - never to diff. |
 
 forge-ci never validates a spec. This engine does, because only it knows what the keys mean.

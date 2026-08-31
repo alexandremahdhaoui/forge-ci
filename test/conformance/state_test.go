@@ -91,8 +91,24 @@ func TestEveryStateEngineSatisfiesTheTransportContract(t *testing.T) {
 			store := t.TempDir()
 
 			for i, o := range c.Ops {
-				in := map[string]any{"spec": map[string]any{"path": store}}
+				spec := map[string]any{"path": store}
+				in := map[string]any{"spec": spec}
+
 				for k, v := range o.In {
+					// A vector's spec merges over the harness's rather than
+					// replacing it: the store path is the harness's to name,
+					// and what a vector declares - extra kinds, say - rides
+					// alongside it.
+					if k == "spec" {
+						if extra, ok := v.(map[string]any); ok {
+							for ek, ev := range extra {
+								spec[ek] = ev
+							}
+
+							continue
+						}
+					}
+
 					in[k] = v
 				}
 

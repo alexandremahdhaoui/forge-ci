@@ -40,3 +40,12 @@ spec:
   required: false
   means: Extra record kinds, each stored under a directory of its own name. This
     engine never learns what a caller stores in them.
+- key: lfs
+  type: list of string
+  required: false
+  means: Kinds whose payloads ride git LFS. Each named kind's directory gets a
+    .gitattributes filter rule committed beside its first record, and the LFS
+    filters are wired into the repo before the first add. Every name must be a
+    declared kind, and the machine needs git-lfs installed. For records whose
+    content only has to persist and verify by hash - a dependency lock, say -
+    never to diff.

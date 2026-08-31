@@ -566,6 +566,63 @@ func (_c *MockGit_IsRepo_Call) RunAndReturn(run func(ctx context.Context, dir st
 	return _c
 }
 
+// LFSInstall provides a mock function for the type MockGit
+func (_mock *MockGit) LFSInstall(ctx context.Context, dir string) error {
+	ret := _mock.Called(ctx, dir)
+
+	if len(ret) == 0 {
+		panic("no return value specified for LFSInstall")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) error); ok {
+		r0 = returnFunc(ctx, dir)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockGit_LFSInstall_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LFSInstall'
+type MockGit_LFSInstall_Call struct {
+	*mock.Call
+}
+
+// LFSInstall is a helper method to define mock.On call
+//   - ctx context.Context
+//   - dir string
+func (_e *MockGit_Expecter) LFSInstall(ctx any, dir any) *MockGit_LFSInstall_Call {
+	return &MockGit_LFSInstall_Call{Call: _e.mock.On("LFSInstall", ctx, dir)}
+}
+
+func (_c *MockGit_LFSInstall_Call) Run(run func(ctx context.Context, dir string)) *MockGit_LFSInstall_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockGit_LFSInstall_Call) Return(err error) *MockGit_LFSInstall_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockGit_LFSInstall_Call) RunAndReturn(run func(ctx context.Context, dir string) error) *MockGit_LFSInstall_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // LatestTag provides a mock function for the type MockGit
 func (_mock *MockGit) LatestTag(ctx context.Context, dir string, prefix string) (string, error) {
 	ret := _mock.Called(ctx, dir, prefix)

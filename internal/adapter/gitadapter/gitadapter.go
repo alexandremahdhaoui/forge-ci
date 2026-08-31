@@ -52,6 +52,12 @@ type Git interface {
 	// a store whose records are one file each recovers from a concurrent
 	// run without anybody choosing a winner.
 	PullRebase(ctx context.Context, dir, branch string) error
+	// LFSInstall wires the LFS filters into this one repo's config. It must
+	// run before the first add of an LFS-tracked path - the clean filter is
+	// what turns the blob into a pointer, and adding without it commits the
+	// full content under an attribute that promises otherwise. A machine
+	// without git-lfs is an error that names the missing tool.
+	LFSInstall(ctx context.Context, dir string) error
 }
 
 // ErrNoRemote marks a checkout with no origin. It is not a failure: a
@@ -409,6 +415,19 @@ func (g *CLI) RemoteTagAt(ctx context.Context, dir, tag string) (string, bool, e
 	}
 
 	return "", false, nil
+}
+
+// LFSInstall configures the LFS filters for one repository. --local keeps it
+// out of the operator's global config: the store opted in, not the machine.
+func (g *CLI) LFSInstall(ctx context.Context, dir string) error {
+	_, err := g.run(ctx, dir, "installing git-lfs filters in "+dir, "lfs", "install", "--local")
+	if err != nil && strings.Contains(err.Error(), "not a git command") {
+		return fmt.Errorf(
+			"installing git-lfs filters in %s: git-lfs is not installed on this machine "+
+				"and the store declares LFS-tracked kinds: %w", dir, err)
+	}
+
+	return err
 }
 
 func (g *CLI) HasRemote(ctx context.Context, dir string) (bool, error) {

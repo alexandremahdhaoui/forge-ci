@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/engineadapter"
+	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/fsadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/gitadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/artifactcontroller"
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
@@ -114,6 +115,7 @@ type Options struct {
 type Controller struct {
 	caller engineadapter.Caller
 	git    gitadapter.Git
+	fs     fsadapter.FS
 	now    func() time.Time
 
 	state sync.Mutex
@@ -124,7 +126,10 @@ func New(caller engineadapter.Caller, git gitadapter.Git, now func() time.Time) 
 		now = time.Now
 	}
 
-	return &Controller{caller: caller, git: git, now: now}
+	// The real filesystem, not an injection point: the only read is the lock
+	// manifest at a root the caller already owns, and an absent file is the
+	// ordinary case a fixture wants anyway.
+	return &Controller{caller: caller, git: git, fs: fsadapter.New(), now: now}
 }
 
 func (c *Controller) Apply(
@@ -203,6 +208,13 @@ func (c *Controller) Apply(
 			}
 
 			report.Minted = true
+
+			// A minted revision carries its exact dependency closure: one
+			// record per lockfile the workspace's lock resolved, so the
+			// claim "proven with these bytes" outlives the runner.
+			if err := c.recordDependencyLocks(ctx, index, revision, root); err != nil {
+				return Report{}, err
+			}
 		}
 
 		if stage.Release != "" {
@@ -391,6 +403,120 @@ func (c *Controller) bumpLevel(
 // the id is derived from the tuple and the record is the same.
 func (c *Controller) mint(ctx context.Context, index engineIndex, revision citypes.Revision) error {
 	return c.putJSON(ctx, index, KindRevision, revision.ID, toWire(revision))
+}
+
+// KindDependencyLock is the record family that pins a revision to the exact
+// dependency closure it was proven with. The store learns nothing about it -
+// the pipeline opts in by declaring the kind on its state engine.
+const KindDependencyLock = "dependency-lock"
+
+// lockManifestPath is where forge-factory's lock records what it resolved.
+// The path is the whole contract: this core never learns what a lockfile is,
+// only which bytes were locked and what they hashed to.
+const lockManifestPath = ".forge/dependency-locks.json"
+
+type lockManifest struct {
+	Version int `json:"version"`
+	Locks   []struct {
+		Path   string `json:"path"`
+		SHA256 string `json:"sha256"`
+	} `json:"locks"`
+}
+
+// dependencyLockRecord is one stored lockfile: the revision it belongs to,
+// the file it came from, the hash that lets a reader verify the content, and
+// the content itself. The payload is a string - a byte array marshals to
+// base64 and the generated MCP schema refuses it.
+type dependencyLockRecord struct {
+	Revision string `json:"revision"`
+	Path     string `json:"path"`
+	SHA256   string `json:"sha256"`
+	Lockfile string `json:"lockfile"`
+}
+
+// recordDependencyLocks stores the closure a minted revision was proven
+// with. Nothing happens unless the pipeline opted in - the state engine
+// declares the kind - and nothing happens when the workspace's lock never
+// ran: an absent manifest is the ordinary single-repo case.
+//
+// A manifest hash that disagrees with the file refuses the record: the tree
+// moved between the lock and the mint, and recording either version would
+// pin the revision to bytes it was not proven with.
+func (c *Controller) recordDependencyLocks(
+	ctx context.Context,
+	index engineIndex,
+	revision citypes.Revision,
+	root string,
+) error {
+	if !stateDeclaresKind(index.stateSpec, KindDependencyLock) {
+		return nil
+	}
+
+	manifestPath := filepath.Join(root, filepath.FromSlash(lockManifestPath))
+
+	exists, err := c.fs.Exists(manifestPath)
+	if err != nil {
+		return fmt.Errorf("reading the lock manifest: %w", err)
+	}
+
+	if !exists {
+		return nil
+	}
+
+	raw, err := c.fs.ReadFile(manifestPath)
+	if err != nil {
+		return fmt.Errorf("reading the lock manifest: %w", err)
+	}
+
+	var manifest lockManifest
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		return fmt.Errorf("reading the lock manifest: %w", err)
+	}
+
+	for _, lock := range manifest.Locks {
+		content, err := c.fs.ReadFile(filepath.Join(root, filepath.FromSlash(lock.Path)))
+		if err != nil {
+			return fmt.Errorf("recording dependency lock %s: %w", lock.Path, err)
+		}
+
+		sum := sha256.Sum256(content)
+		if got := hex.EncodeToString(sum[:]); got != lock.SHA256 {
+			return fmt.Errorf(
+				"recording dependency lock %s: the file changed since the lock resolved it "+
+					"(manifest says %s, the file hashes to %s)", lock.Path, lock.SHA256, got)
+		}
+
+		err = c.putJSON(ctx, index, KindDependencyLock, revision.ID+"/"+lock.Path,
+			dependencyLockRecord{
+				Revision: revision.ID,
+				Path:     lock.Path,
+				SHA256:   lock.SHA256,
+				Lockfile: string(content),
+			})
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// stateDeclaresKind answers whether the state engine's spec names a kind in
+// spec.kinds. The core reads the list and nothing else: what a kind means
+// stays between the pipeline and its store.
+func stateDeclaresKind(spec map[string]any, kind string) bool {
+	list, ok := spec["kinds"].([]any)
+	if !ok {
+		return false
+	}
+
+	for _, e := range list {
+		if name, ok := e.(string); ok && name == kind {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (c *Controller) applyStage(
