@@ -230,16 +230,24 @@ func (_c *MockGit_Clone_Call) RunAndReturn(run func(ctx context.Context, url str
 }
 
 // Commit provides a mock function for the type MockGit
-func (_mock *MockGit) Commit(ctx context.Context, dir string, message string) error {
-	ret := _mock.Called(ctx, dir, message)
+func (_mock *MockGit) Commit(ctx context.Context, dir string, message string, paths ...string) error {
+	// string
+	_va := make([]any, len(paths))
+	for _i := range paths {
+		_va[_i] = paths[_i]
+	}
+	var _ca []any
+	_ca = append(_ca, ctx, dir, message)
+	_ca = append(_ca, _va...)
+	ret := _mock.Called(_ca...)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Commit")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) error); ok {
-		r0 = returnFunc(ctx, dir, message)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, ...string) error); ok {
+		r0 = returnFunc(ctx, dir, message, paths...)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -255,11 +263,13 @@ type MockGit_Commit_Call struct {
 //   - ctx context.Context
 //   - dir string
 //   - message string
-func (_e *MockGit_Expecter) Commit(ctx any, dir any, message any) *MockGit_Commit_Call {
-	return &MockGit_Commit_Call{Call: _e.mock.On("Commit", ctx, dir, message)}
+//   - paths ...string
+func (_e *MockGit_Expecter) Commit(ctx any, dir any, message any, paths ...any) *MockGit_Commit_Call {
+	return &MockGit_Commit_Call{Call: _e.mock.On("Commit",
+		append([]any{ctx, dir, message}, paths...)...)}
 }
 
-func (_c *MockGit_Commit_Call) Run(run func(ctx context.Context, dir string, message string)) *MockGit_Commit_Call {
+func (_c *MockGit_Commit_Call) Run(run func(ctx context.Context, dir string, message string, paths ...string)) *MockGit_Commit_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -273,10 +283,19 @@ func (_c *MockGit_Commit_Call) Run(run func(ctx context.Context, dir string, mes
 		if args[2] != nil {
 			arg2 = args[2].(string)
 		}
+		var arg3 []string
+		variadicArgs := make([]string, len(args)-3)
+		for i, a := range args[3:] {
+			if a != nil {
+				variadicArgs[i] = a.(string)
+			}
+		}
+		arg3 = variadicArgs
 		run(
 			arg0,
 			arg1,
 			arg2,
+			arg3...,
 		)
 	})
 	return _c
@@ -287,7 +306,7 @@ func (_c *MockGit_Commit_Call) Return(err error) *MockGit_Commit_Call {
 	return _c
 }
 
-func (_c *MockGit_Commit_Call) RunAndReturn(run func(ctx context.Context, dir string, message string) error) *MockGit_Commit_Call {
+func (_c *MockGit_Commit_Call) RunAndReturn(run func(ctx context.Context, dir string, message string, paths ...string) error) *MockGit_Commit_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -818,8 +837,16 @@ func (_c *MockGit_RemoteSHA_Call) RunAndReturn(run func(ctx context.Context, url
 }
 
 // Staged provides a mock function for the type MockGit
-func (_mock *MockGit) Staged(ctx context.Context, dir string) (bool, error) {
-	ret := _mock.Called(ctx, dir)
+func (_mock *MockGit) Staged(ctx context.Context, dir string, paths ...string) (bool, error) {
+	// string
+	_va := make([]any, len(paths))
+	for _i := range paths {
+		_va[_i] = paths[_i]
+	}
+	var _ca []any
+	_ca = append(_ca, ctx, dir)
+	_ca = append(_ca, _va...)
+	ret := _mock.Called(_ca...)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Staged")
@@ -827,16 +854,16 @@ func (_mock *MockGit) Staged(ctx context.Context, dir string) (bool, error) {
 
 	var r0 bool
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (bool, error)); ok {
-		return returnFunc(ctx, dir)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, ...string) (bool, error)); ok {
+		return returnFunc(ctx, dir, paths...)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string) bool); ok {
-		r0 = returnFunc(ctx, dir)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, ...string) bool); ok {
+		r0 = returnFunc(ctx, dir, paths...)
 	} else {
 		r0 = ret.Get(0).(bool)
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
-		r1 = returnFunc(ctx, dir)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, ...string) error); ok {
+		r1 = returnFunc(ctx, dir, paths...)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -851,11 +878,13 @@ type MockGit_Staged_Call struct {
 // Staged is a helper method to define mock.On call
 //   - ctx context.Context
 //   - dir string
-func (_e *MockGit_Expecter) Staged(ctx any, dir any) *MockGit_Staged_Call {
-	return &MockGit_Staged_Call{Call: _e.mock.On("Staged", ctx, dir)}
+//   - paths ...string
+func (_e *MockGit_Expecter) Staged(ctx any, dir any, paths ...any) *MockGit_Staged_Call {
+	return &MockGit_Staged_Call{Call: _e.mock.On("Staged",
+		append([]any{ctx, dir}, paths...)...)}
 }
 
-func (_c *MockGit_Staged_Call) Run(run func(ctx context.Context, dir string)) *MockGit_Staged_Call {
+func (_c *MockGit_Staged_Call) Run(run func(ctx context.Context, dir string, paths ...string)) *MockGit_Staged_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -865,9 +894,18 @@ func (_c *MockGit_Staged_Call) Run(run func(ctx context.Context, dir string)) *M
 		if args[1] != nil {
 			arg1 = args[1].(string)
 		}
+		var arg2 []string
+		variadicArgs := make([]string, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(string)
+			}
+		}
+		arg2 = variadicArgs
 		run(
 			arg0,
 			arg1,
+			arg2...,
 		)
 	})
 	return _c
@@ -878,7 +916,7 @@ func (_c *MockGit_Staged_Call) Return(b bool, err error) *MockGit_Staged_Call {
 	return _c
 }
 
-func (_c *MockGit_Staged_Call) RunAndReturn(run func(ctx context.Context, dir string) (bool, error)) *MockGit_Staged_Call {
+func (_c *MockGit_Staged_Call) RunAndReturn(run func(ctx context.Context, dir string, paths ...string) (bool, error)) *MockGit_Staged_Call {
 	_c.Call.Return(run)
 	return _c
 }

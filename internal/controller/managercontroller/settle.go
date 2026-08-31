@@ -86,7 +86,7 @@ func (r GitHubRealizer) settleRepo(dir string, paths []string) (string, error) {
 		}
 	}
 
-	staged, err := r.git.Staged(r.ctx, dir)
+	staged, err := r.git.Staged(r.ctx, dir, paths...)
 	if err != nil {
 		return "", err
 	}
@@ -99,7 +99,7 @@ func (r GitHubRealizer) settleRepo(dir string, paths []string) (string, error) {
 		return fmt.Sprintf("nothing to commit in %s: what changed already matches HEAD", dir), nil
 	}
 
-	if err := r.git.Commit(r.ctx, dir, commitMessage); err != nil {
+	if err := r.git.Commit(r.ctx, dir, commitMessage, paths...); err != nil {
 		return "", err
 	}
 

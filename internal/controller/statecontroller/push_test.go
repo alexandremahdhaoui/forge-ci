@@ -128,3 +128,55 @@ func TestAnIdenticalRecordCommitsNothingAndPushesNothing(t *testing.T) {
 
 	assert.Equal(t, before, gitRun(t, remote, "rev-parse", "main"))
 }
+
+// The store often shares a repo with other work. This asked git about the
+// whole index and then committed with no pathspec, so a developer's staged
+// file was swept into a "ci:" commit under the engine's name - and pushed.
+// FOLLOWUP carried it as "the state engine sweeps a dirty store repo".
+func TestARecordCommitDoesNotSweepSomebodyElsesStagedWork(t *testing.T) {
+	root, remote, c := store(t)
+
+	mine := filepath.Join(root, "half-finished.go")
+	require.NoError(t, os.WriteFile(mine, []byte("package broken\n"), 0o600))
+	gitRun(t, root, "add", "half-finished.go")
+
+	_, err := c.Put(t.Context(), citypes.StatePutInput{
+		Kind: "revision", Key: "abc", Payload: `{"id":"abc"}`,
+		Spec: map[string]any{"path": root},
+	})
+	require.NoError(t, err)
+
+	assert.NotContains(t, gitRun(t, root, "show", "--name-only", "HEAD"), "half-finished.go",
+		"the record commit carries the record and nothing else")
+	assert.Contains(t, gitRun(t, root, "diff", "--cached", "--name-only"), "half-finished.go",
+		"and the developer's file is still staged, where they left it")
+	assert.NotContains(t, gitRun(t, remote, "log", "--all", "--name-only"), "half-finished.go",
+		"least of all pushed")
+}
+
+// The same defect from the index side: re-recording an identical payload
+// stages nothing, so there is nothing to commit - however dirty the index is
+// with somebody else's work.
+func TestAnIdenticalRecordIgnoresSomebodyElsesStagedWork(t *testing.T) {
+	root, _, c := store(t)
+
+	in := citypes.StatePutInput{
+		Kind: "revision", Key: "abc", Payload: `{"id":"abc"}`,
+		Spec: map[string]any{"path": root},
+	}
+
+	_, err := c.Put(t.Context(), in)
+	require.NoError(t, err)
+
+	head := gitRun(t, root, "rev-parse", "HEAD")
+
+	mine := filepath.Join(root, "half-finished.go")
+	require.NoError(t, os.WriteFile(mine, []byte("package broken\n"), 0o600))
+	gitRun(t, root, "add", "half-finished.go")
+
+	_, err = c.Put(t.Context(), in)
+	require.NoError(t, err)
+
+	assert.Equal(t, head, gitRun(t, root, "rev-parse", "HEAD"),
+		"the payload did not change, so the engine had nothing to record")
+}

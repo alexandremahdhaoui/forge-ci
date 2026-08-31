@@ -18,10 +18,14 @@ type Git interface {
 	Clone(ctx context.Context, url, dir string) error
 	IsRepo(ctx context.Context, dir string) (bool, error)
 	Add(ctx context.Context, dir, path string) error
-	Commit(ctx context.Context, dir, message string) error
+	// Commit records what paths hold. Callers pass the paths they staged:
+	// a pathspec-less commit takes the whole index, including a human's.
+	Commit(ctx context.Context, dir, message string, paths ...string) error
 	HeadSHA(ctx context.Context, dir string) (string, error)
 	RemoteSHA(ctx context.Context, url, ref string) (string, error)
-	Staged(ctx context.Context, dir string) (bool, error)
+	// Staged reports whether these paths have anything waiting in the index.
+	// Scoped for the same reason Commit is.
+	Staged(ctx context.Context, dir string, paths ...string) (bool, error)
 	LatestTag(ctx context.Context, dir, prefix string) (string, error)
 	SubjectsSince(ctx context.Context, dir, tag string) ([]string, error)
 	WorktreeHash(ctx context.Context, dir string) (string, error)
@@ -121,27 +125,47 @@ func (g *CLI) Add(ctx context.Context, dir, path string) error {
 	return err
 }
 
-// Commit records the staged record. A commit writes a git object, so it
+// Commit records what these paths hold. A commit writes a git object, so it
 // needs an identity the host may not have: see gitident.
-func (g *CLI) Commit(ctx context.Context, dir, message string) error {
+//
+// The pathspec is not decoration. A bare `git commit -m` commits the whole
+// index, so a developer with anything staged had their work published under
+// the pipeline's name and pushed. Both callers stage an explicit list and
+// both were undone by this; passing that same list here is what makes the
+// promise true.
+func (g *CLI) Commit(ctx context.Context, dir, message string, paths ...string) error {
 	args := append(gitident.Args(ctx, g.runner, dir), "commit", "-m", message)
+	args = append(args, pathspec(paths)...)
 
 	_, err := g.run(ctx, dir, "committing in "+dir, args...)
 
 	return err
 }
 
-// Staged reports whether anything is in the index waiting to be
-// committed. The state engine stages only the record it wrote, so this
-// is what decides whether a commit happens - the rest of the tree is
-// not the engine's to judge.
-func (g *CLI) Staged(ctx context.Context, dir string) (bool, error) {
-	res, err := g.run(ctx, dir, "reading the index of "+dir, "diff", "--cached", "--name-only")
+// Staged reports whether these paths have anything waiting in the index.
+//
+// It is scoped for the same reason Commit is. Asked about the whole index it
+// answered yes because of somebody else's staged file, and the commit that
+// followed swept that file up.
+func (g *CLI) Staged(ctx context.Context, dir string, paths ...string) (bool, error) {
+	args := append([]string{"diff", "--cached", "--name-only"}, pathspec(paths)...)
+
+	res, err := g.run(ctx, dir, "reading the index of "+dir, args...)
 	if err != nil {
 		return false, err
 	}
 
 	return strings.TrimSpace(res.Stdout) != "", nil
+}
+
+// pathspec renders paths as a git pathspec. No paths means the whole tree,
+// which both callers must avoid, so they always pass what they staged.
+func pathspec(paths []string) []string {
+	if len(paths) == 0 {
+		return nil
+	}
+
+	return append([]string{"--"}, paths...)
 }
 
 func (g *CLI) HeadSHA(ctx context.Context, dir string) (string, error) {

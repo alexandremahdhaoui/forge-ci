@@ -280,3 +280,62 @@ func TestASettleIgnoresAPathInNoCheckout(t *testing.T) {
 	assert.True(t, res.Changed, "the file was written, so the run still stops")
 	require.FileExists(t, filepath.Join(root, "loose/file.yaml"))
 }
+
+// The case the untracked test above cannot reach. An untracked file is not in
+// the index, so a pathspec-less `git commit -m` never took it; a STAGED one
+// it took every time, and the settle then pushed it. Somebody's half-finished
+// work, published under the pipeline's name, to a remote.
+func TestASettleLeavesAStagedFileOfSomebodyElsesAlone(t *testing.T) {
+	root, member, _ := workspace(t)
+
+	mine := filepath.Join(member, "half-finished.go")
+	require.NoError(t, os.WriteFile(mine, []byte("package broken\n"), 0o600))
+	out(t, member, "add", "half-finished.go")
+
+	_, err := settling(t, root).Reconcile(citypes.ReconcileInput{
+		Manager:   "github",
+		Resources: []citypes.Resource{fileContent("member/.github/workflows/ci.yaml", "on: push\n")},
+	})
+	require.NoError(t, err)
+
+	assert.NotContains(t, out(t, member, "show", "--name-only", "HEAD"), "half-finished.go",
+		"a staged file belongs to whoever staged it, not to the pipeline's commit")
+	assert.Contains(t, out(t, member, "diff", "--cached", "--name-only"), "half-finished.go",
+		"and it is still staged, exactly where its author left it")
+}
+
+// The other half of the same defect. settleRepo asks whether what it staged
+// is worth committing; asked about the WHOLE index it answered yes because of
+// somebody else's staged file, and committed on the strength of it.
+//
+// The file the reconcile converged is deleted and restored to exactly what
+// HEAD carries, so the settle's own `git add` stages nothing. Only the
+// human's file is in the index.
+func TestASettleStagingNothingOfItsOwnIgnoresSomebodyElsesIndex(t *testing.T) {
+	root, member, _ := workspace(t)
+
+	res := []citypes.Resource{fileContent("member/.github/workflows/ci.yaml", "on: push\n")}
+
+	first, err := settling(t, root).Reconcile(citypes.ReconcileInput{Manager: "github", Resources: res})
+	require.NoError(t, err)
+	require.True(t, first.Changed)
+
+	head := out(t, member, "rev-parse", "HEAD")
+
+	require.NoError(t, os.Remove(filepath.Join(member, ".github/workflows/ci.yaml")))
+
+	mine := filepath.Join(member, "half-finished.go")
+	require.NoError(t, os.WriteFile(mine, []byte("package broken\n"), 0o600))
+	out(t, member, "add", "half-finished.go")
+
+	second, err := settling(t, root).Reconcile(citypes.ReconcileInput{
+		Manager: "github", Resources: res, Owned: first.Owned,
+	})
+	require.NoError(t, err)
+
+	assert.Contains(t, second.Actions[len(second.Actions)-1], "nothing to commit",
+		"the settle staged nothing of its own, whatever else is in the index")
+	assert.Equal(t, head, out(t, member, "rev-parse", "HEAD"))
+	assert.Contains(t, out(t, member, "diff", "--cached", "--name-only"), "half-finished.go",
+		"and the human's file is untouched, still staged")
+}

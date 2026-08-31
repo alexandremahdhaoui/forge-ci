@@ -241,13 +241,15 @@ func (c *Controller) List(ctx context.Context, in citypes.StateGetInput) (citype
 	return citypes.StateListOutput{Keys: keys}, nil
 }
 
-// commit records exactly the file this write produced. It stages that
-// one path and commits only what is staged: the store often shares a
-// repo with other work, and sweeping a dirty tree into a "ci:" commit
-// buries changes the engine had no business recording.
-// commit records the written file and answers whether a commit happened. An
-// identical payload stages nothing, and a caller that pushed on that would
-// push nothing every time a run re-recorded a record it already had.
+// commit records exactly the file this write produced, and answers whether a
+// commit happened. An identical payload stages nothing, and a caller that
+// pushed on that would push nothing every time a run re-recorded a record it
+// already had.
+//
+// One path is staged, asked about and committed. The store often shares a
+// repo with other work, and this used to ask git about the whole index and
+// then commit with no pathspec, so a human's staged file was swept into a
+// "ci:" commit and pushed under the engine's name.
 func (c *Controller) commit(ctx context.Context, root, target, kind, key string) (bool, error) {
 	if c.git == nil {
 		return false, nil
@@ -267,16 +269,22 @@ func (c *Controller) commit(ctx context.Context, root, target, kind, key string)
 	// git -C root resolves pathspecs inside the repo, so the target is
 	// handed over relative to it - a store named by a relative path would
 	// otherwise stage a root-prefixed path that exists nowhere.
-	relTarget := target
-	if rel, err := filepath.Rel(root, target); err == nil && !strings.HasPrefix(rel, "..") {
-		relTarget = rel
+	//
+	// A target that does not resolve under the root is refused rather than
+	// passed through absolute. Handing `git -C root` a path outside the repo
+	// is not a record this engine can write, and falling back to it turned a
+	// bad spec.path into a confusing git error somewhere else.
+	relTarget, err := filepath.Rel(root, target)
+	if err != nil || strings.HasPrefix(relTarget, "..") {
+		return false, fmt.Errorf(
+			"recording %s %q: %s is outside the state root %s", kind, key, target, root)
 	}
 
 	if err := c.git.Add(ctx, root, relTarget); err != nil {
 		return false, fmt.Errorf("recording %s %q: %w", kind, key, err)
 	}
 
-	staged, err := c.git.Staged(ctx, root)
+	staged, err := c.git.Staged(ctx, root, relTarget)
 	if err != nil {
 		return false, fmt.Errorf("recording %s %q: %w", kind, key, err)
 	}
@@ -285,7 +293,7 @@ func (c *Controller) commit(ctx context.Context, root, target, kind, key string)
 		return false, nil
 	}
 
-	if err := c.git.Commit(ctx, root, fmt.Sprintf("ci: %s %s", kind, key)); err != nil {
+	if err := c.git.Commit(ctx, root, fmt.Sprintf("ci: %s %s", kind, key), relTarget); err != nil {
 		return false, fmt.Errorf("recording %s %q: %w", kind, key, err)
 	}
 
