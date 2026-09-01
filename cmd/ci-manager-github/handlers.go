@@ -88,5 +88,5 @@ func fromReconcileOutput(out citypes.ReconcileOutput) *ReconcileOutput {
 		actions = []string{}
 	}
 
-	return &ReconcileOutput{Owned: owned, Actions: actions, Changed: out.Changed}
+	return &ReconcileOutput{Owned: owned, Actions: actions, Changed: out.Changed, Published: out.Published}
 }

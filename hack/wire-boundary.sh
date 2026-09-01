@@ -85,7 +85,7 @@ for dir in cmd/ci-*; do
 
     grep -q 'ReconcileOutput{' "$handlers" || continue
 
-    for field in Changed; do
+    for field in Changed Published; do
         grep -q "	$field bool" "$spec" || continue
 
         if ! grep -qE "$field: *out\.$field" "$handlers"; then

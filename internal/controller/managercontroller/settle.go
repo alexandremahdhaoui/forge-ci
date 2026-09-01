@@ -28,9 +28,9 @@ var _ Settler = GitHubRealizer{}
 // else was uncommitted would publish a human's half-finished work under the
 // pipeline's name, which is not the pipeline's to publish. That is why this
 // stages an explicit list and never the worktree.
-func (r GitHubRealizer) Settle(paths []string) (Action, error) {
+func (r GitHubRealizer) Settle(paths []string) (Action, bool, error) {
 	if r.git == nil {
-		return Action{}, nil
+		return Action{}, false, nil
 	}
 
 	byRepo := map[string][]string{}
@@ -55,40 +55,47 @@ func (r GitHubRealizer) Settle(paths []string) (Action, error) {
 	sort.Strings(dirs)
 
 	var (
-		lines    []string
-		failures []error
+		lines     []string
+		failures  []error
+		published bool
 	)
 
 	for _, dir := range dirs {
-		line, err := r.settleRepo(dir, byRepo[dir])
+		line, pushed, err := r.settleRepo(dir, byRepo[dir])
 		if err != nil {
 			failures = append(failures, err)
 
 			continue
 		}
 
+		published = published || pushed
+
 		lines = append(lines, line)
 	}
 
 	if len(failures) > 0 {
-		return Action{}, errors.Join(failures...)
+		return Action{}, false, errors.Join(failures...)
 	}
 
-	return Did(strings.Join(lines, "\n")), nil
+	return Did(strings.Join(lines, "\n")), published, nil
 }
 
-func (r GitHubRealizer) settleRepo(dir string, paths []string) (string, error) {
+// settleRepo commits one checkout's converged paths and answers whether the
+// commit was pushed. Committed-but-unpushed (no remote, detached HEAD) is
+// durable on this machine and published nowhere - the caller's stop
+// decision needs the difference.
+func (r GitHubRealizer) settleRepo(dir string, paths []string) (string, bool, error) {
 	sort.Strings(paths)
 
 	for _, p := range paths {
 		if err := r.git.Add(r.ctx, dir, p); err != nil {
-			return "", err
+			return "", false, err
 		}
 	}
 
 	staged, err := r.git.Staged(r.ctx, dir, paths...)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 
 	if !staged {
@@ -96,16 +103,16 @@ func (r GitHubRealizer) settleRepo(dir string, paths []string) (string, error) {
 		// It converged, so the run still stops, and there is nothing to
 		// commit. Reporting a commit that never happened is a lie in the log
 		// an operator reads to find out what the pipeline did.
-		return fmt.Sprintf("nothing to commit in %s: what changed already matches HEAD", dir), nil
+		return fmt.Sprintf("nothing to commit in %s: what changed already matches HEAD", dir), false, nil
 	}
 
 	if err := r.git.Commit(r.ctx, dir, commitMessage, paths...); err != nil {
-		return "", err
+		return "", false, err
 	}
 
 	sha, err := r.git.HeadSHA(r.ctx, dir)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 
 	short := sha
@@ -115,30 +122,30 @@ func (r GitHubRealizer) settleRepo(dir string, paths []string) (string, error) {
 
 	has, err := r.git.HasRemote(r.ctx, dir)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 
 	if !has {
 		return fmt.Sprintf("committed %s @ %s; %v, so nothing was pushed",
-			dir, short, gitadapter.ErrNoRemote), nil
+			dir, short, gitadapter.ErrNoRemote), false, nil
 	}
 
 	branch, err := r.git.Branch(r.ctx, dir)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 
 	if branch == "" {
 		// A detached HEAD is what a checkout of a tag looks like. Picking a
 		// branch here would push the commit somewhere nobody named.
-		return fmt.Sprintf("committed %s @ %s; HEAD is detached, so nothing was pushed", dir, short), nil
+		return fmt.Sprintf("committed %s @ %s; HEAD is detached, so nothing was pushed", dir, short), false, nil
 	}
 
 	if err := r.git.Push(r.ctx, dir, branch); err != nil {
-		return "", err
+		return "", false, err
 	}
 
-	return fmt.Sprintf("committed and pushed %s @ %s to %s", dir, short, branch), nil
+	return fmt.Sprintf("committed and pushed %s @ %s to %s", dir, short, branch), true, nil
 }
 
 // repoOf answers the checkout a converged path belongs to and the path

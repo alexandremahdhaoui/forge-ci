@@ -139,7 +139,7 @@ func (c *Controller) Apply(
 
 	// false: an apply converges what can be converged and leaves credentials
 	// alone. Only a bootstrap is responsible for those.
-	actions, changed, err := c.reconcileResources(ctx, p, index, root, false, opts)
+	actions, changed, published, err := c.reconcileResources(ctx, p, index, root, false, opts)
 	if err != nil {
 		return Report{}, err
 	}
@@ -165,8 +165,22 @@ func (c *Controller) Apply(
 	// the manager has already made its changes durable. The run those changes
 	// trigger starts from the corrected state, finds no drift, and does the
 	// work.
-	if changed {
+	//
+	// Superseding is a promise that the superseding run exists, so it is
+	// allowed only when the settle PUBLISHED the changes - a push is what
+	// re-fires the pipeline. A change nobody published cannot re-trigger
+	// anything: stopping for one strands the pipeline forever, which is
+	// exactly what an empty state directory did to a live pipeline for two
+	// runs straight. Such a change is already durable on this machine, so
+	// the run continues and measures the converged state; if it dirtied a
+	// member tree the -dirty refusal at release stays the honest guard.
+	if changed && published {
 		return Report{Actions: actions, Superseded: true}, nil
+	}
+
+	if changed {
+		actions = append(actions,
+			"reconcile changed resources nothing publishes, so no push will re-fire this pipeline; continuing on the converged state")
 	}
 
 	// The revision is resolved here because a run record is keyed by it. It is
@@ -711,10 +725,10 @@ func (c *Controller) reconcileResources(
 	root string,
 	bootstrap bool,
 	opts Options,
-) ([]string, bool, error) {
+) ([]string, bool, bool, error) {
 	owned, err := c.readOwnership(ctx, index)
 	if err != nil {
-		return nil, false, err
+		return nil, false, false, err
 	}
 
 	byManager := map[string][]citypes.Resource{}
@@ -728,7 +742,7 @@ func (c *Controller) reconcileResources(
 		// validates without it.
 		if err := c.caller.Call(ctx, engine.Engine, ToolDeclare,
 			map[string]any{"spec": orEmpty(engine.Spec), "root": root}, &declared); err != nil {
-			return nil, false, fmt.Errorf("asking engine %q what it needs: %w", engine.Alias, err)
+			return nil, false, false, fmt.Errorf("asking engine %q what it needs: %w", engine.Alias, err)
 		}
 
 		// Everything declared is handed over, bootstrapOnly included. The
@@ -747,6 +761,7 @@ func (c *Controller) reconcileResources(
 
 	actions := []string{}
 	changed := false
+	published := false
 	merged := map[string]citypes.Ownership{}
 
 	for _, o := range owned {
@@ -760,7 +775,7 @@ func (c *Controller) reconcileResources(
 	for _, alias := range aliases {
 		manager, err := index.manager(alias)
 		if err != nil {
-			return nil, false, err
+			return nil, false, false, err
 		}
 
 		var out citypes.ReconcileOutput
@@ -780,13 +795,17 @@ func (c *Controller) reconcileResources(
 			DryRun:    opts.DryRun,
 			Force:     opts.Force,
 		}, &out); err != nil {
-			return nil, false, fmt.Errorf("manager %q: %w", alias, err)
+			return nil, false, false, fmt.Errorf("manager %q: %w", alias, err)
 		}
 
 		actions = append(actions, out.Actions...)
 
 		if out.Changed {
 			changed = true
+		}
+
+		if out.Published {
+			published = true
 		}
 
 		for _, o := range out.Owned {
@@ -799,11 +818,11 @@ func (c *Controller) reconcileResources(
 	// the loudest thing a dry run could possibly do.
 	if !opts.DryRun {
 		if err := c.writeOwnership(ctx, index, merged); err != nil {
-			return nil, false, err
+			return nil, false, false, err
 		}
 	}
 
-	return actions, changed, nil
+	return actions, changed, published, nil
 }
 
 func (c *Controller) resolveRevision(

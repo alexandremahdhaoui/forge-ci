@@ -222,12 +222,20 @@ func TestTheWholeLoopRunsLocallyWithNoCloud(t *testing.T) {
 
 	out := mustRun(t, root, "forge-ci", "bootstrap", "--config", filepath.Join(root, "forge-ci.yaml"))
 	require.Contains(t, out, "created directory "+statePath)
+
+	// Only the store root is declared; a kind's directory appears with its
+	// first record. Bootstrap writes the revision and ownership records, so
+	// those two exist; runs/ waits for the first apply. Declaring empty
+	// kind directories was a run-stopper: git cannot carry one, so every
+	// fresh CI clone lacked it and every reconcile "created" it again,
+	// superseding the run with a change no trigger observes.
 	require.DirExists(t, filepath.Join(statePath, "revisions"))
-	require.DirExists(t, filepath.Join(statePath, "runs"))
+	require.NoDirExists(t, filepath.Join(statePath, "runs"))
 
 	out = mustRun(t, root, "forge-ci", "apply", "--config", filepath.Join(root, "forge-ci.yaml"))
 	require.Contains(t, out, "stage build")
 	require.Contains(t, out, "default passed")
+	require.DirExists(t, filepath.Join(statePath, "runs"))
 
 	revision := revisionID(t, statePath)
 	run := readRun(t, statePath, revision)

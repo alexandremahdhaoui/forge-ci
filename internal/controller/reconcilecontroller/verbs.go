@@ -18,7 +18,7 @@ func (c *Controller) Bootstrap(
 	// stages, so there is no run to supersede, and the manager has already
 	// made its changes durable - which is what lets the revision below hash
 	// a committed tree rather than the files this call just wrote.
-	actions, _, err := c.reconcileResources(ctx, p, index, root, true, opts)
+	actions, _, _, err := c.reconcileResources(ctx, p, index, root, true, opts)
 	if err != nil {
 		return Report{}, err
 	}

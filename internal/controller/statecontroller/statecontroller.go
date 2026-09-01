@@ -7,7 +7,6 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/fsadapter"
@@ -123,25 +122,19 @@ func (c *Controller) Declare(spec map[string]any) (citypes.DeclareOutput, error)
 		return citypes.DeclareOutput{}, err
 	}
 
-	known, err := kindsFor(spec)
-	if err != nil {
+	// The kinds are validated and NOT declared. A kind's directory exists
+	// the moment its first record is written - Put creates the path - and
+	// an empty kind is genuinely nothing to converge. Declaring one was
+	// worse than useless: git cannot carry an empty directory, so every
+	// fresh CI clone lacked it, every reconcile re-created it and reported
+	// a change, and the run stopped superseded - forever, because a
+	// directory creation pushes nothing that could fire the superseding
+	// run. Only the store root is declared.
+	if _, err := kindsFor(spec); err != nil {
 		return citypes.DeclareOutput{}, err
 	}
 
-	dirs := make([]string, 0, len(known))
-	for _, dir := range known {
-		dirs = append(dirs, dir)
-	}
-
-	sort.Strings(dirs)
-
-	out := citypes.DeclareOutput{Resources: []citypes.Resource{{Kind: "directory", Name: root}}}
-	for _, dir := range dirs {
-		out.Resources = append(out.Resources,
-			citypes.Resource{Kind: "directory", Name: filepath.Join(root, dir)})
-	}
-
-	return out, nil
+	return citypes.DeclareOutput{Resources: []citypes.Resource{{Kind: "directory", Name: root}}}, nil
 }
 
 func (c *Controller) Get(ctx context.Context, in citypes.StateGetInput) (citypes.StateGetOutput, error) {

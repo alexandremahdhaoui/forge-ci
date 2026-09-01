@@ -54,6 +54,9 @@ type fakeEngines struct {
 	// reconcileChanged is what every manager answers changed with, which is
 	// how a test stands up a run that found drift and corrected it.
 	reconcileChanged bool
+	// reconcilePublished says the fake's settle pushed the changes - the
+	// half of the answer the stop decision hangs on.
+	reconcilePublished bool
 }
 
 // plain is an ordinary run: it writes, and it rewrites nothing that cannot
@@ -120,6 +123,7 @@ func (f *fakeEngines) dispatch(_ context.Context, uri, tool string, in, out any)
 
 		return assign(out, citypes.ReconcileOutput{
 			Owned: owned, Actions: []string{"reconciled"}, Changed: f.reconcileChanged,
+			Published: f.reconcilePublished,
 		})
 	case uri == uriState && tool == "get":
 		var input citypes.StateGetInput

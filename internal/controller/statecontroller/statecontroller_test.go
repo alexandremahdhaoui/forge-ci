@@ -131,16 +131,28 @@ func TestKeyCannotEscapeTheStateRoot(t *testing.T) {
 	require.FileExists(t, filepath.Join(root, "revisions", "escape.json"))
 }
 
-func TestDeclareAsksForTheStateDirectories(t *testing.T) {
+// Only the store root is declared. A kind directory exists the moment its
+// first record lands - Put creates the path - and declaring an empty one was
+// a run-stopper: git cannot carry an empty directory, so every fresh CI
+// clone lacked it, every reconcile re-created it, and the run stopped
+// superseded by a change no trigger observes.
+func TestDeclareAsksForTheStoreRootAlone(t *testing.T) {
 	c, _, spec := setup(t)
 
 	out, err := c.Declare(spec)
 	require.NoError(t, err)
-	require.Len(t, out.Resources, 4)
+	require.Len(t, out.Resources, 1)
+	require.Equal(t, "directory", out.Resources[0].Kind)
+	require.Equal(t, spec["path"], out.Resources[0].Name)
+}
 
-	for _, r := range out.Resources {
-		require.Equal(t, "directory", r.Kind)
-	}
+// A malformed kinds list still refuses at declare, not at first write.
+func TestDeclareStillValidatesTheKinds(t *testing.T) {
+	c, _, spec := setup(t)
+	spec["kinds"] = []any{123}
+
+	_, err := c.Declare(spec)
+	require.Error(t, err)
 }
 
 func TestDeclareNeedsAPath(t *testing.T) {

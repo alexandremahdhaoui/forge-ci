@@ -70,6 +70,12 @@ type ReconcileOutput struct {
 	// change is already durable, so the next run reads the corrected state
 	// and this is false.
 	Changed bool `json:"changed,omitempty"`
+	// Published says the settle delivered the changes somewhere outside this
+	// machine - a git push. It is what the caller's stop decision hangs on:
+	// a published change re-fires the pipeline, so the run may stop
+	// superseded; a change nobody published cannot re-trigger anything, and
+	// a run that stopped for one would strand the pipeline forever.
+	Published bool `json:"published,omitempty"`
 }
 
 type RepoCheckout struct {

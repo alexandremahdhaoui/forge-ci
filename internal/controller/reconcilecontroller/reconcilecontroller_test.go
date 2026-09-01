@@ -234,6 +234,7 @@ func TestAManagerRefusalStopsTheApply(t *testing.T) {
 func TestAChangedReconcileStopsTheApplyBeforeTheRevision(t *testing.T) {
 	f := newFakeEngines(t)
 	f.reconcileChanged = true
+	f.reconcilePublished = true
 
 	report, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(),
 		pipeline(stage("build", substage("default", []string{"build"}))), "/work", plain)
@@ -248,6 +249,34 @@ func TestAChangedReconcileStopsTheApplyBeforeTheRevision(t *testing.T) {
 
 	require.True(t, report.Advanced(),
 		"nothing blocked: no stage failed and no gate refused")
+}
+
+// Superseding is a promise that the superseding run exists, and only a push
+// makes that true. A change nobody published - a directory the local manager
+// created, a commit with no remote - cannot re-fire the pipeline, so
+// stopping for it would strand the pipeline forever: every fresh clone
+// re-creates the change, reports superseded, and no run ever follows. Two
+// live runs died exactly that way on an empty state directory.
+func TestAChangedButUnpublishedReconcileContinues(t *testing.T) {
+	f := newFakeEngines(t)
+	f.reconcileChanged = true
+
+	report, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(),
+		pipeline(stage("build", substage("default", []string{"build"}))), "/work", plain)
+	require.NoError(t, err)
+
+	require.False(t, report.Superseded, "no push means no superseding run; stopping would strand the pipeline")
+	require.NotEmpty(t, report.Revision.ID, "the run continues and measures the converged state")
+	require.NotEmpty(t, report.Stages)
+	require.Equal(t, 1, f.counted(call{uriCompute, "run"}))
+
+	var noted bool
+	for _, a := range report.Actions {
+		if strings.Contains(a, "no push will re-fire this pipeline") {
+			noted = true
+		}
+	}
+	require.True(t, noted, "continuing past unpublished changes is said out loud, never silent")
 }
 
 // The compatibility guarantee. A manager that reports no change leaves the

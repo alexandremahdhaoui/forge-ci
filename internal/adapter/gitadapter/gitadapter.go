@@ -483,7 +483,14 @@ func (g *CLI) PullRebase(ctx context.Context, dir, branch string) error {
 		return err
 	}
 
-	args := append(gitident.Args(ctx, g.runner, dir), "rebase", "origin/"+branch)
+	// --autostash carries the checkout's unstaged work across the rebase.
+	// The store often shares its clone with a workspace whose sync writes
+	// machine-local files into it (.envrc, an amended .gitignore), and a
+	// bare rebase refuses outright on those - which turned every concurrent
+	// state push into "cannot rebase: You have unstaged changes". The
+	// commits being replayed are this engine's own scoped record commits;
+	// the stash only ferries what was never staged.
+	args := append(gitident.Args(ctx, g.runner, dir), "rebase", "--autostash", "origin/"+branch)
 
 	_, err := g.run(ctx, dir, "rebasing "+dir+" onto origin/"+branch, args...)
 

@@ -72,7 +72,13 @@ type Realizer interface {
 // may be touched. A settle that swept up everything uncommitted would commit
 // a human's unrelated work, which is not the pipeline's to publish.
 type Settler interface {
-	Settle(paths []string) (Action, error)
+	// Settle makes this reconcile's changes durable and answers whether any
+	// of them were PUBLISHED - delivered somewhere outside this machine,
+	// like a git push. The distinction is what the core's stop decision
+	// hangs on: a published change re-fires the pipeline, so the run may
+	// stop superseded; a change nobody published cannot re-trigger
+	// anything, and a run that stopped for one would strand the pipeline.
+	Settle(paths []string) (Action, bool, error)
 }
 
 type Controller struct {
@@ -171,11 +177,15 @@ func (c *Controller) Reconcile(in citypes.ReconcileInput) (citypes.ReconcileOutp
 	//
 	// A dry run settles nothing, because it changed nothing.
 	if settler, ok := c.realizer.(Settler); ok && !in.DryRun && len(changed) > 0 {
-		action, err := settler.Settle(changed)
+		action, published, err := settler.Settle(changed)
 		if err != nil {
 			failures = append(failures, fmt.Errorf("settling what changed: %w", err))
-		} else if action.Text != "" {
-			out.Actions = append(out.Actions, action.Text)
+		} else {
+			if action.Text != "" {
+				out.Actions = append(out.Actions, action.Text)
+			}
+
+			out.Published = published
 		}
 	}
 
