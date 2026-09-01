@@ -128,11 +128,18 @@ type Target struct {
 }
 
 type Stage struct {
-	Name      string     `json:"name"`
-	Mint      bool       `json:"mint,omitempty"`
-	Release   string     `json:"release,omitempty"`
-	Promotion string     `json:"promotion,omitempty"`
-	Substages []Substage `json:"substages"`
+	Name    string `json:"name"`
+	Mint    bool   `json:"mint,omitempty"`
+	Release string `json:"release,omitempty"`
+	// ReleaseRepos is the set of repos this stage's release publishes:
+	// only these are handed to the artifact engine, so only these are
+	// tagged. Empty means every repo, which is what a factory that owns
+	// all its members wants. A factory that also carries repos released
+	// elsewhere - a toolchain developed inside a consumer's checkout -
+	// names its own here, and the revision keeps pinning the rest.
+	ReleaseRepos []string   `json:"releaseRepos,omitempty"`
+	Promotion    string     `json:"promotion,omitempty"`
+	Substages    []Substage `json:"substages"`
 }
 
 type Substage struct {
@@ -352,6 +359,23 @@ func (p Pipeline) Validate() error {
 
 		if s.Release != "" {
 			requirePort(where+": release", s.Release, PortArtifact)
+		}
+
+		if len(s.ReleaseRepos) > 0 && s.Release == "" {
+			add("%s: releaseRepos needs a release engine on the same stage", where)
+		}
+
+		released := map[string]bool{}
+		for _, name := range s.ReleaseRepos {
+			if !repos[name] {
+				add("%s: releaseRepos names %q, which is not a declared repo", where, name)
+			}
+
+			if released[name] {
+				add("%s: releaseRepos repeats %q", where, name)
+			}
+
+			released[name] = true
 		}
 
 		if len(s.Substages) == 0 {

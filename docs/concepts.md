@@ -32,6 +32,7 @@ The question an engine answers. The list is closed.
 | `promotion` | Alias of an engine whose type is promotion. It decides whether the stage advances, given every substage outcome. |
 | `ref` | Branch to track. |
 | `release` | Alias of an engine whose type is artifact. It runs after the stage advances, so nothing is published for a build that did not pass. |
+| `releaseRepos` | The repos this stage's release publishes. Only these reach the artifact engine, so only these are tagged. Empty or absent means every repo. Each name must be a declared repo and must not repeat, and the key needs a release engine on the same stage - both checked in the semantic pass, since they cross-reference. |
 | `repos` | The repos that form a revision. Optional. One repo is valid. A pipeline with no repos still runs, and its revision is the pipeline file itself. |
 | `semantic` | The vocabulary the semantic strategy reads commit subjects with. It is a vocabulary and not a standard: a team writes the prefixes it actually uses, emoji included. Ignored by the other strategies. |
 | `spec` | Manager specific configuration. Validated by the manager. |

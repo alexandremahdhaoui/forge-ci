@@ -745,6 +745,27 @@ func TestAStageThatDeclaresAReleasePublishesWhatItProved(t *testing.T) {
 		"the engine is told where the repos are")
 }
 
+func TestAReleaseSetKeepsTheOtherReposOutOfThePublish(t *testing.T) {
+	f := newFakeEngines(t)
+	c := reconcilecontroller.New(f.caller(), gitAt(t, "abc123", "v0.1.9"), clock())
+
+	s := releasingStage("build", substage("default", []string{"build"}))
+	s.ReleaseRepos = []string{"golden-rust"}
+
+	p := pipeline(s)
+	p.Repos = append(p.Repos, config.Repo{Name: "toolchain", URL: "git@example.com:toolchain.git"})
+
+	report, err := c.Apply(context.Background(), p, "/work", plain)
+	require.NoError(t, err)
+
+	require.Equal(t, "abc123", report.Revision.Repos["toolchain"],
+		"the revision keeps pinning what the release does not own")
+
+	require.Len(t, f.published, 1)
+	require.Equal(t, map[string]string{"golden-rust": "abc123"}, f.published[0].Repos,
+		"the engine tags what it is handed, so it is handed only the release set")
+}
+
 func TestAFailedStagePublishesNothing(t *testing.T) {
 	f := newFakeEngines(t)
 	f.runOutputs["build/default"] = citypes.RunOutput{Status: citypes.StatusFailed}

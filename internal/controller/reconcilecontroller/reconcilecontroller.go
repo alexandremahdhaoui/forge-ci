@@ -294,11 +294,25 @@ func (c *Controller) release(
 		spec["root"] = root
 	}
 
+	// The engine tags every repo it is handed, so the release set is
+	// enforced here by handing it less: a factory can hold members that
+	// are released elsewhere, and the revision keeps pinning their shas
+	// while the release never touches them.
+	repos := revision.Repos
+	if len(stage.ReleaseRepos) > 0 {
+		repos = map[string]string{}
+		for _, name := range stage.ReleaseRepos {
+			if sha, ok := revision.Repos[name]; ok {
+				repos[name] = sha
+			}
+		}
+	}
+
 	in := citypes.ArtifactInput{
 		Revision:  revision.ID,
 		Version:   version,
 		TagPrefix: p.Versioning.TagPrefix,
-		Repos:     revision.Repos,
+		Repos:     repos,
 		Artifacts: runArtifacts(stages),
 		Spec:      spec,
 	}
