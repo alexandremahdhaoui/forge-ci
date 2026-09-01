@@ -932,3 +932,23 @@ func TestOnlyABootstrapTellsTheManagerItMayWriteCredentials(t *testing.T) {
 			"the bootstrap is the one ceremony responsible for credentials")
 	})
 }
+
+// The serialized duplicate of a push wave finds every run recorded green and
+// executes nothing. The report must say so - a reused apply that reads like
+// a build that did work hides what actually happened.
+func TestAnApplyThatReusedEveryRunReportsNothingNew(t *testing.T) {
+	f := newFakeEngines(t)
+	p := pipeline(stage("build", substage("default", []string{"build"})))
+
+	first, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).
+		Apply(context.Background(), p, "/work", plain)
+	require.NoError(t, err)
+	require.False(t, first.NothingNew, "the first apply executed the run")
+	require.Zero(t, first.Stages[0].Reused)
+
+	second, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).
+		Apply(context.Background(), p, "/work", plain)
+	require.NoError(t, err)
+	require.True(t, second.NothingNew, "every run was answered from the recorded state")
+	require.Equal(t, 1, second.Stages[0].Reused)
+}

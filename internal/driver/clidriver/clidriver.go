@@ -262,6 +262,15 @@ func render(report reconcilecontroller.Report) string {
 
 	fmt.Fprintf(&b, "revision %s\n", report.Revision.ID)
 
+	// Nothing new reads as its own thing, up front: every run below was
+	// answered from the recorded state, so this apply executed nothing. A
+	// serialized duplicate - the second dispatch of one push wave - lands
+	// here, and without this line it reads like a build that did work.
+	if report.NothingNew {
+		fmt.Fprintf(&b, "nothing new: revision %s already ran green; every run below was reused from the recorded state\n",
+			report.Revision.ID)
+	}
+
 	for name, sha := range report.Revision.Repos {
 		fmt.Fprintf(&b, "  %s %s\n", name, short(sha))
 	}

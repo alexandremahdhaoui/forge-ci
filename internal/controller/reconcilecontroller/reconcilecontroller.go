@@ -50,6 +50,11 @@ type StageReport struct {
 	Runs    []citypes.Run `json:"runs"`
 	Advance bool          `json:"advance"`
 	Reason  string        `json:"reason"`
+
+	// Reused counts the runs answered from the recorded state instead of
+	// being executed: the revision already carried a green record for the
+	// substage, so nothing ran.
+	Reused int `json:"reused,omitempty"`
 }
 
 type Report struct {
@@ -83,6 +88,13 @@ type Report struct {
 	// and the release would refuse it. The change is already durable, so the
 	// run it triggers reads the corrected state and reconciles to no change.
 	Superseded bool `json:"superseded,omitempty"`
+
+	// NothingNew says every run this apply reports was reused from the
+	// recorded state: the revision had already run green, so nothing
+	// executed. A serialized duplicate - two dispatches from one push wave,
+	// the second starting after the first finished - lands here, and the
+	// report says so instead of reading like a build that did work.
+	NothingNew bool `json:"nothingNew,omitempty"`
 }
 
 // Advanced reports whether anything blocked. A superseded report did not
@@ -240,6 +252,18 @@ func (c *Controller) Apply(
 			report.Released = append(report.Released, released)
 		}
 	}
+
+	// Every run answered from the recorded state means this apply proved
+	// nothing new: the revision had already run green. The serialized
+	// duplicate of a push wave lands here, and the report says so rather
+	// than reading like a build that did work.
+	total, reused := 0, 0
+	for _, s := range report.Stages {
+		total += len(s.Runs)
+		reused += s.Reused
+	}
+
+	report.NothingNew = total > 0 && reused == total
 
 	return report, nil
 }
@@ -545,6 +569,7 @@ func (c *Controller) applyStage(
 	report := StageReport{Name: stage.Name, Runs: make([]citypes.Run, len(stage.Substages))}
 
 	failures := make([]error, len(stage.Substages))
+	reused := make([]bool, len(stage.Substages))
 
 	var wg sync.WaitGroup
 
@@ -554,13 +579,20 @@ func (c *Controller) applyStage(
 		go func() {
 			defer wg.Done()
 
-			run, err := c.applySubstage(ctx, p, index, stage, sub, revision, version, root)
+			run, wasReused, err := c.applySubstage(ctx, p, index, stage, sub, revision, version, root)
 			report.Runs[i] = run
+			reused[i] = wasReused
 			failures[i] = err
 		}()
 	}
 
 	wg.Wait()
+
+	for _, r := range reused {
+		if r {
+			report.Reused++
+		}
+	}
 
 	for _, err := range failures {
 		if err != nil {
@@ -588,21 +620,21 @@ func (c *Controller) applySubstage(
 	revision citypes.Revision,
 	version string,
 	root string,
-) (citypes.Run, error) {
+) (citypes.Run, bool, error) {
 	key := runKey(revision.ID, stage.Name, sub.Name)
 
 	existing, err := c.getRun(ctx, index, key)
 	if err != nil {
-		return citypes.Run{}, err
+		return citypes.Run{}, false, err
 	}
 
 	if existing != nil && existing.Status == citypes.StatusPassed && allGatesPassed(*existing) {
-		return *existing, nil
+		return *existing, true, nil
 	}
 
 	engine, err := index.require(sub.Engine, config.PortCompute)
 	if err != nil {
-		return citypes.Run{}, fmt.Errorf("stage %q substage %q: %w", stage.Name, sub.Name, err)
+		return citypes.Run{}, false, fmt.Errorf("stage %q substage %q: %w", stage.Name, sub.Name, err)
 	}
 
 	started := c.now()
@@ -620,7 +652,7 @@ func (c *Controller) applySubstage(
 		Spec:     orEmpty(engine.Spec),
 	})
 	if err != nil {
-		return citypes.Run{}, fmt.Errorf("stage %q substage %q: %w", stage.Name, sub.Name, err)
+		return citypes.Run{}, false, fmt.Errorf("stage %q substage %q: %w", stage.Name, sub.Name, err)
 	}
 
 	run := citypes.Run{
@@ -638,16 +670,16 @@ func (c *Controller) applySubstage(
 
 	gates, err := c.evaluateGates(ctx, index, sub, run)
 	if err != nil {
-		return citypes.Run{}, fmt.Errorf("stage %q substage %q: %w", stage.Name, sub.Name, err)
+		return citypes.Run{}, false, fmt.Errorf("stage %q substage %q: %w", stage.Name, sub.Name, err)
 	}
 
 	run.Gates = gates
 
 	if err := c.putJSON(ctx, index, KindRun, key, run); err != nil {
-		return citypes.Run{}, err
+		return citypes.Run{}, false, err
 	}
 
-	return run, nil
+	return run, false, nil
 }
 
 func (c *Controller) evaluateGates(
