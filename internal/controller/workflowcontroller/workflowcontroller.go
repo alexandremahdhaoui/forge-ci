@@ -119,17 +119,12 @@ type WorkflowSpec struct {
 	// workspace files themselves change, so without it an edit to the
 	// pipeline's own config never runs it.
 	PushBranches []string `json:"pushBranches,omitempty"`
-	// Concurrency names a group only one run of may be in flight, so a
-	// second start queues instead of racing the first. An apply is
-	// idempotent and two at once race the state repo: seven dispatches
-	// arrived within seconds of each other the day this was written.
-	Concurrency string   `json:"concurrency,omitempty"`
-	Job         string   `json:"job,omitempty"`
-	StepName    string   `json:"stepName,omitempty"`
-	Secret      string   `json:"secret,omitempty"`
-	PayloadEnv  []string `json:"payloadEnv,omitempty"`
-	Command     string   `json:"command,omitempty"`
-	Push        bool     `json:"push,omitempty"`
+	Job          string   `json:"job,omitempty"`
+	StepName     string   `json:"stepName,omitempty"`
+	Secret       string   `json:"secret,omitempty"`
+	PayloadEnv   []string `json:"payloadEnv,omitempty"`
+	Command      string   `json:"command,omitempty"`
+	Push         bool     `json:"push,omitempty"`
 
 	// Token puts secrets.GITHUB_TOKEN into the step's environment. Nothing
 	// else does: engines inherit forge-ci's environment and nothing else,

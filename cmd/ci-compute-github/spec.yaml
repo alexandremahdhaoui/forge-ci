@@ -90,7 +90,7 @@ spec:
 - key: workflows
   type: list
   required: false
-  means: The owned workflows, each a kind with its parameters or verbatim content, plus an optional header comment block. A command workflow also takes reportFailure (open an issue when a run fails - set it on a workflow nobody watches, meaning a cron run or a repository_dispatch somebody fired from another repo), pushBranches (also start on a push to this repo, which is how a factory pipeline reruns when its own workspace files change) and concurrency (a group only one run of may be in flight, queued rather than cancelled - an apply that is already writing state must finish). A release workflow needs a secret too, because it stands the workspace up to reach the toolchain and that clone reaches private members.
+  means: The owned workflows, each a kind with its parameters or verbatim content, plus an optional header comment block. A command workflow also takes reportFailure (open an issue when a run fails - set it on a workflow nobody watches, meaning a cron run or a repository_dispatch somebody fired from another repo), and pushBranches (also start on a push to this repo, which is how a factory pipeline reruns when its own workspace files change). Every command workflow serializes its own runs - one in flight, later starts queued rather than cancelled - because one push wave dispatches once per member, and concurrent applies race the state repo; this is the engine's guarantee, never a knob. A release workflow needs a secret too, because it stands the workspace up to reach the toolchain and that clone reaches private members.
 - key: runner
   type: object
   required: false

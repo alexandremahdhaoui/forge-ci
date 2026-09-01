@@ -99,13 +99,16 @@ func renderCommand(spec Spec, w WorkflowSpec) string {
 		b.WriteString("  packages: write\n")
 	}
 
-	// One run of the group at a time, queued rather than cancelled: an apply
-	// that is already writing state must finish, and the next one then sees
-	// what it wrote. Cancelling mid-write is how a state repo ends up with a
-	// revision recorded and no run beside it.
-	if w.Concurrency != "" {
-		fmt.Fprintf(&b, "\nconcurrency:\n  group: %s\n  cancel-in-progress: false\n", w.Concurrency)
-	}
+	// One run of this workflow at a time, queued rather than cancelled: an
+	// apply that is already writing state must finish, and the next one then
+	// sees what it wrote and converges. This is the engine's own guarantee,
+	// not a knob - one push wave dispatches once per member, so a workflow
+	// without it races itself on the state repo, and forgetting to declare
+	// it was exactly how forge-self's duplicate runs went red. The group is
+	// the platform's own name for this workflow; nothing is hand-typed.
+	// Cancelling mid-write is how a state repo ends up with a revision
+	// recorded and no run beside it, so a superseded start waits instead.
+	b.WriteString("\nconcurrency:\n  group: ${{ github.workflow }}\n  cancel-in-progress: false\n")
 
 	writeRunsOn(&b, spec, job)
 	writeSetup(&b, spec)

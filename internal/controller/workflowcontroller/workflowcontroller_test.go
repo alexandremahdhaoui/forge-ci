@@ -967,7 +967,6 @@ func TestAPipelineCanRunOnItsOwnPushAndOnlyOneAtATime(t *testing.T) {
 			Name: "pipeline", Kind: "command", Command: "true\n", Secret: "S",
 			Events:       []string{"member-pushed"},
 			PushBranches: []string{"main"},
-			Concurrency:  "pipeline",
 		}},
 	}
 
@@ -977,7 +976,12 @@ func TestAPipelineCanRunOnItsOwnPushAndOnlyOneAtATime(t *testing.T) {
 
 	got := files[0].Content
 	assert.Contains(t, got, "  push:\n    branches: [main]\n")
-	assert.Contains(t, got, "\nconcurrency:\n  group: pipeline\n  cancel-in-progress: false\n")
+
+	// The engine's own guarantee, never a knob: one push wave dispatches
+	// once per member, so a command workflow without this races itself on
+	// the state repo. The group is the platform's own name for the
+	// workflow; nothing is hand-typed anywhere.
+	assert.Contains(t, got, "\nconcurrency:\n  group: ${{ github.workflow }}\n  cancel-in-progress: false\n")
 
 	// Queued, never cancelled. An apply already writing state has to finish,
 	// or the store keeps a revision with no run beside it.
@@ -987,8 +991,11 @@ func TestAPipelineCanRunOnItsOwnPushAndOnlyOneAtATime(t *testing.T) {
 	require.NoError(t, yaml.Unmarshal([]byte(got), &parsed), "the rendered workflow must be valid YAML")
 }
 
-// Neither is rendered when unasked, so every existing workflow is unchanged.
-func TestNoPushTriggerAndNoConcurrencyWithoutThem(t *testing.T) {
+// The push trigger is rendered only when asked; the concurrency group is
+// never asked for - every command workflow serializes its own runs, because
+// one push wave dispatches once per member and a workflow without the group
+// races itself on the state repo.
+func TestPushTriggerIsOptionalAndSerializationIsNot(t *testing.T) {
 	t.Parallel()
 
 	files, err := workflowcontroller.RenderAll(registerSpec())
@@ -997,7 +1004,6 @@ func TestNoPushTriggerAndNoConcurrencyWithoutThem(t *testing.T) {
 	byName := map[string]string{}
 	for _, f := range files {
 		byName[f.Name] = f.Content
-		assert.NotContainsf(t, f.Content, "concurrency:", "%s asked for no concurrency group", f.Name)
 	}
 
 	// Only the command workflows. A fan-out fires on a tag push by
@@ -1005,5 +1011,11 @@ func TestNoPushTriggerAndNoConcurrencyWithoutThem(t *testing.T) {
 	for _, name := range []string{"intake", "request", "ci-runner"} {
 		assert.NotContainsf(t, byName[name], "  push:\n    branches:",
 			"%s asked for no push trigger", name)
+	}
+
+	for _, name := range []string{"intake", "request"} {
+		assert.Containsf(t, byName[name],
+			"\nconcurrency:\n  group: ${{ github.workflow }}\n  cancel-in-progress: false\n",
+			"%s is a command workflow, so its runs serialize by the engine's own guarantee", name)
 	}
 }

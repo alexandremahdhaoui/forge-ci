@@ -19,6 +19,10 @@ permissions:
   contents: write
   issues: write
 
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
 jobs:
   file:
     runs-on: ubuntu-latest
