@@ -171,7 +171,8 @@ func TestGitHubRealizerForceRotatesAnExistingSecret(t *testing.T) {
 func TestGitHubRealizerRefusesAnEmptySecretSource(t *testing.T) {
 	t.Setenv("EMPTY_SOURCE", "")
 
-	r, _ := githubRealizer(t)
+	r, api := githubRealizer(t)
+	api.EXPECT().SecretExists(mock.Anything, "o/r", "S").Return(false, nil)
 
 	_, err := r.Realize(citypes.Resource{
 		Kind: managercontroller.KindActionsSecret,
@@ -179,6 +180,26 @@ func TestGitHubRealizerRefusesAnEmptySecretSource(t *testing.T) {
 		Spec: map[string]any{"repo": "o/r", "secret": "S", "fromEnv": "EMPTY_SOURCE"},
 	}, plain)
 	require.ErrorContains(t, err, "EMPTY_SOURCE is empty")
+}
+
+// Keeping an existing secret needs no value: the state is read first, and
+// only a write demands the env. The old order demanded the env before
+// looking, so any environment holding no credentials - a CI runner meeting
+// secrets that were sealed at provisioning - failed on every one of them.
+func TestGitHubRealizerKeepsAnExistingSecretWithoutTheEnv(t *testing.T) {
+	t.Setenv("EMPTY_SOURCE", "")
+
+	r, api := githubRealizer(t)
+	api.EXPECT().SecretExists(mock.Anything, "o/r", "S").Return(true, nil)
+
+	action, err := r.Realize(citypes.Resource{
+		Kind: managercontroller.KindActionsSecret,
+		Name: "o/r/S",
+		Spec: map[string]any{"repo": "o/r", "secret": "S", "fromEnv": "EMPTY_SOURCE"},
+	}, plain)
+	require.NoError(t, err)
+	require.False(t, action.Changed)
+	require.Contains(t, action.Text, "kept secret S on o/r")
 }
 
 func TestGitHubRealizerSecretDefaultsToGithubToken(t *testing.T) {

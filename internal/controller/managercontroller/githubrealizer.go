@@ -140,12 +140,10 @@ func (r GitHubRealizer) realizeSecret(res citypes.Resource, opts Options) (Actio
 		fromEnv = "GITHUB_TOKEN"
 	}
 
-	value := os.Getenv(fromEnv)
-	if value == "" {
-		return Action{}, fmt.Errorf(
-			"environment variable %s is empty; export it (.envrc) before bootstrapping", fromEnv)
-	}
-
+	// Actual state first. A secret that already exists is kept without a
+	// put, and keeping needs no value - demanding the env before looking
+	// made every environment that holds no credentials fail on secrets
+	// that were already sealed, which is exactly the case a re-run meets.
 	existed, err := r.api.SecretExists(r.ctx, repo, secret)
 	if err != nil {
 		return Action{}, explainSecretsDenial(err)
@@ -155,6 +153,12 @@ func (r GitHubRealizer) realizeSecret(res citypes.Resource, opts Options) (Actio
 		return Kept(fmt.Sprintf(
 			"kept secret %s on %s: it already exists and cannot be read back, so it is not rewritten. "+
 				"--force rotates it", secret, repo)), nil
+	}
+
+	value := os.Getenv(fromEnv)
+	if value == "" {
+		return Action{}, fmt.Errorf(
+			"environment variable %s is empty; export it (.envrc) before bootstrapping", fromEnv)
 	}
 
 	text := fmt.Sprintf("seal secret %s on %s from $%s", secret, repo, fromEnv)
