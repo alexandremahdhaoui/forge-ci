@@ -112,6 +112,7 @@ func renderCommand(spec Spec, w WorkflowSpec) string {
 
 	writeRunsOn(&b, spec, job)
 	writeSetup(&b, spec)
+	writeStoreRestore(&b)
 	writeWorkspaceCheckout(&b, spec, w.Secret)
 	writeToolchain(&b, spec)
 
@@ -163,6 +164,7 @@ func renderCommand(spec Spec, w WorkflowSpec) string {
 			spec.Dir, spec.Ref)
 	}
 
+	writeStoreSave(&b)
 	writeFailureReport(&b, w)
 
 	return b.String()
@@ -302,6 +304,7 @@ permissions:
 
 	writeRunsOn(&b, spec, "release")
 	writeSetup(&b, spec)
+	writeStoreRestore(&b)
 	writeWorkspaceCheckout(&b, spec, w.Secret)
 	writeToolchain(&b, spec)
 
@@ -317,6 +320,8 @@ permissions:
         run: |
           forge-ci release --repo "$GITHUB_REPOSITORY" --dir %s --tag "$TAG" --sha "$SHA"
 `, spec.Dir)
+
+	writeStoreSave(&b)
 
 	return b.String()
 }
@@ -349,6 +354,7 @@ permissions:
 `, spec.Runner.Name)
 	writeRunsOn(&b, spec, "run")
 	writeSetup(&b, spec)
+	writeStoreRestore(&b)
 	writeWorkspaceCheckout(&b, spec, spec.Runner.Secret)
 	writeToolchain(&b, spec)
 	b.WriteString(`
@@ -361,6 +367,7 @@ permissions:
 	}
 
 	b.WriteString("          ${{ inputs.script }}\n")
+	writeStoreSave(&b)
 
 	return b.String()
 }
@@ -414,6 +421,49 @@ func writeSetup(b *strings.Builder, spec Spec) {
 // on a credential that was never there. ParseSpec refuses that config, and
 // this refuses to render it either way, because a half-written credential
 // line is worse than an absent one.
+// writeStoreRestore brings back the tool store a previous run saved, so
+// the bootstrap reuses installed runtimes and toolchain binaries instead
+// of downloading them again. The restore key is a prefix: the newest saved
+// store for this OS wins whatever it holds, because the store converges on
+// its own - an entry that no longer matches its description is rebuilt and
+// a missing one installs - so a stale cache costs one rebuild, never a lie.
+// This is the engine's own behavior, not a knob, for the same reason the
+// concurrency group is: every workspace-building job benefits identically
+// and a forgotten declaration would silently cost minutes per run.
+func writeStoreRestore(b *strings.Builder) {
+	b.WriteString(`
+      - name: Restore the tool store
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/forge
+          key: tool-store-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            tool-store-${{ runner.os }}-
+`)
+}
+
+// writeStoreSave saves the tool store under a key derived from its own
+// content, so an unchanged store is never uploaded twice and any change
+// lands exactly once - a save whose key already exists is skipped by the
+// cache action itself. It runs whatever the pipeline concluded: the store
+// a red run installed is just as reusable as a green one's.
+func writeStoreSave(b *strings.Builder) {
+	b.WriteString(`
+      - name: Name the tool store by its content
+        id: tool-store-key
+        if: always()
+        run: |
+          echo "key=$(find ~/.cache/forge -mindepth 1 -maxdepth 3 2>/dev/null | sort | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+      - name: Save the tool store
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/forge
+          key: tool-store-${{ runner.os }}-${{ steps.tool-store-key.outputs.key }}
+`)
+}
+
 func writeWorkspaceCheckout(b *strings.Builder, spec Spec, secret string) {
 	b.WriteString(`
       - name: Check out the workspace around this repo
