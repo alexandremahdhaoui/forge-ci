@@ -159,7 +159,7 @@ func TestWhatIsActuallyMintedSatisfiesTheContract(t *testing.T) {
 					return "sha-" + filepath.Base(dir), nil
 				}).Maybe()
 			git.EXPECT().WorktreeHash(mock.Anything, mock.Anything).
-				RunAndReturn(func(_ context.Context, dir string) (string, error) {
+				RunAndReturn(func(_ context.Context, dir string, _ ...string) (string, error) {
 					if tc.dirty[filepath.Base(dir)] {
 						return "worktree-hash", nil
 					}

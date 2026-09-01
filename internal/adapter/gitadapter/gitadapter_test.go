@@ -171,7 +171,7 @@ func TestABrokenRunnerIsWrappedWithWhatWasAttempted(t *testing.T) {
 
 func TestACleanWorktreeHashesToNothing(t *testing.T) {
 	r := execadaptermock.NewMockRunner(t)
-	r.EXPECT().Run(mock.Anything, "/repo", "git", "status", "--porcelain").Return(ok("\n"), nil).Once()
+	r.EXPECT().Run(mock.Anything, "/repo", "git", "status", "--porcelain", "--", ".").Return(ok("\n"), nil).Once()
 
 	got, err := gitadapter.New(r).WorktreeHash(context.Background(), "/repo")
 	require.NoError(t, err)
@@ -181,8 +181,8 @@ func TestACleanWorktreeHashesToNothing(t *testing.T) {
 func TestADirtyWorktreeHashesItsContent(t *testing.T) {
 	build := func(status, diff string) string {
 		r := execadaptermock.NewMockRunner(t)
-		r.EXPECT().Run(mock.Anything, "/repo", "git", "status", "--porcelain").Return(ok(status), nil).Once()
-		r.EXPECT().Run(mock.Anything, "/repo", "git", "diff", "HEAD").Return(ok(diff), nil).Once()
+		r.EXPECT().Run(mock.Anything, "/repo", "git", "status", "--porcelain", "--", ".").Return(ok(status), nil).Once()
+		r.EXPECT().Run(mock.Anything, "/repo", "git", "diff", "HEAD", "--", ".").Return(ok(diff), nil).Once()
 
 		got, err := gitadapter.New(r).WorktreeHash(context.Background(), "/repo")
 		require.NoError(t, err)
@@ -201,15 +201,15 @@ func TestADirtyWorktreeHashesItsContent(t *testing.T) {
 
 func TestWorktreeHashReportsBothFailures(t *testing.T) {
 	r := execadaptermock.NewMockRunner(t)
-	r.EXPECT().Run(mock.Anything, "/repo", "git", "status", "--porcelain").
+	r.EXPECT().Run(mock.Anything, "/repo", "git", "status", "--porcelain", "--", ".").
 		Return(execadapter.Result{ExitCode: 128, Stderr: "fatal\n"}, nil).Once()
 
 	_, err := gitadapter.New(r).WorktreeHash(context.Background(), "/repo")
 	require.Error(t, err)
 
 	r2 := execadaptermock.NewMockRunner(t)
-	r2.EXPECT().Run(mock.Anything, "/repo", "git", "status", "--porcelain").Return(ok(" M a.go\n"), nil).Once()
-	r2.EXPECT().Run(mock.Anything, "/repo", "git", "diff", "HEAD").
+	r2.EXPECT().Run(mock.Anything, "/repo", "git", "status", "--porcelain", "--", ".").Return(ok(" M a.go\n"), nil).Once()
+	r2.EXPECT().Run(mock.Anything, "/repo", "git", "diff", "HEAD", "--", ".").
 		Return(execadapter.Result{ExitCode: 128, Stderr: "fatal\n"}, nil).Once()
 
 	_, err = gitadapter.New(r2).WorktreeHash(context.Background(), "/repo")
@@ -732,4 +732,18 @@ func TestBranchIsEmptyOnADetachedHead(t *testing.T) {
 	branch, err := g.Branch(ctx, dir)
 	require.NoError(t, err)
 	require.Empty(t, branch)
+}
+
+// An excluded path stays out of both measurements: the status and the diff
+// carry the same exclude pathspec, so a repo whose only change is an
+// excluded file hashes to nothing.
+func TestWorktreeHashExcludesTheNamedPaths(t *testing.T) {
+	r := execadaptermock.NewMockRunner(t)
+	r.EXPECT().Run(mock.Anything, "/repo", "git",
+		"status", "--porcelain", "--", ".", ":(exclude)a.mod", ":(exclude)b.sum").
+		Return(ok("\n"), nil).Once()
+
+	got, err := gitadapter.New(r).WorktreeHash(context.Background(), "/repo", "a.mod", "b.sum")
+	require.NoError(t, err)
+	require.Empty(t, got)
 }

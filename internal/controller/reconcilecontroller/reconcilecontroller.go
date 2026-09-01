@@ -453,6 +453,52 @@ const KindDependencyLock = "dependency-lock"
 // only which bytes were locked and what they hashed to.
 const lockManifestPath = ".forge/dependency-locks.json"
 
+// generatedManifestPath is where forge-factory records the files it
+// generates, root-relative. The path is the whole contract, exactly like
+// the lock manifest's: this core never learns what those files are, only
+// that their churn is the factory's own doing and stays out of the dirty
+// measurement.
+const generatedManifestPath = ".forge/factory-generated.json"
+
+type generatedManifest struct {
+	Version int      `json:"version"`
+	Files   []string `json:"files"`
+}
+
+// generatedExclusions maps each repo name to the repo-relative paths the
+// factory generates inside it. An absent or unreadable manifest answers
+// nothing: a factory that recorded nothing excludes nothing, and the
+// measurement is then what it always was. Root-level entries name no repo
+// and are dropped - the root is not a repo.
+//
+// The same reading lives in the trigger controller: a poll and an apply
+// that disagree on what counts as a move re-split two decisions one
+// commit already unified.
+func generatedExclusions(fs fsadapter.FS, root string) map[string][]string {
+	raw, err := fs.ReadFile(filepath.Join(root, filepath.FromSlash(generatedManifestPath)))
+	if err != nil {
+		return map[string][]string{}
+	}
+
+	var manifest generatedManifest
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		return map[string][]string{}
+	}
+
+	exclusions := map[string][]string{}
+
+	for _, file := range manifest.Files {
+		repo, rest, found := strings.Cut(path.Clean(file), "/")
+		if !found || repo == "" || rest == "" || strings.HasPrefix(repo, ".") {
+			continue
+		}
+
+		exclusions[repo] = append(exclusions[repo], rest)
+	}
+
+	return exclusions
+}
+
 type lockManifest struct {
 	Version int `json:"version"`
 	Locks   []struct {
@@ -868,6 +914,13 @@ func (c *Controller) resolveRevision(
 
 	worktrees := map[string]string{}
 
+	// The factory's generated files are excluded from the dirty
+	// measurement: the register moves them by design, so their churn is
+	// the system working rather than drift. The list comes from the
+	// factory itself - only a language engine knows those names - and an
+	// absent manifest excludes nothing.
+	exclusions := generatedExclusions(c.fs, root)
+
 	for _, repo := range p.Repos {
 		dir := filepath.Join(root, repo.Name)
 
@@ -876,7 +929,7 @@ func (c *Controller) resolveRevision(
 			return citypes.Revision{}, fmt.Errorf("resolving the revision of %s: %w", repo.Name, err)
 		}
 
-		worktree, err := c.git.WorktreeHash(ctx, dir)
+		worktree, err := c.git.WorktreeHash(ctx, dir, exclusions[repo.Name]...)
 		if err != nil {
 			return citypes.Revision{}, fmt.Errorf("resolving the revision of %s: %w", repo.Name, err)
 		}

@@ -524,3 +524,46 @@ func TestUntrackedBuildOutputNeverSettles(t *testing.T) {
 		"without a gitignore, build output dirties the tree and every apply is a new revision. "+
 			"This is why a repo must gitignore its own output.")
 }
+
+// A file the factory's manifest names as generated churns without dirtying
+// the revision: the register moves those files by design, so their churn is
+// the system working. A file the manifest does not name still dirties it -
+// the protection for real edits stands.
+func TestFactoryGeneratedChurnDoesNotDirtyTheRevision(t *testing.T) {
+	root, statePath := bareWorkspace(t, "true")
+	config := filepath.Join(root, "forge-ci.yaml")
+	repo := filepath.Join(root, "demo-repo")
+
+	// A tracked file the factory declares generated, and the manifest that
+	// declares it - the same file forge-factory's sync writes. Committed
+	// before the bootstrap so the bootstrap's revision and the apply's are
+	// the same one.
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "generated.file"), []byte("v1\n"), 0o600))
+	mustRun(t, repo, "git", "add", "generated.file")
+	mustRun(t, repo, "git", "commit", "-m", "track the generated file")
+
+	require.NoError(t, os.MkdirAll(filepath.Join(root, ".forge"), 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(root, ".forge", "factory-generated.json"),
+		[]byte(`{"version":1,"files":["demo-repo/generated.file"]}`), 0o600))
+
+	mustRun(t, root, "forge-ci", "bootstrap", "--config", config)
+	mustRun(t, root, "forge-ci", "apply", "--config", config)
+
+	ids := revisionIDs(t, statePath)
+	require.Len(t, ids, 1)
+	require.NotContains(t, ids[0], "-dirty")
+
+	// The generated file churns. The revision must not move and must not
+	// come out dirty: this is the register bumping a version, not drift.
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "generated.file"), []byte("v2\n"), 0o600))
+	mustRun(t, root, "forge-ci", "apply", "--config", config)
+
+	after := revisionIDs(t, statePath)
+	require.Equal(t, ids, after, "generated churn is not a new revision")
+
+	// An edit to a file the manifest does not name still counts.
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "hand-edited.file"), []byte("x\n"), 0o600))
+
+	out, _ := run(t, root, "forge-ci", "apply", "--config", config)
+	require.Contains(t, out, "-dirty", "a real edit still dirties the revision")
+}

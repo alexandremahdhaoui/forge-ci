@@ -1278,8 +1278,16 @@ func (_c *MockGit_TagAt_Call) RunAndReturn(run func(ctx context.Context, dir str
 }
 
 // WorktreeHash provides a mock function for the type MockGit
-func (_mock *MockGit) WorktreeHash(ctx context.Context, dir string) (string, error) {
-	ret := _mock.Called(ctx, dir)
+func (_mock *MockGit) WorktreeHash(ctx context.Context, dir string, exclude ...string) (string, error) {
+	// string
+	_va := make([]any, len(exclude))
+	for _i := range exclude {
+		_va[_i] = exclude[_i]
+	}
+	var _ca []any
+	_ca = append(_ca, ctx, dir)
+	_ca = append(_ca, _va...)
+	ret := _mock.Called(_ca...)
 
 	if len(ret) == 0 {
 		panic("no return value specified for WorktreeHash")
@@ -1287,16 +1295,16 @@ func (_mock *MockGit) WorktreeHash(ctx context.Context, dir string) (string, err
 
 	var r0 string
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (string, error)); ok {
-		return returnFunc(ctx, dir)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, ...string) (string, error)); ok {
+		return returnFunc(ctx, dir, exclude...)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string) string); ok {
-		r0 = returnFunc(ctx, dir)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, ...string) string); ok {
+		r0 = returnFunc(ctx, dir, exclude...)
 	} else {
 		r0 = ret.Get(0).(string)
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
-		r1 = returnFunc(ctx, dir)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, ...string) error); ok {
+		r1 = returnFunc(ctx, dir, exclude...)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1311,11 +1319,13 @@ type MockGit_WorktreeHash_Call struct {
 // WorktreeHash is a helper method to define mock.On call
 //   - ctx context.Context
 //   - dir string
-func (_e *MockGit_Expecter) WorktreeHash(ctx any, dir any) *MockGit_WorktreeHash_Call {
-	return &MockGit_WorktreeHash_Call{Call: _e.mock.On("WorktreeHash", ctx, dir)}
+//   - exclude ...string
+func (_e *MockGit_Expecter) WorktreeHash(ctx any, dir any, exclude ...any) *MockGit_WorktreeHash_Call {
+	return &MockGit_WorktreeHash_Call{Call: _e.mock.On("WorktreeHash",
+		append([]any{ctx, dir}, exclude...)...)}
 }
 
-func (_c *MockGit_WorktreeHash_Call) Run(run func(ctx context.Context, dir string)) *MockGit_WorktreeHash_Call {
+func (_c *MockGit_WorktreeHash_Call) Run(run func(ctx context.Context, dir string, exclude ...string)) *MockGit_WorktreeHash_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -1325,9 +1335,18 @@ func (_c *MockGit_WorktreeHash_Call) Run(run func(ctx context.Context, dir strin
 		if args[1] != nil {
 			arg1 = args[1].(string)
 		}
+		var arg2 []string
+		variadicArgs := make([]string, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(string)
+			}
+		}
+		arg2 = variadicArgs
 		run(
 			arg0,
 			arg1,
+			arg2...,
 		)
 	})
 	return _c
@@ -1338,7 +1357,7 @@ func (_c *MockGit_WorktreeHash_Call) Return(s string, err error) *MockGit_Worktr
 	return _c
 }
 
-func (_c *MockGit_WorktreeHash_Call) RunAndReturn(run func(ctx context.Context, dir string) (string, error)) *MockGit_WorktreeHash_Call {
+func (_c *MockGit_WorktreeHash_Call) RunAndReturn(run func(ctx context.Context, dir string, exclude ...string) (string, error)) *MockGit_WorktreeHash_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -28,7 +28,7 @@ type Git interface {
 	Staged(ctx context.Context, dir string, paths ...string) (bool, error)
 	LatestTag(ctx context.Context, dir, prefix string) (string, error)
 	SubjectsSince(ctx context.Context, dir, tag string) ([]string, error)
-	WorktreeHash(ctx context.Context, dir string) (string, error)
+	WorktreeHash(ctx context.Context, dir string, exclude ...string) (string, error)
 	// Tag points a tag at one commit and pushes it.
 	Tag(ctx context.Context, dir, tag, sha string) error
 	// TagAt answers the commit a tag points at, and whether dir carries the
@@ -206,8 +206,21 @@ func (g *CLI) RemoteSHA(ctx context.Context, url, ref string) (string, error) {
 	return fields[0], nil
 }
 
-func (g *CLI) WorktreeHash(ctx context.Context, dir string) (string, error) {
-	status, err := g.run(ctx, dir, "reading status of "+dir, "status", "--porcelain")
+// WorktreeHash fingerprints a repo's uncommitted changes. Paths in exclude
+// are left out of the measurement, repo-relative: they name the files the
+// factory generates, whose churn is the register moving versions rather
+// than drift. The exclusion applies identically here and wherever the
+// trigger polls, because a poll and an apply that disagree on what counts
+// as a move re-split the two decisions one commit already unified.
+func (g *CLI) WorktreeHash(ctx context.Context, dir string, exclude ...string) (string, error) {
+	pathspec := []string{"--", "."}
+	for _, path := range exclude {
+		pathspec = append(pathspec, ":(exclude)"+path)
+	}
+
+	statusArgs := append([]string{"status", "--porcelain"}, pathspec...)
+
+	status, err := g.run(ctx, dir, "reading status of "+dir, statusArgs...)
 	if err != nil {
 		return "", err
 	}
@@ -216,7 +229,9 @@ func (g *CLI) WorktreeHash(ctx context.Context, dir string) (string, error) {
 		return "", nil
 	}
 
-	diff, err := g.run(ctx, dir, "reading uncommitted changes in "+dir, "diff", "HEAD")
+	diffArgs := append([]string{"diff", "HEAD"}, pathspec...)
+
+	diff, err := g.run(ctx, dir, "reading uncommitted changes in "+dir, diffArgs...)
 	if err != nil {
 		return "", err
 	}
