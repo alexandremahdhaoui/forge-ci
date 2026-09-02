@@ -361,7 +361,7 @@ func TestApplyRefusesToRunInsideApply(t *testing.T) {
 		AlreadyApplying(true).
 		Run(context.Background(), []string{"apply", "--config", write(t, minimal)})
 	require.ErrorIs(t, err, clidriver.ErrRecurse)
-	require.Contains(t, err.Error(), "use forgeCI: bootstrap for a self stage")
+	require.Contains(t, err.Error(), "the loop calling itself")
 }
 
 func TestTheOtherVerbsStillWorkInsideApply(t *testing.T) {
@@ -533,4 +533,50 @@ func TestTheRootReachesTheEnginesAbsolute(t *testing.T) {
 				"engines join paths against this from a working directory nobody promises; got %q", seen)
 		})
 	}
+}
+
+// A skipped run says why on its own line, runs no stage, exits 0, and ends
+// on the one word a rendered workflow reads. An intent phase that found
+// work ends on the other word.
+func TestASkippedApplyReportsTheReasonAndTheWord(t *testing.T) {
+	var out bytes.Buffer
+
+	r := clidrivermock.NewMockReconciler(t)
+	r.EXPECT().Apply(mock.Anything, mock.Anything, mock.Anything, reconcilecontroller.Options{Phase: "intent"}).
+		Return(reconcilecontroller.Report{
+			Revision: citypes.Revision{ID: "abc123def456"},
+			Version:  "v0.5.6",
+			Skipped:  true,
+			Reason:   "revision abc123def456 is already released as v0.5.6",
+			Intent:   reconcilecontroller.IntentSkip,
+		}, nil).Once()
+
+	err := clidriver.New(&out, r).Run(context.Background(),
+		[]string{"apply", "--config", write(t, minimal), "--phase", "intent"})
+	require.NoError(t, err)
+	require.Contains(t, out.String(), "skipped: revision abc123def456 is already released as v0.5.6")
+	require.True(t, strings.HasSuffix(out.String(), "intent: skip\n"), out.String())
+
+	out.Reset()
+	r.EXPECT().Apply(mock.Anything, mock.Anything, mock.Anything, reconcilecontroller.Options{Phase: "intent"}).
+		Return(reconcilecontroller.Report{
+			Revision: citypes.Revision{ID: "abc123def456"},
+			Version:  "v0.5.7",
+			Intent:   reconcilecontroller.IntentProceed,
+		}, nil).Once()
+
+	err = clidriver.New(&out, r).Run(context.Background(),
+		[]string{"apply", "--config", write(t, minimal), "--phase", "intent"})
+	require.NoError(t, err)
+	require.True(t, strings.HasSuffix(out.String(), "intent: proceed\n"), out.String())
+}
+
+// A phase nobody implements is refused by name, before anything runs.
+func TestAnUnknownPhaseIsRefused(t *testing.T) {
+	var out bytes.Buffer
+
+	err := clidriver.New(&out, clidrivermock.NewMockReconciler(t)).Run(context.Background(),
+		[]string{"apply", "--config", write(t, minimal), "--phase", "deploy"})
+	require.ErrorIs(t, err, clidriver.ErrUsage)
+	require.Contains(t, err.Error(), "reconcile, intent, stages, release")
 }

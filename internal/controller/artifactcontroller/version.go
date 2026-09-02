@@ -95,6 +95,37 @@ func Classify(vocab config.Semantic, subject string) Level {
 	return levelOf(vocab.Unmatched)
 }
 
+// Unclaimed is every subject no list of the vocabulary claims. It is what
+// unmatched: error refuses on: a vocabulary the team wrote down is a rule,
+// and a subject outside it is a mistake to report before anything builds
+// rather than a patch to release quietly.
+func Unclaimed(vocab config.Semantic, subjects []string) []string {
+	out := []string{}
+
+	for _, s := range subjects {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+
+		claimed := false
+
+		for _, tokens := range [][]string{vocab.Ignore, vocab.Patch, vocab.Minor, vocab.Major} {
+			for _, token := range tokens {
+				if token != "" && strings.Contains(s, token) {
+					claimed = true
+				}
+			}
+		}
+
+		if !claimed {
+			out = append(out, s)
+		}
+	}
+
+	return out
+}
+
 // HighestLevel is what a range of commits asks for: the strongest claim any
 // one subject makes. An empty range asks for nothing.
 func HighestLevel(vocab config.Semantic, subjects []string) Level {

@@ -39,12 +39,12 @@ func (_m *MockAPI) EXPECT() *MockAPI_Expecter {
 	return &MockAPI_Expecter{mock: &_m.Mock}
 }
 
-// CreateRelease provides a mock function for the type MockAPI
-func (_mock *MockAPI) CreateRelease(ctx context.Context, repo string, tag string) (githubadapter.Release, error) {
+// CreateDraftRelease provides a mock function for the type MockAPI
+func (_mock *MockAPI) CreateDraftRelease(ctx context.Context, repo string, tag string) (githubadapter.Release, error) {
 	ret := _mock.Called(ctx, repo, tag)
 
 	if len(ret) == 0 {
-		panic("no return value specified for CreateRelease")
+		panic("no return value specified for CreateDraftRelease")
 	}
 
 	var r0 githubadapter.Release
@@ -65,20 +65,20 @@ func (_mock *MockAPI) CreateRelease(ctx context.Context, repo string, tag string
 	return r0, r1
 }
 
-// MockAPI_CreateRelease_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateRelease'
-type MockAPI_CreateRelease_Call struct {
+// MockAPI_CreateDraftRelease_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateDraftRelease'
+type MockAPI_CreateDraftRelease_Call struct {
 	*mock.Call
 }
 
-// CreateRelease is a helper method to define mock.On call
+// CreateDraftRelease is a helper method to define mock.On call
 //   - ctx context.Context
 //   - repo string
 //   - tag string
-func (_e *MockAPI_Expecter) CreateRelease(ctx any, repo any, tag any) *MockAPI_CreateRelease_Call {
-	return &MockAPI_CreateRelease_Call{Call: _e.mock.On("CreateRelease", ctx, repo, tag)}
+func (_e *MockAPI_Expecter) CreateDraftRelease(ctx any, repo any, tag any) *MockAPI_CreateDraftRelease_Call {
+	return &MockAPI_CreateDraftRelease_Call{Call: _e.mock.On("CreateDraftRelease", ctx, repo, tag)}
 }
 
-func (_c *MockAPI_CreateRelease_Call) Run(run func(ctx context.Context, repo string, tag string)) *MockAPI_CreateRelease_Call {
+func (_c *MockAPI_CreateDraftRelease_Call) Run(run func(ctx context.Context, repo string, tag string)) *MockAPI_CreateDraftRelease_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -101,12 +101,12 @@ func (_c *MockAPI_CreateRelease_Call) Run(run func(ctx context.Context, repo str
 	return _c
 }
 
-func (_c *MockAPI_CreateRelease_Call) Return(release githubadapter.Release, err error) *MockAPI_CreateRelease_Call {
+func (_c *MockAPI_CreateDraftRelease_Call) Return(release githubadapter.Release, err error) *MockAPI_CreateDraftRelease_Call {
 	_c.Call.Return(release, err)
 	return _c
 }
 
-func (_c *MockAPI_CreateRelease_Call) RunAndReturn(run func(ctx context.Context, repo string, tag string) (githubadapter.Release, error)) *MockAPI_CreateRelease_Call {
+func (_c *MockAPI_CreateDraftRelease_Call) RunAndReturn(run func(ctx context.Context, repo string, tag string) (githubadapter.Release, error)) *MockAPI_CreateDraftRelease_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -397,6 +397,78 @@ func (_c *MockAPI_PublicKey_Call) Return(keyID string, keyB64 string, err error)
 }
 
 func (_c *MockAPI_PublicKey_Call) RunAndReturn(run func(ctx context.Context, repo string) (string, string, error)) *MockAPI_PublicKey_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// PublishRelease provides a mock function for the type MockAPI
+func (_mock *MockAPI) PublishRelease(ctx context.Context, repo string, id int64) (githubadapter.Release, error) {
+	ret := _mock.Called(ctx, repo, id)
+
+	if len(ret) == 0 {
+		panic("no return value specified for PublishRelease")
+	}
+
+	var r0 githubadapter.Release
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, int64) (githubadapter.Release, error)); ok {
+		return returnFunc(ctx, repo, id)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, int64) githubadapter.Release); ok {
+		r0 = returnFunc(ctx, repo, id)
+	} else {
+		r0 = ret.Get(0).(githubadapter.Release)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, int64) error); ok {
+		r1 = returnFunc(ctx, repo, id)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockAPI_PublishRelease_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PublishRelease'
+type MockAPI_PublishRelease_Call struct {
+	*mock.Call
+}
+
+// PublishRelease is a helper method to define mock.On call
+//   - ctx context.Context
+//   - repo string
+//   - id int64
+func (_e *MockAPI_Expecter) PublishRelease(ctx any, repo any, id any) *MockAPI_PublishRelease_Call {
+	return &MockAPI_PublishRelease_Call{Call: _e.mock.On("PublishRelease", ctx, repo, id)}
+}
+
+func (_c *MockAPI_PublishRelease_Call) Run(run func(ctx context.Context, repo string, id int64)) *MockAPI_PublishRelease_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 int64
+		if args[2] != nil {
+			arg2 = args[2].(int64)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *MockAPI_PublishRelease_Call) Return(release githubadapter.Release, err error) *MockAPI_PublishRelease_Call {
+	_c.Call.Return(release, err)
+	return _c
+}
+
+func (_c *MockAPI_PublishRelease_Call) RunAndReturn(run func(ctx context.Context, repo string, id int64) (githubadapter.Release, error)) *MockAPI_PublishRelease_Call {
 	_c.Call.Return(run)
 	return _c
 }

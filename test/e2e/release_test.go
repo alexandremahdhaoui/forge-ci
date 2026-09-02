@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -25,32 +26,73 @@ import (
 // names, on whatever host spec.apiBaseURL points at - which is what lets
 // this suite stay hermetic.
 type releaseFake struct {
-	server   *httptest.Server
+	server *httptest.Server
+	// releases is what consumers can see: repo to the published tag. A
+	// draft is not here until it is published.
 	releases map[string]string
-	assets   map[string][]byte
+	// drafts is what was created and not yet published, by id.
+	drafts map[int64]fakeDraft
+	assets map[string][]byte
+	nextID int64
+}
+
+type fakeDraft struct {
+	repo string
+	tag  string
 }
 
 func newReleaseFake(t *testing.T) *releaseFake {
 	t.Helper()
 
-	f := &releaseFake{releases: map[string]string{}, assets: map[string][]byte{}}
+	f := &releaseFake{releases: map[string]string{}, drafts: map[int64]fakeDraft{}, assets: map[string][]byte{}}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /repos/{owner}/{repo}/releases", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			TagName string `json:"tag_name"`
+			Draft   bool   `json:"draft"`
 		}
 
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&in))
-		f.releases[r.PathValue("owner")+"/"+r.PathValue("repo")] = in.TagName
+		require.True(t, in.Draft, "the first write of a release is a draft, so a crash leaves nothing a consumer can see")
+
+		f.nextID++
+		f.drafts[f.nextID] = fakeDraft{repo: r.PathValue("owner") + "/" + r.PathValue("repo"), tag: in.TagName}
 
 		w.WriteHeader(http.StatusCreated)
-		_ = json.NewEncoder(w).Encode(map[string]string{
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":         f.nextID,
+			"draft":      true,
 			"html_url":   f.server.URL + "/releases/" + in.TagName,
 			"upload_url": f.server.URL + "/uploads{?name,label}",
 		})
 	})
+	mux.HandleFunc("PATCH /repos/{owner}/{repo}/releases/{id}", func(w http.ResponseWriter, r *http.Request) {
+		var id int64
+
+		_, err := fmt.Sscanf(r.PathValue("id"), "%d", &id)
+		require.NoError(t, err)
+
+		draft, ok := f.drafts[id]
+		if !ok {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{}`))
+
+			return
+		}
+
+		delete(f.drafts, id)
+		f.releases[draft.repo] = draft.tag
+
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":       id,
+			"draft":    false,
+			"html_url": f.server.URL + "/releases/" + draft.tag,
+		})
+	})
 	mux.HandleFunc("GET /repos/{owner}/{repo}/releases/tags/{tag}", func(w http.ResponseWriter, r *http.Request) {
+		// A draft is invisible here, exactly as on GitHub: only a published
+		// release answers by tag.
 		tag, ok := f.releases[r.PathValue("owner")+"/"+r.PathValue("repo")]
 		if !ok || tag != r.PathValue("tag") {
 			w.WriteHeader(http.StatusNotFound)

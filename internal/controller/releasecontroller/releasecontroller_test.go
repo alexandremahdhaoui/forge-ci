@@ -33,7 +33,9 @@ func TestItTagsAndPublishes(t *testing.T) {
 	api := githubadaptermock.NewMockAPI(t)
 	api.EXPECT().ReleaseByTag(context.Background(), repo, tag).
 		Return(githubadapter.Release{}, false, nil).Once()
-	api.EXPECT().CreateRelease(context.Background(), repo, tag).
+	api.EXPECT().CreateDraftRelease(context.Background(), repo, tag).
+		Return(githubadapter.Release{ID: 7, Draft: true}, nil).Once()
+	api.EXPECT().PublishRelease(context.Background(), repo, int64(7)).
 		Return(githubadapter.Release{HTMLURL: "http://releases/1"}, nil).Once()
 
 	report, err := releasecontroller.New(git, api).Publish(context.Background(), dir, repo, tag, sha)
@@ -56,7 +58,9 @@ func TestItPublishesATagThatAlreadyExists(t *testing.T) {
 	api := githubadaptermock.NewMockAPI(t)
 	api.EXPECT().ReleaseByTag(context.Background(), repo, tag).
 		Return(githubadapter.Release{}, false, nil).Once()
-	api.EXPECT().CreateRelease(context.Background(), repo, tag).
+	api.EXPECT().CreateDraftRelease(context.Background(), repo, tag).
+		Return(githubadapter.Release{ID: 7, Draft: true}, nil).Once()
+	api.EXPECT().PublishRelease(context.Background(), repo, int64(7)).
 		Return(githubadapter.Release{HTMLURL: "http://releases/1"}, nil).Once()
 
 	report, err := releasecontroller.New(git, api).Publish(context.Background(), dir, repo, tag, sha)
@@ -207,7 +211,7 @@ func TestItReportsAFailureFromEitherHalf(t *testing.T) {
 	creator := githubadaptermock.NewMockAPI(t)
 	creator.EXPECT().ReleaseByTag(context.Background(), repo, tag).
 		Return(githubadapter.Release{}, false, nil).Once()
-	creator.EXPECT().CreateRelease(context.Background(), repo, tag).
+	creator.EXPECT().CreateDraftRelease(context.Background(), repo, tag).
 		Return(githubadapter.Release{}, errBoom).Once()
 
 	_, err = releasecontroller.New(git2, creator).Publish(context.Background(), dir, repo, tag, sha)

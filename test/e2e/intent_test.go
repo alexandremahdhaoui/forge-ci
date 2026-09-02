@@ -1,0 +1,157 @@
+//go:build e2e
+
+package e2e_test
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
+
+// releasingRepo stands up one member with a bare origin and a pipeline that
+// releases it, bootstrapped and applied once, so a test starts from a
+// released v0.1.0 and asks what the next apply does.
+func releasingRepo(t *testing.T, fake *releaseFake, versioning string) (root, repo, origin string) {
+	t.Helper()
+
+	root = t.TempDir()
+	repo = filepath.Join(root, "demo-repo")
+	statePath := filepath.Join(root, "state")
+
+	require.NoError(t, os.MkdirAll(repo, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "forge.yaml"), []byte(releaseForgeYAML), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(repo, ".envrc"), nil, 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(repo, ".gitignore"),
+		[]byte("/.forge/\n.envrc\n/build/\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "README.md"), []byte("one"), 0o600))
+
+	mustRun(t, repo, "git", "init", "-b", "main")
+	mustRun(t, repo, "git", "config", "user.email", "e2e@example.com")
+	mustRun(t, repo, "git", "config", "user.name", "e2e")
+	mustRun(t, repo, "git", "add", ".")
+	mustRun(t, repo, "git", "commit", "-m", "feat: first")
+
+	origin = filepath.Join(root, "remotes", "owner", "demo-repo.git")
+	require.NoError(t, os.MkdirAll(origin, 0o750))
+	mustRun(t, origin, "git", "init", "--bare")
+	mustRun(t, origin, "git", "symbolic-ref", "HEAD", "refs/heads/main")
+	mustRun(t, repo, "git", "remote", "add", "origin", origin)
+	mustRun(t, repo, "git", "push", "origin", "main")
+
+	yaml := strings.Replace(releasePipelineYAML(root, statePath, fake.server.URL), "name: demo\n", "name: demo\n"+versioning, 1)
+	require.NoError(t, os.WriteFile(filepath.Join(root, "forge-ci.yaml"), []byte(yaml), 0o600))
+
+	mustRun(t, root, "forge-ci", "bootstrap", "--config", "forge-ci.yaml", "--root", ".")
+	mustRun(t, root, "forge-ci", "apply", "--config", "forge-ci.yaml", "--root", ".")
+	require.Equal(t, "v0.1.0", fake.releases["owner/demo-repo"])
+
+	return root, repo, origin
+}
+
+// The rerun that killed golden run 19: a checkout WITH tags, so the tag
+// line answers v0.1.0 and a derivation would say v0.1.1. The release record
+// answers first, the run is skipped, and the remote still carries exactly
+// one tag.
+func TestARerunOfAReleasedRevisionReusesItsVersion(t *testing.T) {
+	fake := newReleaseFake(t)
+	root, repo, origin := releasingRepo(t, fake, "")
+
+	require.NoError(t, os.RemoveAll(repo))
+	mustRun(t, root, "git", "clone", origin, "demo-repo")
+	require.NoError(t, os.WriteFile(filepath.Join(repo, ".envrc"), nil, 0o600))
+	require.Contains(t, mustRun(t, repo, "git", "tag"), "v0.1.0", "this clone carries the tag, or the test proves nothing")
+
+	out := mustRun(t, root, "forge-ci", "apply", "--config", "forge-ci.yaml", "--root", ".")
+	require.Contains(t, out, "skipped: revision")
+	require.Contains(t, out, "already released as v0.1.0")
+	require.Contains(t, out, "intent: skip")
+
+	require.Equal(t, []string{"v0.1.0"}, strings.Fields(mustRun(t, origin, "git", "tag")))
+	require.Equal(t, "v0.1.0", fake.releases["owner/demo-repo"])
+	require.Empty(t, fake.drafts, "nothing was even drafted")
+}
+
+// A commit the vocabulary ignores is a new revision with nothing to
+// release. The run ends at the intent, before any build, and the next fix
+// releases the patch.
+func TestADocsOnlyCommitSkipsBeforeAnyBuildAndTheNextFixReleases(t *testing.T) {
+	fake := newReleaseFake(t)
+	root, repo, origin := releasingRepo(t, fake, `versioning:
+  strategy: semantic
+  semantic:
+    patch: ["fix:"]
+    ignore: ["docs:"]
+`)
+
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "README.md"), []byte("two"), 0o600))
+	mustRun(t, repo, "git", "commit", "-am", "docs: explain the door")
+
+	out := mustRun(t, root, "forge-ci", "apply", "--config", "forge-ci.yaml", "--root", ".")
+	require.Contains(t, out, "skipped: nothing releasable since v0.1.0")
+	require.NotContains(t, out, "stage build", "a skipped run builds nothing")
+	require.Equal(t, []string{"v0.1.0"}, strings.Fields(mustRun(t, origin, "git", "tag")))
+
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "README.md"), []byte("three"), 0o600))
+	mustRun(t, repo, "git", "commit", "-am", "fix: the door")
+
+	out = mustRun(t, root, "forge-ci", "apply", "--config", "forge-ci.yaml", "--root", ".")
+	require.Contains(t, out, "stage build")
+	require.Equal(t, "v0.1.1", fake.releases["owner/demo-repo"])
+	require.ElementsMatch(t, []string{"v0.1.0", "v0.1.1"}, strings.Fields(mustRun(t, origin, "git", "tag")))
+}
+
+// unmatched: error fails the run before anything builds, naming the
+// subject, and nothing is tagged.
+func TestAnUnclaimedSubjectFailsFast(t *testing.T) {
+	fake := newReleaseFake(t)
+	root, repo, origin := releasingRepo(t, fake, `versioning:
+  strategy: semantic
+  semantic:
+    minor: ["feat:"]
+    patch: ["fix:"]
+    ignore: ["docs:"]
+    unmatched: error
+`)
+
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "README.md"), []byte("two"), 0o600))
+	mustRun(t, repo, "git", "commit", "-am", "pushed from the train")
+
+	out, err := run(t, root, "forge-ci", "apply", "--config", "forge-ci.yaml", "--root", ".")
+	require.Error(t, err)
+	require.Contains(t, out, "pushed from the train")
+	require.NotContains(t, out, "stage build")
+	require.Equal(t, []string{"v0.1.0"}, strings.Fields(mustRun(t, origin, "git", "tag")))
+}
+
+// The phases, one process each, reach the same release the whole apply
+// reaches, and the intent phase prints the word a rendered workflow reads.
+func TestThePhasesReachTheSameReleaseAsOneApply(t *testing.T) {
+	fake := newReleaseFake(t)
+	root, repo, origin := releasingRepo(t, fake, "")
+
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "README.md"), []byte("two"), 0o600))
+	mustRun(t, repo, "git", "commit", "-am", "fix: the door")
+
+	mustRun(t, root, "forge-ci", "apply", "--config", "forge-ci.yaml", "--root", ".", "--phase", "reconcile")
+
+	out := mustRun(t, root, "forge-ci", "apply", "--config", "forge-ci.yaml", "--root", ".", "--phase", "intent")
+	require.True(t, strings.HasSuffix(strings.TrimSpace(out), "intent: proceed"), out)
+
+	out = mustRun(t, root, "forge-ci", "apply", "--config", "forge-ci.yaml", "--root", ".", "--phase", "stages")
+	require.Contains(t, out, "stage build")
+	require.Equal(t, "v0.1.0", fake.releases["owner/demo-repo"], "the stages phase releases nothing")
+
+	// The release phase reads the recorded file back through the engine
+	// that kept it, so the build output can go the way a runner's disk
+	// goes. Only the recorded artifact: a spec.assets glob names files no
+	// record carries, and those still live where the release runs.
+	require.NoError(t, os.Remove(filepath.Join(repo, "build", "dist", "demo-tool_linux_amd64")))
+
+	mustRun(t, root, "forge-ci", "apply", "--config", "forge-ci.yaml", "--root", ".", "--phase", "release")
+	require.Equal(t, "v0.1.1", fake.releases["owner/demo-repo"])
+	require.ElementsMatch(t, []string{"v0.1.0", "v0.1.1"}, strings.Fields(mustRun(t, origin, "git", "tag")))
+	require.Contains(t, string(fake.assets["demo-tool_linux_amd64"]), "demo-tool works")
+}

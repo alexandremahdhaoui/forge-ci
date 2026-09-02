@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"path"
 	"regexp"
 	"strings"
 
@@ -29,6 +30,12 @@ type Git interface {
 	LatestTag(ctx context.Context, dir, prefix string) (string, error)
 	SubjectsSince(ctx context.Context, dir, tag string) ([]string, error)
 	WorktreeHash(ctx context.Context, dir string, exclude ...string) (string, error)
+	// TreeHash is the identity of what HEAD holds, minus the paths the
+	// patterns name. Two commits with the same tree hash carry the same
+	// files, whatever their messages say; two that differ only under an
+	// ignored path hash the same. Patterns are root-relative globs: "/*.md"
+	// is the root's markdown, "docs/**" is everything under docs.
+	TreeHash(ctx context.Context, dir string, ignore ...string) (string, error)
 	// Tag points a tag at one commit and pushes it.
 	Tag(ctx context.Context, dir, tag, sha string) error
 	// TagAt answers the commit a tag points at, and whether dir carries the
@@ -284,6 +291,92 @@ func (g *CLI) LatestTag(ctx context.Context, dir, prefix string) (string, error)
 	}
 
 	return "", nil
+}
+
+// TreeHash hashes `git ls-tree -r HEAD` with the ignored paths dropped. The
+// blob ids git already computed carry the content, so this reads no file:
+// it is one listing and one sha256 over the lines that survive the filter.
+func (g *CLI) TreeHash(ctx context.Context, dir string, ignore ...string) (string, error) {
+	res, err := g.run(ctx, dir, "listing the tree", "ls-tree", "-r", "HEAD")
+	if err != nil {
+		return "", err
+	}
+
+	kept := []string{}
+
+	for _, line := range strings.Split(res.Stdout, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		// "<mode> <type> <sha>\t<path>": the path is what the patterns
+		// match, the whole line is what the hash covers.
+		_, path, ok := strings.Cut(line, "\t")
+		if !ok || Ignored(path, ignore) {
+			continue
+		}
+
+		kept = append(kept, line)
+	}
+
+	sum := sha256.Sum256([]byte(strings.Join(kept, "\n")))
+
+	return hex.EncodeToString(sum[:]), nil
+}
+
+// Ignored answers whether a root-relative path matches any pattern. Three
+// shapes cover what a factory writes: "/*.md" anchors at the root and never
+// crosses a slash; "docs/**" is a directory and everything under it; any
+// other pattern is a plain glob against the whole path and, failing that,
+// against the base name, so "**.md" reads as every markdown file.
+func Ignored(path string, patterns []string) bool {
+	for _, pattern := range patterns {
+		pattern = strings.TrimSpace(pattern)
+		if pattern == "" {
+			continue
+		}
+
+		if rest, ok := strings.CutPrefix(pattern, "/"); ok {
+			if matched, _ := filepathMatch(rest, path); matched {
+				return true
+			}
+
+			continue
+		}
+
+		if prefix, ok := strings.CutSuffix(pattern, "/**"); ok {
+			if path == prefix || strings.HasPrefix(path, prefix+"/") {
+				return true
+			}
+
+			continue
+		}
+
+		if strings.HasPrefix(pattern, "**") {
+			if matched, _ := filepathMatch(strings.TrimPrefix(pattern, "**"), "/"+path); matched {
+				return true
+			}
+
+			if matched, _ := filepathMatch("*"+strings.TrimPrefix(pattern, "**"), path[strings.LastIndex(path, "/")+1:]); matched {
+				return true
+			}
+
+			continue
+		}
+
+		if matched, _ := filepathMatch(pattern, path); matched {
+			return true
+		}
+	}
+
+	return false
+}
+
+// filepathMatch is path.Match on slash-separated paths, which is what git
+// lists whatever the host separator is.
+func filepathMatch(pattern, name string) (bool, error) {
+	return path.Match(pattern, name)
 }
 
 // SubjectsSince is every commit subject a checkout gained after tag. A tag the

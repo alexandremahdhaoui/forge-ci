@@ -19,14 +19,23 @@ runs where, and what gets promoted. It calls forge for the rest.
 | Verb | Does |
 |---|---|
 | `bootstrap` | Creates the minimum that lets the loop run. Once, by hand. |
-| `apply` | Makes everything match the definition. This is the reconcile. |
+| `apply` | Makes everything match the definition. This is the reconcile, and it drives the stages. |
 | `status` | Reads without changing. |
 | `graph` | Renders the pipeline and its live state as mermaid. |
 | `poll` | Asks the triggers whether anything moved. |
 | `validate` | Checks the file and stops. |
+| `release` | Tags one commit somebody named and publishes its release. What the generated release workflow runs. |
 
 `apply` is idempotent, so triggers are dumb. A webhook, a cron and your
 keyboard all call the same thing and a duplicate call costs nothing.
+
+`apply --phase <name>` runs one part of the loop: `reconcile`, `intent`,
+`stages` or `release`. Each phase reads and writes state, so the next can
+run in another process. A compute engine renders the phases as jobs, so a
+run reads as what it is. The `intent` phase is where a revision with
+nothing to release ends: already released, every commit since the last tag
+ignored by the vocabulary, or the release set unchanged. It answers one
+word, `skip` or `proceed`, and the phases after it run only on `proceed`.
 
 ## The loop
 
@@ -90,14 +99,15 @@ the choice is stopping loudly or paying for two of everything.
 ## Bootstrap
 
 Something has to run `apply`, and it cannot create itself. So one command is
-manual, once. After that a stage can run `forge-ci bootstrap` to reconcile the
-pipeline from its own definition.
+manual, once. After that every `apply` reconciles the pipeline's own
+resources before its first stage, settles what it changed with a scoped
+push, and stops superseded: the run that push fires starts from the
+corrected state. There is no self stage. One ran `forge-ci bootstrap` for a
+while, before the reconcile moved to the top of apply, and it only
+duplicated what every run already does.
 
-That stage must use `bootstrap`, never `apply`. Apply inside apply recurses, and
-forge-ci refuses it by name.
-
-Put it after the stage that proves the revision. Then a broken pipeline file
-breaks the next reconcile, not the running one.
+A stage that runs `forge-ci apply` is the loop calling itself, and forge-ci
+refuses it by name.
 
 **apply must never delete the trigger or the seed.** Break that and a bad
 pipeline file leaves you back at the laptop.

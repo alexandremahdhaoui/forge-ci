@@ -18,6 +18,10 @@ const (
 	KindRevision = "revision"
 	KindRun      = "run"
 	KindOwned    = "owned"
+	// KindRelease is what a revision was released as: the version, the tag,
+	// the shas it carried and the digests it shipped. Read before a version
+	// is ever derived, so a released revision is never released twice.
+	KindRelease = "release"
 )
 
 var (
@@ -31,6 +35,7 @@ var kinds = map[string]string{
 	KindRevision: "revisions",
 	KindRun:      "runs",
 	KindOwned:    "owned",
+	KindRelease:  "releases",
 }
 
 var kindPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)

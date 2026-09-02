@@ -17,3 +17,11 @@ surface:
       description: Run every target and report what happened.
       input: RunInput
       output: RunOutput
+    - name: put
+      description: Keep what a run built where this engine can serve it again.
+      input: ArtifactPutInput
+      output: ArtifactPutOutput
+    - name: get
+      description: Bring artifacts a put handed out back to paths under the root.
+      input: ArtifactGetInput
+      output: ArtifactGetOutput

@@ -14,6 +14,9 @@ type FS interface {
 	WriteFile(path string, data []byte) error
 	MkdirAll(path string) error
 	Exists(path string) (bool, error)
+	// IsDir answers whether path is a directory. A missing path is false
+	// and not an error, like Exists.
+	IsDir(path string) (bool, error)
 	List(dir string) ([]string, error)
 	Walk(dir string) ([]string, error)
 	Remove(path string) error
@@ -60,6 +63,19 @@ func (OS) Exists(path string) (bool, error) {
 	_, err := os.Stat(path)
 	if err == nil {
 		return true, nil
+	}
+
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+
+	return false, fmt.Errorf("inspecting %s: %w", path, err)
+}
+
+func (OS) IsDir(path string) (bool, error) {
+	info, err := os.Stat(path)
+	if err == nil {
+		return info.IsDir(), nil
 	}
 
 	if os.IsNotExist(err) {

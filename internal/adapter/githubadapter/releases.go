@@ -13,6 +13,10 @@ import (
 
 // Release is the slice of a GitHub release a caller acts on.
 type Release struct {
+	// ID is what a draft is published by: the tag is not yet a handle
+	// while the release is a draft.
+	ID      int64  `json:"id"`
+	Draft   bool   `json:"draft"`
 	HTMLURL string `json:"html_url"`
 	// UploadURL is an RFC 6570 template on uploads.github.com, ending in
 	// {?name,label}. It is a different host from the API base, which is why
@@ -39,16 +43,32 @@ func (c *Client) ReleaseByTag(ctx context.Context, repo, tag string) (Release, b
 	return out, true, nil
 }
 
-// CreateRelease publishes the release for a tag that already exists on the
-// remote, with notes GitHub generates from the commits since the previous
-// tag.
-func (c *Client) CreateRelease(ctx context.Context, repo, tag string) (Release, error) {
-	in := map[string]any{"tag_name": tag, "generate_release_notes": true}
+// CreateDraftRelease creates the release for a tag as a draft: invisible to
+// consumers, assets attachable, and the tag itself not yet required to
+// exist. It is the first write of a release, so a crash after it leaves a
+// draft nobody can consume rather than a tag nobody can use.
+func (c *Client) CreateDraftRelease(ctx context.Context, repo, tag string) (Release, error) {
+	in := map[string]any{"tag_name": tag, "draft": true, "generate_release_notes": true}
 
 	var out Release
 
 	if err := c.do(ctx, http.MethodPost, "/repos/"+repo+"/releases", in, &out); err != nil {
-		return Release{}, fmt.Errorf("creating release %q in %q: %w", tag, repo, err)
+		return Release{}, fmt.Errorf("creating draft release %q in %q: %w", tag, repo, err)
+	}
+
+	return out, nil
+}
+
+// PublishRelease turns a draft into the release consumers see. It is the
+// last write, after the assets are attached and the tags are on their
+// remotes, so what appears appears whole.
+func (c *Client) PublishRelease(ctx context.Context, repo string, id int64) (Release, error) {
+	in := map[string]any{"draft": false}
+
+	var out Release
+
+	if err := c.do(ctx, http.MethodPatch, fmt.Sprintf("/repos/%s/releases/%d", repo, id), in, &out); err != nil {
+		return Release{}, fmt.Errorf("publishing release %d in %q: %w", id, repo, err)
 	}
 
 	return out, nil

@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/reconcilecontroller"
@@ -102,8 +103,8 @@ func (d *Driver) Run(ctx context.Context, args []string) error {
 	case "apply":
 		if d.applying {
 			return fmt.Errorf(
-				"%w: a stage ran forge-ci apply. use forgeCI: bootstrap for a self stage, "+
-					"which reconciles the pipeline without running it again", ErrRecurse)
+				"%w: a stage ran forge-ci apply. every apply already reconciles the pipeline's own "+
+					"resources before its first stage, so a stage that applies is the loop calling itself", ErrRecurse)
 		}
 
 		return d.reportOf(func() (reconcilecontroller.Report, error) {
@@ -146,12 +147,19 @@ func (d *Driver) load(verb string, args []string) (config.Pipeline, string, reco
 		"say what would change and write nothing, anywhere")
 	force := fs.Bool("force", false,
 		"rewrite a resource that exists and cannot be compared, which today means one thing: a secret")
+	phase := fs.String("phase", "",
+		"run one part of the apply: reconcile, intent, stages or release. Empty runs the whole loop")
 
 	if err := fs.Parse(args); err != nil {
 		return config.Pipeline{}, "", reconcilecontroller.Options{}, fmt.Errorf("parsing flags: %w", err)
 	}
 
-	opts := reconcilecontroller.Options{DryRun: *dryRun, Force: *force}
+	if *phase != "" && !slices.Contains(reconcilecontroller.Phases, *phase) {
+		return config.Pipeline{}, "", reconcilecontroller.Options{}, fmt.Errorf(
+			"%w: --phase %q is not one of %s", ErrUsage, *phase, strings.Join(reconcilecontroller.Phases, ", "))
+	}
+
+	opts := reconcilecontroller.Options{DryRun: *dryRun, Force: *force, Phase: *phase}
 
 	p, err := Load(*path)
 	if err != nil {
@@ -261,6 +269,26 @@ func render(report reconcilecontroller.Report) string {
 	}
 
 	fmt.Fprintf(&b, "revision %s\n", report.Revision.ID)
+
+	// A skipped run says why on its own line and ends there: no stage ran
+	// and nothing was tagged. The last line is the machine-readable word a
+	// rendered workflow reads to skip the jobs that follow.
+	if report.Skipped {
+		fmt.Fprintf(&b, "skipped: %s\n", report.Reason)
+		writeActions(&b, report.Actions)
+		fmt.Fprintf(&b, "intent: %s\n", report.Intent)
+
+		return b.String()
+	}
+
+	// An intent phase that found work says so as its last line, the same
+	// word a skip prints, so a rendered workflow reads one line either way.
+	if report.Intent != "" {
+		writeActions(&b, report.Actions)
+		fmt.Fprintf(&b, "intent: %s\n", report.Intent)
+
+		return b.String()
+	}
 
 	// Nothing new reads as its own thing, up front: every run below was
 	// answered from the recorded state, so this apply executed nothing. A

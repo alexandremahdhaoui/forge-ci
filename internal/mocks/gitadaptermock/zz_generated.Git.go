@@ -1277,6 +1277,91 @@ func (_c *MockGit_TagAt_Call) RunAndReturn(run func(ctx context.Context, dir str
 	return _c
 }
 
+// TreeHash provides a mock function for the type MockGit
+func (_mock *MockGit) TreeHash(ctx context.Context, dir string, ignore ...string) (string, error) {
+	// string
+	_va := make([]any, len(ignore))
+	for _i := range ignore {
+		_va[_i] = ignore[_i]
+	}
+	var _ca []any
+	_ca = append(_ca, ctx, dir)
+	_ca = append(_ca, _va...)
+	ret := _mock.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for TreeHash")
+	}
+
+	var r0 string
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, ...string) (string, error)); ok {
+		return returnFunc(ctx, dir, ignore...)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, ...string) string); ok {
+		r0 = returnFunc(ctx, dir, ignore...)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, ...string) error); ok {
+		r1 = returnFunc(ctx, dir, ignore...)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockGit_TreeHash_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'TreeHash'
+type MockGit_TreeHash_Call struct {
+	*mock.Call
+}
+
+// TreeHash is a helper method to define mock.On call
+//   - ctx context.Context
+//   - dir string
+//   - ignore ...string
+func (_e *MockGit_Expecter) TreeHash(ctx any, dir any, ignore ...any) *MockGit_TreeHash_Call {
+	return &MockGit_TreeHash_Call{Call: _e.mock.On("TreeHash",
+		append([]any{ctx, dir}, ignore...)...)}
+}
+
+func (_c *MockGit_TreeHash_Call) Run(run func(ctx context.Context, dir string, ignore ...string)) *MockGit_TreeHash_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 []string
+		variadicArgs := make([]string, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(string)
+			}
+		}
+		arg2 = variadicArgs
+		run(
+			arg0,
+			arg1,
+			arg2...,
+		)
+	})
+	return _c
+}
+
+func (_c *MockGit_TreeHash_Call) Return(s string, err error) *MockGit_TreeHash_Call {
+	_c.Call.Return(s, err)
+	return _c
+}
+
+func (_c *MockGit_TreeHash_Call) RunAndReturn(run func(ctx context.Context, dir string, ignore ...string) (string, error)) *MockGit_TreeHash_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // WorktreeHash provides a mock function for the type MockGit
 func (_mock *MockGit) WorktreeHash(ctx context.Context, dir string, exclude ...string) (string, error) {
 	// string

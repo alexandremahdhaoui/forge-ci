@@ -59,6 +59,7 @@ func NewHandlers() Handlers {
 				Url:       out.URL,
 				Reason:    out.Reason,
 				Tagged:    out.Tagged,
+				Index:     out.Index,
 			}, nil
 		},
 	}
@@ -153,18 +154,21 @@ func publish(
 
 	out := citypes.ArtifactOutput{Tagged: []string{}}
 
-	// Every member carries the SAME tag, and this engine computes no part of
-	// it. The version arrives decided; deriving one here per member is what
-	// put every repo on a version line of its own, so the arithmetic lives
-	// in the core and nowhere else.
+	// PREFLIGHT. Everything below reads and nothing writes, so a release
+	// that cannot complete fails before it has touched a remote. golden run
+	// 19 tagged six members and then met a missing asset; the six tags
+	// stayed, and the next real release would have refused on every one of
+	// them.
+
+	// The remote is the authority on which members are already tagged, not
+	// the local tag list: a CI checkout is a fresh clone that carries no
+	// tags. A remote that cannot be read is an error, never "absent" -
+	// falling through would re-create a published tag.
+	pending := []artifactcontroller.Tag{}
+
 	for _, tag := range plan.Tags {
 		dir := root + "/" + tag.Repo
 
-		// The remote is the authority, not the local tag list: a CI checkout
-		// is a fresh clone that carries no tags, so reading only the local
-		// list re-created an already-published tag and the push was rejected
-		// by the only party that knew. A remote that cannot be read is an
-		// error, never "absent" - falling through would repeat that mistake.
 		hasRemote, err := git.HasRemote(ctx, dir)
 		if err != nil {
 			return out, fmt.Errorf("releasing %s: %w", tag.Repo, err)
@@ -192,6 +196,74 @@ func publish(
 			}
 		}
 
+		pending = append(pending, tag)
+	}
+
+	existing, found, err := api.ReleaseByTag(ctx, home, plan.TagName)
+	if err != nil {
+		return out, fmt.Errorf("releasing %s: %w", plan.Version, err)
+	}
+
+	// A revision already fully published converges rather than re-releasing:
+	// every member's tag is on its remote and the release exists, so there
+	// is no work left and no build output to demand.
+	if len(plan.Tags) > 0 && len(pending) == 0 && found {
+		out.URL = existing.HTMLURL
+		out.Reason = plan.Version + " is already released; converged"
+
+		return out, nil
+	}
+
+	// Every asset is read and digested here, before the first write. A
+	// missing file fails the release with nothing tagged and nothing
+	// created.
+	uploads, err := expandAssets(root, plan.Uploads, in.Spec)
+	if err != nil {
+		return out, fmt.Errorf("releasing %s: %w", plan.Version, err)
+	}
+
+	assets, index, err := stageAssets(root, plan, uploads, in.Revision)
+	if err != nil {
+		return out, fmt.Errorf("releasing %s: %w", plan.Version, err)
+	}
+
+	out.Index = string(index)
+
+	// WRITES, in the order a crash cannot leave a consumer-visible half:
+	// a draft release with every asset attached, invisible until published;
+	// then the tags; then the publish. A crash after the draft leaves a
+	// draft, which nobody can consume. A crash after the tags leaves tags
+	// whose release the next run finishes, because it finds them converged
+	// and the draft absent from the visible releases.
+	release := existing
+
+	if !found {
+		// One aggregated release per version: every binary the runs built
+		// plus the index that pins their digests, under the same tag the
+		// members carry - the workspace is one thing, built together and
+		// released together, under one number.
+		release, err = api.CreateDraftRelease(ctx, home, plan.TagName)
+		if err != nil {
+			return out, fmt.Errorf("releasing %s: %w", plan.Version, err)
+		}
+
+		// The upload URL comes from the release itself and is on a
+		// different host from the API base, which is why the client sends
+		// to a full URL rather than joining a path onto the base.
+		for _, asset := range assets {
+			if err := api.UploadAsset(ctx, release.UploadURL, asset); err != nil {
+				return out, fmt.Errorf("releasing %s: %w", plan.Version, err)
+			}
+		}
+	}
+
+	// Every member carries the SAME tag, and this engine computes no part of
+	// it. The version arrives decided; deriving one here per member is what
+	// put every repo on a version line of its own, so the arithmetic lives
+	// in the core and nowhere else.
+	for _, tag := range pending {
+		dir := root + "/" + tag.Repo
+
 		// Tag re-decides on the union of local and remote: a leftover local
 		// tag at the same commit is an interrupted run, and the push is what
 		// finishes it; one at a different commit is refused there.
@@ -202,52 +274,13 @@ func publish(
 		out.Tagged = append(out.Tagged, tag.Repo)
 	}
 
-	// A revision already fully published converges rather than re-releasing:
-	// every member's tag was already on its remote and the release exists,
-	// so there is no work left and no build output to demand - a re-run's
-	// fresh clone has none, its substages were skipped as already passed.
-	// An interrupted run - tags pushed, release missing - falls through and
-	// finishes the job.
-	if len(plan.Tags) > 0 && len(out.Tagged) == 0 {
-		existing, found, err := api.ReleaseByTag(ctx, home, plan.TagName)
+	if !found {
+		published, err := api.PublishRelease(ctx, home, release.ID)
 		if err != nil {
 			return out, fmt.Errorf("releasing %s: %w", plan.Version, err)
 		}
 
-		if found {
-			out.URL = existing.HTMLURL
-			out.Reason = plan.Version + " is already released; converged"
-
-			return out, nil
-		}
-	}
-
-	uploads, err := expandAssets(root, plan.Uploads, in.Spec)
-	if err != nil {
-		return out, fmt.Errorf("releasing %s: %w", plan.Version, err)
-	}
-
-	assets, err := stageAssets(root, plan, uploads, in.Revision)
-	if err != nil {
-		return out, fmt.Errorf("releasing %s: %w", plan.Version, err)
-	}
-
-	// One aggregated release per version: every binary the runs built plus
-	// the index that pins their digests, under the same tag the members
-	// carry - the workspace is one thing, built together and released
-	// together, under one number.
-	release, err := api.CreateRelease(ctx, home, plan.TagName)
-	if err != nil {
-		return out, fmt.Errorf("releasing %s: %w", plan.Version, err)
-	}
-
-	// The upload URL comes from the release itself and is on a different
-	// host from the API base, which is why the client sends to a full URL
-	// rather than joining a path onto the base.
-	for _, asset := range assets {
-		if err := api.UploadAsset(ctx, release.UploadURL, asset); err != nil {
-			return out, fmt.Errorf("releasing %s: %w", plan.Version, err)
-		}
+		release = published
 	}
 
 	out.Published = true
@@ -320,7 +353,12 @@ func resolveUpload(root, upload string) string {
 // stageAssets resolves the uploads against the root, digests each one, and
 // writes the distribution index beside them in a staging dir. The index is
 // built from the measured digests, never from claims.
-func stageAssets(root string, plan artifactcontroller.Plan, uploads []string, revision string) ([]string, error) {
+func stageAssets(
+	root string,
+	plan artifactcontroller.Plan,
+	uploads []string,
+	revision string,
+) ([]string, []byte, error) {
 	assets := make([]string, 0, len(uploads)+1)
 	digests := make([]artifactcontroller.UploadDigest, 0, len(uploads))
 
@@ -338,12 +376,12 @@ func stageAssets(root string, plan artifactcontroller.Plan, uploads []string, re
 		// prevents lands after the tags are cut.
 		path, err := filepath.Abs(resolveUpload(root, upload))
 		if err != nil {
-			return nil, fmt.Errorf("resolving upload %s: %w", upload, err)
+			return nil, nil, fmt.Errorf("resolving upload %s: %w", upload, err)
 		}
 
 		digest, size, err := fsadapter.Digest(path)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		assets = append(assets, path)
@@ -354,18 +392,18 @@ func stageAssets(root string, plan artifactcontroller.Plan, uploads []string, re
 		revision, time.Now().UTC().Format(time.RFC3339),
 		artifactcontroller.Release{Tag: plan.TagName}, digests)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	staging, err := os.MkdirTemp("", "ci-artifact-release-*")
 	if err != nil {
-		return nil, fmt.Errorf("staging the index: %w", err)
+		return nil, nil, fmt.Errorf("staging the index: %w", err)
 	}
 
 	indexPath := filepath.Join(staging, "index.json")
 	if err := os.WriteFile(indexPath, index, 0o600); err != nil {
-		return nil, fmt.Errorf("staging the index: %w", err)
+		return nil, nil, fmt.Errorf("staging the index: %w", err)
 	}
 
-	return append(assets, indexPath), nil
+	return append(assets, indexPath), index, nil
 }

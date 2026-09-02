@@ -76,7 +76,10 @@ func (f *fakeGitHub) handle(w http.ResponseWriter, r *http.Request) {
 		// from the API base. One server is enough to prove the engine sends
 		// where the RELEASE said rather than where the base is: the path is
 		// one this handler would not otherwise serve.
-		fmt.Fprintf(w, `{"html_url":"http://fake/releases/1","upload_url":"http://%s/upload/assets{?name,label}"}`, r.Host)
+		fmt.Fprintf(w, `{"id":1,"draft":true,"html_url":"http://fake/releases/1","upload_url":"http://%s/upload/assets{?name,label}"}`, r.Host)
+	case strings.HasSuffix(r.URL.Path, "/releases/1") && r.Method == http.MethodPatch:
+		// The publish of the draft: the last write of a release.
+		fmt.Fprint(w, `{"id":1,"draft":false,"html_url":"http://fake/releases/1"}`)
 	case strings.HasPrefix(r.URL.Path, "/upload/assets"):
 		f.uploaded = append(f.uploaded, r.URL.Query().Get("name"))
 		w.WriteHeader(http.StatusCreated)

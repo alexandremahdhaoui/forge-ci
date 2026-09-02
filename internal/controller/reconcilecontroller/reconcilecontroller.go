@@ -20,7 +20,6 @@ import (
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/artifactcontroller"
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 	"github.com/alexandremahdhaoui/forge-ci/pkg/config"
-	"github.com/alexandremahdhaoui/forge/pkg/forge"
 )
 
 const (
@@ -95,7 +94,26 @@ type Report struct {
 	// the second starting after the first finished - lands here, and the
 	// report says so instead of reading like a build that did work.
 	NothingNew bool `json:"nothingNew,omitempty"`
+
+	// Skipped says the release decision found nothing to release for this
+	// revision, and the run ended before any stage: the revision was
+	// already released, every commit since the last tag is one the
+	// vocabulary ignores, or the release set did not move. Reason says
+	// which. Not a failure: the next real change runs everything.
+	Skipped bool   `json:"skipped,omitempty"`
+	Reason  string `json:"reason,omitempty"`
+
+	// Intent is the one word the intent phase answers, skip or proceed,
+	// which a rendered workflow reads to decide whether the phases after
+	// it run at all. Empty outside that phase.
+	Intent string `json:"intent,omitempty"`
 }
+
+// The words an intent phase answers.
+const (
+	IntentSkip    = "skip"
+	IntentProceed = "proceed"
+)
 
 // Advanced reports whether anything blocked. A superseded report did not
 // block: no stage failed, no gate refused, and the run that follows is the
@@ -122,7 +140,27 @@ func (r Report) Advanced() bool {
 type Options struct {
 	DryRun bool
 	Force  bool
+
+	// Phase is which part of the apply to run: empty for the whole thing,
+	// or one of reconcile, intent, stages, release. Each phase reads and
+	// writes state, so a phase can run in a process of its own and the
+	// next phase carries on from the record. That is what lets a compute
+	// engine render one apply as several jobs, each visible on its own.
+	Phase string
 }
+
+// The phases of an apply. PhaseAll is the whole loop in one process,
+// which is what every apply was before phases existed.
+const (
+	PhaseAll       = ""
+	PhaseReconcile = "reconcile"
+	PhaseIntent    = "intent"
+	PhaseStages    = "stages"
+	PhaseRelease   = "release"
+)
+
+// Phases is every phase name a caller may ask for.
+var Phases = []string{PhaseReconcile, PhaseIntent, PhaseStages, PhaseRelease}
 
 type Controller struct {
 	caller engineadapter.Caller
@@ -149,6 +187,30 @@ func (c *Controller) Apply(
 ) (Report, error) {
 	index := newIndex(p, root)
 
+	phase := opts.Phase
+
+	var actions []string
+
+	// A phase after the reconcile trusts the reconcile that ran before it,
+	// in the process that ran it: the phases are one apply cut into jobs,
+	// and the first job is the one that converged the surface.
+	if phase == PhaseAll || phase == PhaseReconcile {
+		return c.applyFrom(ctx, p, index, root, opts, phase)
+	}
+
+	return c.applyPhases(ctx, p, index, root, phase, actions)
+}
+
+// applyFrom is an apply that starts at the reconcile: a whole run, or the
+// reconcile phase alone.
+func (c *Controller) applyFrom(
+	ctx context.Context,
+	p config.Pipeline,
+	index engineIndex,
+	root string,
+	opts Options,
+	phase string,
+) (Report, error) {
 	// false: an apply converges what can be converged and leaves credentials
 	// alone. Only a bootstrap is responsible for those.
 	actions, changed, published, err := c.reconcileResources(ctx, p, index, root, false, opts)
@@ -195,6 +257,25 @@ func (c *Controller) Apply(
 			"reconcile changed resources nothing publishes, so no push will re-fire this pipeline; continuing on the converged state")
 	}
 
+	if phase == PhaseReconcile {
+		return Report{Actions: actions}, nil
+	}
+
+	return c.applyPhases(ctx, p, index, root, phase, actions)
+}
+
+// applyPhases is everything after the reconcile: the revision, the release
+// decision, the stages and the release, from the phase asked for onward.
+func (c *Controller) applyPhases(
+	ctx context.Context,
+	p config.Pipeline,
+	index engineIndex,
+	root string,
+	phase string,
+	actions []string,
+) (Report, error) {
+	var err error
+
 	// The revision is resolved here because a run record is keyed by it. It is
 	// not written yet. A revision in state is a claim that this tuple of
 	// commits was proven, and minting it before anything runs hands a broken
@@ -204,20 +285,54 @@ func (c *Controller) Apply(
 		return Report{}, err
 	}
 
-	// The version is derived ONCE, before any stage runs, and carried from
-	// here. The build stamp and the release tag are then the same number by
-	// construction rather than by two computations agreeing: a binary that
-	// reports a different version from the release it shipped in is a lie
-	// the operator acts on.
-	version, err := c.releaseVersion(ctx, p, index, root)
-	if err != nil {
-		return Report{}, err
+	// The release decision is made ONCE, before any stage runs, and carried
+	// from here. The build stamp and the release tag are then the same
+	// number by construction rather than by two computations agreeing: a
+	// binary that reports a different version from the release it shipped
+	// in is a lie the operator acts on. And a revision with nothing to
+	// release ends here, before anything builds: a docs commit is proven by
+	// the run that follows a real one.
+	var decision releaseDecision
+
+	if phase == PhaseAll || phase == PhaseIntent {
+		decision, err = c.decideRelease(ctx, p, index, root, revision)
+		if err != nil {
+			return Report{}, err
+		}
+
+		// A phased apply hands the decision to the phases that follow in
+		// other processes through state. A whole apply keeps it in hand.
+		if phase == PhaseIntent {
+			if err := c.writeIntent(ctx, index, revision.ID, decision); err != nil {
+				return Report{}, err
+			}
+		}
+	} else {
+		decision, err = c.readIntent(ctx, index, revision.ID)
+		if err != nil {
+			return Report{}, err
+		}
 	}
 
-	report := Report{Revision: revision, Version: version, Actions: actions}
+	report := Report{Revision: revision, Version: decision.Version, Actions: actions}
+
+	if decision.Skip {
+		report.Skipped = true
+		report.Reason = decision.Reason
+		report.Intent = IntentSkip
+		report.Released = []citypes.ArtifactOutput{{URL: decision.URL, Reason: decision.Reason}}
+
+		return report, nil
+	}
+
+	if phase == PhaseIntent {
+		report.Intent = IntentProceed
+
+		return report, nil
+	}
 
 	for _, stage := range p.Stages {
-		stageReport, err := c.applyStage(ctx, p, index, stage, revision, version, root)
+		stageReport, err := c.applyStage(ctx, p, index, stage, revision, decision.Version, root)
 		if err != nil {
 			return Report{}, err
 		}
@@ -228,7 +343,11 @@ func (c *Controller) Apply(
 			break
 		}
 
-		if stage.Mint {
+		// The release phase re-reads runs the stages phase recorded; minting
+		// again would only rewrite the same record, and re-reading the lock
+		// manifest on a machine that never locked is a refusal waiting to
+		// happen. The stages phase minted.
+		if stage.Mint && phase != PhaseRelease {
 			if err := c.mint(ctx, index, revision); err != nil {
 				return Report{}, err
 			}
@@ -243,8 +362,8 @@ func (c *Controller) Apply(
 			}
 		}
 
-		if stage.Release != "" {
-			released, err := c.release(ctx, p, index, stage, revision, version, root, report.Stages)
+		if stage.Release != "" && phase != PhaseStages {
+			released, err := c.release(ctx, p, index, stage, revision, decision, root, report.Stages)
 			if err != nil {
 				return Report{}, err
 			}
@@ -276,7 +395,7 @@ func (c *Controller) release(
 	index engineIndex,
 	stage config.Stage,
 	revision citypes.Revision,
-	version string,
+	decision releaseDecision,
 	root string,
 	stages []StageReport,
 ) (citypes.ArtifactOutput, error) {
@@ -285,6 +404,8 @@ func (c *Controller) release(
 		return citypes.ArtifactOutput{}, err
 	}
 
+	version := decision.Version
+
 	spec := map[string]any{}
 	for k, v := range engine.Spec {
 		spec[k] = v
@@ -292,6 +413,15 @@ func (c *Controller) release(
 
 	if _, ok := spec["root"]; !ok {
 		spec["root"] = root
+	}
+
+	// What the runs built comes back through the engines that built it, so
+	// the release reads files on this machine whether or not this machine
+	// ran the build. A release on a fresh runner that reused every stage
+	// from state used to read paths nothing had written.
+	artifacts, err := c.restoreArtifacts(ctx, index, revision.ID, root, stages)
+	if err != nil {
+		return citypes.ArtifactOutput{}, fmt.Errorf("releasing stage %q: %w", stage.Name, err)
 	}
 
 	// The engine tags every repo it is handed, so the release set is
@@ -313,8 +443,46 @@ func (c *Controller) release(
 		Version:   version,
 		TagPrefix: p.Versioning.TagPrefix,
 		Repos:     repos,
-		Artifacts: runArtifacts(stages),
+		Artifacts: artifacts,
 		Spec:      spec,
+	}
+
+	// The last check before anything is written: the bytes. What this run
+	// would upload is digested and set against what the previous release
+	// shipped. Identical, name for name and byte for byte, means the
+	// previous release already is this release, and the revision is
+	// recorded under that number so a rerun converges by the record.
+	if decision.Previous != "" {
+		previousTag := artifactcontroller.TagName(p.Versioning.TagPrefix, decision.Previous)
+
+		prev, err := c.readRelease(ctx, index, "by-tag/"+previousTag)
+		if err != nil {
+			return citypes.ArtifactOutput{}, err
+		}
+
+		plan, err := artifactcontroller.New().Plan(in)
+		if err != nil {
+			return citypes.ArtifactOutput{}, fmt.Errorf("releasing stage %q: %w", stage.Name, err)
+		}
+
+		same, err := sameBytes(root, plan.Uploads, prev)
+		if err != nil {
+			return citypes.ArtifactOutput{}, fmt.Errorf("releasing stage %q: %w", stage.Name, err)
+		}
+
+		if same {
+			reason := fmt.Sprintf("every asset is byte for byte what %s shipped; nothing to release", previousTag)
+
+			rec := *prev
+			rec.Revision = revision.ID
+			rec.ReleasedAt = c.now()
+
+			if err := c.putJSON(ctx, index, KindRelease, revision.ID, rec); err != nil {
+				return citypes.ArtifactOutput{}, err
+			}
+
+			return citypes.ArtifactOutput{URL: prev.URL, Reason: reason}, nil
+		}
 	}
 
 	var out citypes.ArtifactOutput
@@ -323,67 +491,28 @@ func (c *Controller) release(
 		return citypes.ArtifactOutput{}, fmt.Errorf("releasing stage %q: %w", stage.Name, err)
 	}
 
-	return out, nil
-}
+	// Published or converged, the revision now carries this number. The
+	// record is what stops the next run from deriving another.
+	if out.Published || out.URL != "" {
+		home, _ := spec["repo"].(string)
 
-// runArtifacts gathers everything the apply's runs built, in stage order.
-// This is the channel a distribution rides: what the substages produced is
-// exactly what a release may publish.
-func runArtifacts(stages []StageReport) []forge.Artifact {
-	out := []forge.Artifact{}
-
-	for _, stage := range stages {
-		for _, run := range stage.Runs {
-			if run.Forge == nil {
-				continue
-			}
-
-			out = append(out, run.Forge.Artifacts...)
+		err := c.writeRelease(ctx, index, releaseRecord{
+			Revision:   revision.ID,
+			Version:    version,
+			Tag:        artifactcontroller.TagName(p.Versioning.TagPrefix, version),
+			Repo:       home,
+			Repos:      decision.Repos,
+			Trees:      decision.Trees,
+			Index:      out.Index,
+			URL:        out.URL,
+			ReleasedAt: c.now(),
+		})
+		if err != nil {
+			return citypes.ArtifactOutput{}, err
 		}
 	}
 
-	return out
-}
-
-// releaseVersion is the one number the whole factory is released under. It is
-// derived here and nowhere else: there is no field to type a version into, so
-// a number can never be re-pointed at a release that already exists, and no
-// engine downstream may compute one of its own.
-//
-// It runs before the first stage, because the build stamp and the release tag
-// have to be the same number and a build cannot wait for a release to decide.
-//
-// A pipeline that releases nothing gets no version. There is no line to read:
-// a workspace root is not a repo and carries no tags, and asking it for one
-// fails outright rather than answering empty. Builds then stamp what they
-// always did.
-func (c *Controller) releaseVersion(
-	ctx context.Context,
-	p config.Pipeline,
-	index engineIndex,
-	root string,
-) (string, error) {
-	home, releases := releaseHome(p, index, root)
-	if !releases {
-		return "", nil
-	}
-
-	previous, err := c.git.LatestTag(ctx, home, p.Versioning.TagPrefix)
-	if err != nil {
-		return "", fmt.Errorf("reading the last released version: %w", err)
-	}
-
-	level, err := c.bumpLevel(ctx, p, root, previous)
-	if err != nil {
-		return "", err
-	}
-
-	next, err := artifactcontroller.Bump(previous, level, p.Versioning.Cap)
-	if err != nil {
-		return "", fmt.Errorf("deciding the next version: %w", err)
-	}
-
-	return next, nil
+	return out, nil
 }
 
 // releaseHome is the checkout the version line lives in: the one the release
@@ -416,15 +545,22 @@ func releaseHome(p config.Pipeline, index engineIndex, root string) (string, boo
 	return "", false
 }
 
-// bumpLevel is how far the release moves. The semantic strategy reads every
-// member's commit subjects since the last release, because a factory releases
-// its members together and a breaking change in any one of them is breaking
-// for the number they all carry.
+// bumpLevel is how far the release moves. The semantic strategy reads the
+// release set's commit subjects since the last release, because a factory
+// releases its members together and a breaking change in any one of them is
+// breaking for the number they all carry. Only the release set is read: a
+// pipeline repo the release never tags, a register that gains a commit every
+// run say, must not decide the number.
+//
+// A subject no list claims, under unmatched: error, fails here, before any
+// build: the vocabulary is a rule the team wrote, and a subject outside it
+// is a mistake to report rather than a patch to release quietly.
 func (c *Controller) bumpLevel(
 	ctx context.Context,
 	p config.Pipeline,
 	root string,
 	previous string,
+	set []string,
 ) (artifactcontroller.Level, error) {
 	switch p.Versioning.Strategy {
 	case config.StrategyMinor:
@@ -435,13 +571,19 @@ func (c *Controller) bumpLevel(
 
 		subjects := []string{}
 
-		for _, repo := range p.Repos {
-			got, err := c.git.SubjectsSince(ctx, filepath.Join(root, repo.Name), tag)
+		for _, name := range set {
+			got, err := c.git.SubjectsSince(ctx, filepath.Join(root, name), tag)
 			if err != nil {
-				return 0, fmt.Errorf("reading what changed in %q: %w", repo.Name, err)
+				return 0, fmt.Errorf("reading what changed in %q: %w", name, err)
 			}
 
 			subjects = append(subjects, got...)
+		}
+
+		if p.Versioning.Semantic.Unmatched == config.UnmatchedError {
+			if unclaimed := artifactcontroller.Unclaimed(p.Versioning.Semantic, subjects); len(unclaimed) > 0 {
+				return 0, fmt.Errorf("%w: %q", ErrUnclaimedSubject, unclaimed[0])
+			}
 		}
 
 		return artifactcontroller.HighestLevel(p.Versioning.Semantic, subjects), nil
@@ -713,6 +855,15 @@ func (c *Controller) applySubstage(
 	})
 	if err != nil {
 		return citypes.Run{}, false, fmt.Errorf("stage %q substage %q: %w", stage.Name, sub.Name, err)
+	}
+
+	// What a green run built is handed to the engine that built it before
+	// the run is recorded, so the record carries locations the engine can
+	// serve again rather than paths on a disk that is gone with the runner.
+	if out.Status == citypes.StatusPassed {
+		if err := c.putArtifacts(ctx, engine, revision.ID, root, out.Forge); err != nil {
+			return citypes.Run{}, false, fmt.Errorf("stage %q substage %q: keeping what it built: %w", stage.Name, sub.Name, err)
+		}
 	}
 
 	run := citypes.Run{

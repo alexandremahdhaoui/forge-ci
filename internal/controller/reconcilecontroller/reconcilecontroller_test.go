@@ -42,6 +42,7 @@ func gitAt(t *testing.T, sha string, previous ...string) *gitadaptermock.MockGit
 	git.EXPECT().HeadSHA(mock.Anything, mock.Anything).Return(sha, nil).Maybe()
 	git.EXPECT().WorktreeHash(mock.Anything, mock.Anything).Return("", nil).Maybe()
 	git.EXPECT().LatestTag(mock.Anything, mock.Anything, mock.Anything).Return(last, nil).Maybe()
+	git.EXPECT().TreeHash(mock.Anything, mock.Anything).Return("tree-"+sha, nil).Maybe()
 
 	return git
 }

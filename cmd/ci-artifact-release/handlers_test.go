@@ -46,7 +46,7 @@ func TestAssetsResolveAbsolutelyWhateverTheRootLooksLike(t *testing.T) {
 		"a trailing slash": root + "/",
 	} {
 		t.Run(name, func(t *testing.T) {
-			assets, err := stageAssets(given, plan, []string{upload}, "abc")
+			assets, _, err := stageAssets(given, plan, []string{upload}, "abc")
 			require.NoError(t, err)
 			require.NotEmpty(t, assets)
 

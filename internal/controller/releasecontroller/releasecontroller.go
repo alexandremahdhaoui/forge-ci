@@ -106,7 +106,15 @@ func (c *Controller) Publish(ctx context.Context, dir, repo, tag, sha string) (R
 		return out, nil
 	}
 
-	release, err := c.api.CreateRelease(ctx, repo, tag)
+	// Draft then publish, the same two writes the pipeline's release makes:
+	// there is nothing to attach here, but one order for both means one
+	// fake and one set of expectations to reason about.
+	draft, err := c.api.CreateDraftRelease(ctx, repo, tag)
+	if err != nil {
+		return out, fmt.Errorf("publishing %s: %w", tag, err)
+	}
+
+	release, err := c.api.PublishRelease(ctx, repo, draft.ID)
 	if err != nil {
 		return out, fmt.Errorf("publishing %s: %w", tag, err)
 	}

@@ -2,11 +2,15 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 
+	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/fsadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/githubadapter"
+	"github.com/alexandremahdhaoui/forge-ci/internal/controller/computecontroller"
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/workflowcontroller"
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
+	"github.com/alexandremahdhaoui/forge/pkg/forge"
 )
 
 // NewHandlers wires the github compute into the generated tool surface.
@@ -18,6 +22,11 @@ func NewHandlers() Handlers {
 	ctrl := workflowcontroller.New(func(spec workflowcontroller.Spec) githubadapter.API {
 		return githubadapter.New(nil, spec.APIBaseURL, os.Getenv(spec.TokenEnv))
 	}, nil, nil)
+
+	// put and get are the same controller the local engine runs: the files
+	// live under the root either way, and the rendered workflow is what
+	// carries that directory between jobs.
+	files := computecontroller.New(nil, nil, nil)
 
 	return Handlers{
 		Declare: func(_ context.Context, in DeclareInput) (*DeclareOutput, error) {
@@ -39,6 +48,46 @@ func NewHandlers() Handlers {
 				Message: out.Message,
 				Output:  out.Output,
 			}, nil
+		},
+		Put: func(_ context.Context, in ArtifactPutInput) (*ArtifactPutOutput, error) {
+			artifacts, err := toArtifacts(in.Artifacts)
+			if err != nil {
+				return nil, err
+			}
+
+			out, err := files.Put(fsadapter.New(), citypes.ArtifactPutInput{
+				Revision: in.Revision, Artifacts: artifacts, Root: in.Root, Spec: in.Spec,
+			})
+			if err != nil {
+				return nil, err
+			}
+
+			wire, err := fromArtifacts(out.Artifacts)
+			if err != nil {
+				return nil, err
+			}
+
+			return &ArtifactPutOutput{Artifacts: wire}, nil
+		},
+		Get: func(_ context.Context, in ArtifactGetInput) (*ArtifactGetOutput, error) {
+			artifacts, err := toArtifacts(in.Artifacts)
+			if err != nil {
+				return nil, err
+			}
+
+			out, err := files.Get(fsadapter.New(), citypes.ArtifactGetInput{
+				Revision: in.Revision, Artifacts: artifacts, Root: in.Root, Spec: in.Spec,
+			})
+			if err != nil {
+				return nil, err
+			}
+
+			wire, err := fromArtifacts(out.Artifacts)
+			if err != nil {
+				return nil, err
+			}
+
+			return &ArtifactGetOutput{Artifacts: wire}, nil
 		},
 	}
 }
@@ -80,4 +129,49 @@ func fromResources(in []citypes.Resource) []Resource {
 	}
 
 	return out
+}
+
+// toArtifacts reads forge's own records off the wire and fromArtifacts puts
+// them back. Marshalling is the mapping on purpose: the shape is whatever
+// forge emits, and describing it again is what we are avoiding.
+func toArtifacts(in []ForgeArtifact) ([]forge.Artifact, error) {
+	out := make([]forge.Artifact, 0, len(in))
+
+	for _, a := range in {
+		raw, err := json.Marshal(a)
+		if err != nil {
+			return nil, err
+		}
+
+		var artifact forge.Artifact
+
+		if err := json.Unmarshal(raw, &artifact); err != nil {
+			return nil, err
+		}
+
+		out = append(out, artifact)
+	}
+
+	return out, nil
+}
+
+func fromArtifacts(in []forge.Artifact) ([]ForgeArtifact, error) {
+	out := make([]ForgeArtifact, 0, len(in))
+
+	for _, a := range in {
+		raw, err := json.Marshal(a)
+		if err != nil {
+			return nil, err
+		}
+
+		var wire ForgeArtifact
+
+		if err := json.Unmarshal(raw, &wire); err != nil {
+			return nil, err
+		}
+
+		out = append(out, wire)
+	}
+
+	return out, nil
 }

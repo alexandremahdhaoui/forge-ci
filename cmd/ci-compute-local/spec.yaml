@@ -15,6 +15,10 @@ tools:
   does: Report the resources this compute target needs. It needs none.
 - name: run
   does: Run the targets and return the outcome.
+- name: put
+  does: Keep what a run built under the root, keyed by revision, and answer the records with locations this engine serves again.
+- name: get
+  does: Bring artifacts a put handed out back to their paths under the root, bytes verified.
 example:
   tool: run
   input: '{"revision":"abc","stage":"build","substage":"default","root":"/work","targets":[{"alias":"build-all","forge":"test-all","in":["my-repo"]}]}'

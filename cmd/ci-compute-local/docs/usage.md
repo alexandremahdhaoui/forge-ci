@@ -20,6 +20,8 @@ forge ran in, so every test report and artifact lands in CI state for free.
 |---|---|
 | `declare` | Report the resources this compute target needs. It needs none. |
 | `run` | Run the targets and return the outcome. |
+| `put` | Keep what a run built under the root, keyed by revision, and answer the records with locations this engine serves again. |
+| `get` | Bring artifacts a put handed out back to their paths under the root, bytes verified. |
 
 ## By hand
 

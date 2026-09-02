@@ -406,7 +406,7 @@ func TestApplyInsideApplyIsRefused(t *testing.T) {
 	out, err := run(t, root, "forge-ci", "apply", "--config", config)
 	require.Error(t, err, out)
 	require.Contains(t, out, "apply cannot run inside apply")
-	require.Contains(t, out, "use forgeCI: bootstrap for a self stage")
+	require.Contains(t, out, "the loop calling itself")
 	require.Contains(t, out, "| forge-ci:")
 }
 

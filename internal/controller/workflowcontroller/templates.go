@@ -79,6 +79,13 @@ func renderCommand(spec Spec, w WorkflowSpec) string {
 	// an edit to the pipeline never runs the pipeline.
 	if len(w.PushBranches) > 0 {
 		fmt.Fprintf(&b, "  push:\n    branches: [%s]\n", strings.Join(w.PushBranches, ", "))
+
+		// A push that touched only these paths never starts the run. This
+		// is the platform's own filter and it is blind to what a file is
+		// for, so the instance lists only what nothing embeds.
+		if len(w.PushPathsIgnore) > 0 {
+			fmt.Fprintf(&b, "    paths-ignore: [%s]\n", quoteList(w.PushPathsIgnore))
+		}
 	}
 
 	job := w.Job
@@ -109,6 +116,12 @@ func renderCommand(spec Spec, w WorkflowSpec) string {
 	// Cancelling mid-write is how a state repo ends up with a revision
 	// recorded and no run beside it, so a superseded start waits instead.
 	b.WriteString("\nconcurrency:\n  group: ${{ github.workflow }}\n  cancel-in-progress: false\n")
+
+	if spec.Phases {
+		writePhasedJobs(&b, spec, w)
+
+		return b.String()
+	}
 
 	writeRunsOn(&b, spec, job)
 	writeSetup(&b, spec)
@@ -168,6 +181,138 @@ func renderCommand(spec Spec, w WorkflowSpec) string {
 	writeFailureReport(&b, w)
 
 	return b.String()
+}
+
+// The phases of one apply, as the jobs that run them. Each job stands the
+// workspace up on its own and runs `<command> --phase <name>`; the phases
+// hand each other what they decided through the state repo, and the files
+// the stages built cross to the release job as an Actions artifact under
+// the directory the compute engine's put keeps them in.
+var phases = []struct {
+	name string
+	step string
+}{
+	{"reconcile", "Reconcile the pipeline's own resources"},
+	{"intent", "Decide whether this revision has anything to release"},
+	{"stages", "Run the stages"},
+	{"release", "Release"},
+}
+
+// artifactDir is where a compute engine's put keeps what a run built, under
+// the workspace root. The stages job uploads it and the release job
+// downloads it, so a release reads files on a runner that never built them.
+const artifactDir = ".forge-ci/artifacts"
+
+// writePhasedJobs renders one apply as four jobs. The intent job's last
+// line is one word, skip or proceed, captured as its output; the two jobs
+// after it run only on proceed, so a run with nothing to release shows them
+// skipped rather than green. A reconcile that superseded itself exits 0
+// with no revision, and the intent job then runs on the superseded state
+// and skips on its own - the run that push fired carries the work.
+func writePhasedJobs(b *strings.Builder, spec Spec, w WorkflowSpec) {
+	b.WriteString("\njobs:\n")
+
+	for i, phase := range phases {
+		fmt.Fprintf(b, "  %s:\n", phase.name)
+
+		if i > 0 {
+			// Every job after the first needs intent: the two after it
+			// read its word, and a job can only read the outputs of a job
+			// it names.
+			needs := []string{phases[i-1].name}
+			if i > 2 {
+				needs = []string{"intent", phases[i-1].name}
+			}
+
+			fmt.Fprintf(b, "    needs: [%s]\n", strings.Join(needs, ", "))
+		}
+
+		if i > 1 {
+			b.WriteString("    if: needs.intent.outputs.outcome == 'proceed'\n")
+		}
+
+		if phase.name == "intent" {
+			b.WriteString("    outputs:\n      outcome: ${{ steps.phase.outputs.outcome }}\n")
+		}
+
+		b.WriteString("    runs-on: ubuntu-latest\n")
+
+		if spec.Container != "" {
+			fmt.Fprintf(b, "    container:\n      image: %s\n", spec.Container)
+		}
+
+		b.WriteString("    steps:\n")
+
+		writeSetup(b, spec)
+		writeStoreRestore(b)
+		writeWorkspaceCheckout(b, spec, w.Secret)
+		writeToolchain(b, spec)
+
+		if phase.name == "release" {
+			fmt.Fprintf(b, "\n      - name: Bring back what the stages built\n        uses: actions/download-artifact@v4\n        with:\n          name: built-${{ github.run_id }}\n          path: %s\n", artifactDir)
+		}
+
+		fmt.Fprintf(b, "\n      - name: %s\n        id: phase\n", phase.step)
+		writeCommandEnv(b, w)
+		b.WriteString("        run: |\n")
+
+		if phase.name == "intent" {
+			// The last line of the report is the word. It is captured
+			// rather than parsed from the middle: a report can say
+			// anything before it, and the last line is the contract.
+			writeIndented(b, "out=$("+strings.TrimSpace(w.Command)+" --phase intent)\n"+
+				"printf '%s\\n' \"$out\"\n"+
+				"echo \"outcome=$(printf '%s\\n' \"$out\" | sed -n 's/^intent: //p' | tail -n 1)\" >> \"$GITHUB_OUTPUT\"")
+		} else {
+			writeIndented(b, strings.TrimSpace(w.Command)+" --phase "+phase.name)
+		}
+
+		if phase.name == "stages" {
+			fmt.Fprintf(b, "\n      - name: Keep what the stages built for the release job\n        uses: actions/upload-artifact@v4\n        with:\n          name: built-${{ github.run_id }}\n          path: %s\n          if-no-files-found: ignore\n          retention-days: 7\n", artifactDir)
+		}
+
+		if phase.name == "stages" && w.Push {
+			fmt.Fprintf(b, "\n      - name: Push what the pipeline wrote\n        run: |\n          cd %s\n          git push origin HEAD:%s\n",
+				spec.Dir, spec.Ref)
+		}
+
+		writeStoreSave(b)
+		writeFailureReport(b, w)
+	}
+}
+
+// writeCommandEnv renders the env block the command step needs: the
+// token, the workflow's own secret, and the dispatch payload fields.
+func writeCommandEnv(b *strings.Builder, w WorkflowSpec) {
+	if len(w.PayloadEnv) == 0 && !w.Token && w.Secret == "" {
+		return
+	}
+
+	b.WriteString("        env:\n")
+
+	if w.Token {
+		b.WriteString("          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}\n")
+	}
+
+	if w.Secret != "" {
+		fmt.Fprintf(b, "          %s: ${{ secrets.%s }}\n", w.Secret, w.Secret)
+	}
+
+	for _, field := range w.PayloadEnv {
+		fmt.Fprintf(b, "          %s: ${{ github.event.client_payload.%s }}\n",
+			strings.ToUpper(field), field)
+	}
+}
+
+// quoteList renders a YAML flow list of quoted strings, so a glob like
+// "*.md" survives the parser.
+func quoteList(items []string) string {
+	quoted := make([]string, 0, len(items))
+	for _, item := range items {
+		quoted = append(quoted, `"`+strings.ReplaceAll(item, `"`, `\"`)+`"`)
+	}
+
+	return strings.Join(quoted, ", ")
 }
 
 // writeFailureReport renders the step that opens an issue when the run

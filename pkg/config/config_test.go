@@ -158,7 +158,7 @@ func TestVersioningRejectsWhatItCannotActOn(t *testing.T) {
 				p.Versioning.Strategy = config.StrategySemantic
 				p.Versioning.Semantic.Unmatched = "huge"
 			},
-			"must be major, minor, patch or ignore",
+			"must be major, minor, patch, ignore or error",
 		},
 		"a vocabulary nothing reads": {
 			func(p *config.Pipeline) {

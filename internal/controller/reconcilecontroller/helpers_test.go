@@ -38,7 +38,10 @@ type fakeEngines struct {
 	live  int
 	peak  int
 
-	published  []citypes.ArtifactInput
+	published []citypes.ArtifactInput
+	// index is what the fake release engine answers as the staged index,
+	// so a test can seed what the last release shipped.
+	index      string
 	runOutputs map[string]citypes.RunOutput
 	gateStatus citypes.Status
 	promote    *citypes.PromotionOutput
@@ -153,6 +156,18 @@ func (f *fakeEngines) dispatch(_ context.Context, uri, tool string, in, out any)
 		}
 
 		return assign(out, result)
+	case uri == uriCompute && tool == "put":
+		// The fake keeps nothing: the records come back as they went, the
+		// way an engine with nothing to move answers.
+		var input citypes.ArtifactPutInput
+		require.NoError(f.t, remarshal(in, &input))
+
+		return assign(out, citypes.ArtifactPutOutput{Artifacts: input.Artifacts})
+	case uri == uriCompute && tool == "get":
+		var input citypes.ArtifactGetInput
+		require.NoError(f.t, remarshal(in, &input))
+
+		return assign(out, citypes.ArtifactGetOutput{Artifacts: input.Artifacts})
 	case uri == uriRelease && tool == "publish":
 		var input citypes.ArtifactInput
 		require.NoError(f.t, remarshal(in, &input))
@@ -165,6 +180,7 @@ func (f *fakeEngines) dispatch(_ context.Context, uri, tool string, in, out any)
 			Published: true,
 			URL:       "https://example.com/releases/" + input.Version,
 			Tagged:    []string{"golden-rust"},
+			Index:     f.index,
 		})
 	case uri == uriTrigger && tool == "poll":
 		var input struct {

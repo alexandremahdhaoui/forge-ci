@@ -175,6 +175,44 @@ type ArtifactOutput struct {
 	URL       string   `json:"url,omitempty" jsonschema:"Where it landed"`
 	Reason    string   `json:"reason,omitempty" jsonschema:"Why it did not publish"`
 	Tagged    []string `json:"tagged,omitempty" jsonschema:"Repos that carry the tag now"`
+	// Index is the distribution index the engine staged, as JSON text: every
+	// asset's digest under the revision and tag. The core records it beside
+	// the release so a later run can say whether the bytes it built are the
+	// bytes already released. A string and never bytes: a byte field crosses
+	// the wire as base64 and the generated schema rejects it.
+	Index string `json:"index,omitempty" jsonschema:"The staged distribution index as JSON text"`
+}
+
+// ArtifactPutInput hands the files a run built to the compute engine's own
+// world, so a later phase or a later run can ask for them back. A build
+// leaves files on one runner's disk and the run record keeps only their
+// paths; the release then reads paths on a runner that never built them.
+type ArtifactPutInput struct {
+	Revision  string           `json:"revision"`
+	Artifacts []forge.Artifact `json:"artifacts"`
+	Root      string           `json:"root"`
+	Spec      map[string]any   `json:"spec,omitempty"`
+}
+
+// ArtifactPutOutput is the same records with each location rewritten to a
+// URL the engine can serve again.
+type ArtifactPutOutput struct {
+	Artifacts []forge.Artifact `json:"artifacts"`
+}
+
+// ArtifactGetInput brings artifacts a put handed out back to paths under
+// root.
+type ArtifactGetInput struct {
+	Revision  string           `json:"revision"`
+	Artifacts []forge.Artifact `json:"artifacts"`
+	Root      string           `json:"root"`
+	Spec      map[string]any   `json:"spec,omitempty"`
+}
+
+// ArtifactGetOutput is the same records with each location a path under
+// root again, bytes verified.
+type ArtifactGetOutput struct {
+	Artifacts []forge.Artifact `json:"artifacts"`
 }
 
 type Revision struct {

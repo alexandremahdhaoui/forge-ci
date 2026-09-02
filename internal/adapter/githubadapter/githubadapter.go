@@ -51,8 +51,11 @@ type API interface {
 	// ReleaseByTag answers the release published under a tag, and whether
 	// the repo carries one. Absent is not an error.
 	ReleaseByTag(ctx context.Context, repo, tag string) (Release, bool, error)
-	// CreateRelease publishes the release for a tag already on the remote.
-	CreateRelease(ctx context.Context, repo, tag string) (Release, error)
+	// CreateDraftRelease creates a release nobody can see yet, so assets can
+	// be attached before anything is visible or tagged.
+	CreateDraftRelease(ctx context.Context, repo, tag string) (Release, error)
+	// PublishRelease makes a draft visible. The last write of a release.
+	PublishRelease(ctx context.Context, repo string, id int64) (Release, error)
 	// UploadAsset attaches one file through the URL the release answered,
 	// which is on a different host from the API base.
 	UploadAsset(ctx context.Context, uploadURL, file string) error

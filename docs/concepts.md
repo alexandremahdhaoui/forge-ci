@@ -22,6 +22,7 @@ The question an engine answers. The list is closed.
 | `forge` | Arguments passed to forge. For example "test-all". |
 | `forgeCI` | A forge-ci verb. For example "apply". |
 | `gates` | Aliases of engines whose type is gate. Every gate runs after the substage finishes. A gate never runs before. |
+| `ignorePaths` | Paths whose changes never release, as glob patterns against each member's root. A revision whose release set differs from the last release only under these paths converges without a release. List only what nothing embeds: a README a binary carries is a code change, and a pattern that hides it hides a release. |
 | `in` | Repo names the target runs in. Empty means the pipeline root. |
 | `manager` | Alias of an entry in managers. |
 | `managers` | Named manager instances. A manager makes declared resources exist. It knows nothing about CI. |
@@ -44,7 +45,7 @@ The question an engine answers. The list is closed.
 | `tagPrefix` | Goes in front of the semver, joined with a dash. Absent means no prefix, which is what every factory does: v0.50.0. Set it only when one repo is released by more than one factory, so the two lines do not read each other's tags. |
 | `targets` | Named units of work. A target names a forge target or a forge-ci verb. This is the only place a forge target appears. |
 | `triggers` | Aliases of engines whose type is trigger. |
-| `unmatched` | What a subject no list claims scores. Absent means patch. Set it to ignore to make the vocabulary exhaustive. |
+| `unmatched` | What a subject no list claims scores. Absent means patch. Set it to ignore to make the vocabulary exhaustive, or to error to enforce it: a subject no list claims then fails the run before anything builds, naming the subject. |
 | `versioning` | How the one number this factory releases under is derived. Every member is tagged with it, so a workspace has one version line rather than one per repo. There is no field to type a version into: a version is derived or it is nothing, so it can never be re-pointed at a release that already exists. |
 
 See [architecture.md](architecture.md) for how they fit together, and

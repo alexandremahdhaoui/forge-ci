@@ -74,6 +74,13 @@ type Versioning struct {
 	// Semantic is the vocabulary the semantic strategy reads commit
 	// subjects with. It is ignored by the other strategies.
 	Semantic Semantic `json:"semantic,omitempty"`
+
+	// IgnorePaths names what never releases, as glob patterns against each
+	// member's root. A revision whose release set differs from the last
+	// release only under these paths converges without a release. List only
+	// what nothing embeds: a README a binary carries is a code change, and a
+	// pattern that hides it hides a release.
+	IgnorePaths []string `json:"ignorePaths,omitempty"`
 }
 
 // Semantic is the vocabulary, not a standard. A team writes the prefixes it
@@ -87,9 +94,14 @@ type Semantic struct {
 
 	// Unmatched is the level a subject scores when no list claims it.
 	// Empty means patch. Set it to "ignore" to make the vocabulary
-	// exhaustive, so an unrecognised subject releases nothing.
+	// exhaustive, so an unrecognised subject releases nothing, or to
+	// "error" to enforce it: a subject no list claims then fails the run
+	// before anything builds, naming the subject.
 	Unmatched string `json:"unmatched,omitempty"`
 }
+
+// UnmatchedError is the Unmatched value that enforces the vocabulary.
+const UnmatchedError = "error"
 
 type Repo struct {
 	Name string `json:"name"`
@@ -462,12 +474,14 @@ var strategies = map[string]bool{
 }
 
 // levels are what Semantic.Unmatched may name. "ignore" makes the vocabulary
-// exhaustive: a subject nothing claims releases nothing.
+// exhaustive: a subject nothing claims releases nothing. "error" enforces
+// it: a subject nothing claims fails the run before anything builds.
 var levels = map[string]bool{
-	"major":  true,
-	"minor":  true,
-	"patch":  true,
-	"ignore": true,
+	"major":        true,
+	"minor":        true,
+	"patch":        true,
+	"ignore":       true,
+	UnmatchedError: true,
 }
 
 // capPattern is a ceiling, not a version: "v0" or "v0.50". A full semver is
@@ -498,7 +512,17 @@ func (v Versioning) problems() []string {
 
 	if v.Semantic.Unmatched != "" && !levels[v.Semantic.Unmatched] {
 		out = append(out, fmt.Sprintf(
-			"semantic.unmatched %q must be major, minor, patch or ignore", v.Semantic.Unmatched))
+			"semantic.unmatched %q must be major, minor, patch, ignore or error", v.Semantic.Unmatched))
+	}
+
+	// A path rule nothing reads is the same mistake as a vocabulary nothing
+	// reads: it only applies where a release set is compared, which is the
+	// release decision of any strategy, so it is never refused here. An
+	// empty pattern would match everything and hide every release.
+	for _, pattern := range v.IgnorePaths {
+		if strings.TrimSpace(pattern) == "" {
+			out = append(out, "ignorePaths carries an empty pattern")
+		}
 	}
 
 	// A vocabulary nothing reads is a vocabulary somebody wrote expecting it

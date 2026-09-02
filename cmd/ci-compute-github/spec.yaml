@@ -16,6 +16,10 @@ tools:
   does: Answer one converged file per owned workflow, one Actions secret per declared secret, and enablement for every workflow file.
 - name: run
   does: Dispatch the runner workflow with a unique marker and the target script, correlate by the marker in the run name, and poll to conclusion.
+- name: put
+  does: Keep what a run built under the root, keyed by revision, and answer the records with locations this engine serves again. The rendered phased workflow uploads that directory after the stages job and downloads it before the release job.
+- name: get
+  does: Bring artifacts a put handed out back to their paths under the root, bytes verified.
 example:
   tool: declare
   input: '{"spec":{"repo":"o/r","runner":{"name":"ci-runner","secret":"FORGE_CI_GITHUB_TOKEN"}}}'
@@ -90,7 +94,11 @@ spec:
 - key: workflows
   type: list
   required: false
-  means: The owned workflows, each a kind with its parameters or verbatim content, plus an optional header comment block. A command workflow also takes reportFailure (open an issue when a run fails - set it on a workflow nobody watches, meaning a cron run or a repository_dispatch somebody fired from another repo), and pushBranches (also start on a push to this repo, which is how a factory pipeline reruns when its own workspace files change). Every command workflow serializes its own runs - one in flight, later starts queued rather than cancelled - because one push wave dispatches once per member, and concurrent applies race the state repo; this is the engine's guarantee, never a knob. Every workspace-building job also restores the tool store from the Actions cache before its bootstrap and saves it under a content-derived key afterwards, so runtimes and toolchain binaries download once rather than every run; also the engine's own behavior, never a knob, and safe because the store rebuilds any entry that no longer matches its description. A release workflow needs a secret too, because it stands the workspace up to reach the toolchain and that clone reaches private members.
+  means: The owned workflows, each a kind with its parameters or verbatim content, plus an optional header comment block. A command workflow also takes reportFailure (open an issue when a run fails - set it on a workflow nobody watches, meaning a cron run or a repository_dispatch somebody fired from another repo), and pushBranches (also start on a push to this repo, which is how a factory pipeline reruns when its own workspace files change), and pushPathsIgnore (a push touching only these paths never starts the run - the platform's own filter, blind to what a file is for, so list only what nothing embeds). Every command workflow serializes its own runs - one in flight, later starts queued rather than cancelled - because one push wave dispatches once per member, and concurrent applies race the state repo; this is the engine's guarantee, never a knob. Every workspace-building job also restores the tool store from the Actions cache before its bootstrap and saves it under a content-derived key afterwards, so runtimes and toolchain binaries download once rather than every run; also the engine's own behavior, never a knob, and safe because the store rebuilds any entry that no longer matches its description. A release workflow needs a secret too, because it stands the workspace up to reach the toolchain and that clone reaches private members.
+- key: phases
+  type: bool
+  required: false
+  means: 'Render every command workflow as four jobs - reconcile, intent, stages, release - each running one phase of the apply with --phase, so the run reads as what it is instead of one job named after its first step. The intent job answers one word, skip or proceed; the two jobs after it run only on proceed, so a run with nothing to release shows them skipped. The files the stages built cross to the release job as an Actions artifact. Off, a command workflow is one job running the whole apply.'
 - key: runner
   type: object
   required: false

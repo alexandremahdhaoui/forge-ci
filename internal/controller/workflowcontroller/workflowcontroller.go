@@ -73,6 +73,15 @@ type Spec struct {
 	// Runner configures the run tool's dispatch target. Empty name means
 	// the engine declares no runner and cannot run substages.
 	Runner RunnerSpec `json:"runner,omitzero"`
+	// Phases renders every command workflow as four jobs - reconcile,
+	// intent, stages, release - each running one phase of the apply, so the
+	// run reads as what it is instead of one job named after its first
+	// step. A skipped intent shows the jobs after it as skipped, which is
+	// GitHub's own word for it. The files a build produces cross from the
+	// stages job to the release job as an Actions artifact. Off, a command
+	// workflow is one job running the whole apply, which is what every
+	// pipeline was before phases existed.
+	Phases bool `json:"phases,omitempty"`
 }
 
 // Workspace is the checkout preamble: one command that stands the whole
@@ -119,12 +128,19 @@ type WorkflowSpec struct {
 	// workspace files themselves change, so without it an edit to the
 	// pipeline's own config never runs it.
 	PushBranches []string `json:"pushBranches,omitempty"`
-	Job          string   `json:"job,omitempty"`
-	StepName     string   `json:"stepName,omitempty"`
-	Secret       string   `json:"secret,omitempty"`
-	PayloadEnv   []string `json:"payloadEnv,omitempty"`
-	Command      string   `json:"command,omitempty"`
-	Push         bool     `json:"push,omitempty"`
+	// PushPathsIgnore keeps a push that touched only these paths from
+	// starting the workflow at all, GitHub's own paths-ignore. It filters
+	// pushes to THIS repo only, and it is blind to what a file is used for:
+	// a README a binary embeds is a code change, so list only what nothing
+	// embeds. The vocabulary and ignorePaths in the pipeline are what stop a
+	// release for a member push; this only saves the runner minutes.
+	PushPathsIgnore []string `json:"pushPathsIgnore,omitempty"`
+	Job             string   `json:"job,omitempty"`
+	StepName        string   `json:"stepName,omitempty"`
+	Secret          string   `json:"secret,omitempty"`
+	PayloadEnv      []string `json:"payloadEnv,omitempty"`
+	Command         string   `json:"command,omitempty"`
+	Push            bool     `json:"push,omitempty"`
 
 	// Token puts secrets.GITHUB_TOKEN into the step's environment. Nothing
 	// else does: engines inherit forge-ci's environment and nothing else,

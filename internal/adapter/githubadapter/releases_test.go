@@ -46,6 +46,7 @@ func TestItUploadsToTheHostTheReleaseNames(t *testing.T) {
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&in))
 		assert.Equal(t, "v0.2.0", in["tag_name"])
 		assert.Equal(t, true, in["generate_release_notes"])
+		assert.Equal(t, true, in["draft"], "the first write of a release is a draft nobody can consume")
 
 		fmt.Fprintf(w, `{"html_url":"http://releases/1","upload_url":"%s/assets{?name,label}"}`, uploads.URL)
 	}))
@@ -53,7 +54,7 @@ func TestItUploadsToTheHostTheReleaseNames(t *testing.T) {
 
 	client := githubadapter.New(nil, api.URL, "pat")
 
-	release, err := client.CreateRelease(context.Background(), "o/r", "v0.2.0")
+	release, err := client.CreateDraftRelease(context.Background(), "o/r", "v0.2.0")
 	require.NoError(t, err)
 	require.Equal(t, "http://releases/1", release.HTMLURL)
 
