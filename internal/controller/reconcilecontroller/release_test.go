@@ -105,14 +105,15 @@ func TestAnIgnoredOnlyRangeSkipsBeforeAnyBuild(t *testing.T) {
 	}
 }
 
-// unmatched: error makes the vocabulary a rule. A subject outside it fails
-// the run before anything builds, naming the subject.
+// unmatched: error makes the vocabulary a rule for the newest commit of
+// each repo. A newest subject outside it fails the run before anything
+// builds, naming the subject.
 func TestAnUnclaimedSubjectFailsBeforeAnyBuild(t *testing.T) {
 	f := newFakeEngines(t)
 
 	git := gitAt(t, "abc123", "v0.2.4")
 	git.EXPECT().SubjectsSince(mock.Anything, mock.Anything, "v0.2.4").
-		Return([]string{"fix: fine", "yolo pushed from the train"}, nil).Maybe()
+		Return([]string{"yolo pushed from the train", "fix: fine"}, nil).Maybe()
 
 	p := pipeline(releasingStage("build", substage("default", []string{"build"})))
 	p.Versioning.Strategy = config.StrategySemantic
@@ -126,6 +127,30 @@ func TestAnUnclaimedSubjectFailsBeforeAnyBuild(t *testing.T) {
 	for _, call := range f.calls {
 		require.NotEqual(t, "run", call.Tool, "a refused run builds nothing")
 	}
+}
+
+// The rule rolls forward. A bad subject is fixed by pushing a good commit
+// on top, never by rewriting history, so an older unmatched commit scores
+// patch and the run releases. Nothing reports the old commit: it will
+// never change.
+func TestAnOlderUnclaimedSubjectScoresPatchOnceANewerCommitFollowsTheRule(t *testing.T) {
+	f := newFakeEngines(t)
+
+	git := gitAt(t, "abc123", "v0.2.4")
+	git.EXPECT().SubjectsSince(mock.Anything, mock.Anything, "v0.2.4").
+		Return([]string{"docs: explain", "yolo pushed from the train"}, nil).Maybe()
+
+	p := pipeline(releasingStage("build", substage("default", []string{"build"})))
+	p.Versioning.Strategy = config.StrategySemantic
+	p.Versioning.Semantic = config.Semantic{
+		Patch: []string{"fix:"}, Ignore: []string{"docs:"}, Unmatched: config.UnmatchedError,
+	}
+
+	report, err := reconcilecontroller.New(f.caller(), git, clock()).Apply(context.Background(), p, "/work", plain)
+	require.NoError(t, err)
+	require.False(t, report.Skipped, "the older commit is a patch, not nothing")
+	require.Equal(t, "v0.2.5", report.Version)
+	require.Len(t, f.published, 1)
 }
 
 // One apply cut into phases, each in its own process, reaches the same

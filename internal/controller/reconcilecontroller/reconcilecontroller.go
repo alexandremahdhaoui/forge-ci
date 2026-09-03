@@ -586,7 +586,11 @@ type commitScan struct {
 //
 // A subject no list claims, under unmatched: error, fails here, before any
 // build: the vocabulary is a rule the team wrote, and a subject outside it
-// is a mistake to report rather than a patch to release quietly.
+// is a mistake to report rather than a patch to release quietly. Only the
+// newest commit of each repo is held to it. A bad message is fixed by
+// pushing a good commit on top, never by rewriting history, so an older
+// unmatched commit scores patch and is not reported: it will never change,
+// and a rule that blocked on it would block forever.
 func (c *Controller) bumpLevel(
 	ctx context.Context,
 	p config.Pipeline,
@@ -605,24 +609,33 @@ func (c *Controller) bumpLevel(
 
 		scan := commitScan{Semantic: true}
 
+		// The subjects come newest first. Under unmatched: error the newest
+		// one is the rule; the ones behind it are scored as if unmatched
+		// meant patch, because a commit nobody can change must not decide
+		// that nothing ever releases again.
+		scoring := vocab
+		if scoring.Unmatched == config.UnmatchedError {
+			scoring.Unmatched = "patch"
+		}
+
 		for _, name := range set {
 			got, err := c.git.SubjectsSince(ctx, filepath.Join(root, name), tag)
 			if err != nil {
 				return commitScan{}, fmt.Errorf("reading what changed in %q: %w", name, err)
 			}
 
-			if vocab.Unmatched == config.UnmatchedError {
-				if unclaimed := artifactcontroller.Unclaimed(vocab, prefix, got); len(unclaimed) > 0 {
+			if vocab.Unmatched == config.UnmatchedError && len(got) > 0 {
+				if unclaimed := artifactcontroller.Unclaimed(vocab, prefix, got[:1]); len(unclaimed) > 0 {
 					return commitScan{}, fmt.Errorf(
-						"%w: the commit %q in %s starts with no known release kind. Use one of: %s, or set semantic.unmatched to a level",
-						ErrUnclaimedSubject, unclaimed[0], name, strings.Join(knownKinds(vocab, prefix), ", "))
+						"%w: the newest commit in %s, %q, starts with no known release kind. Use one of: %s. Push a commit with a known kind on top; older commits are not held to the rule",
+						ErrUnclaimedSubject, name, unclaimed[0], strings.Join(knownKinds(vocab, prefix), ", "))
 				}
 			}
 
 			for _, subject := range got {
 				scan.Count++
 
-				level := artifactcontroller.Classify(vocab, prefix, subject)
+				level := artifactcontroller.Classify(scoring, prefix, subject)
 				where := fmt.Sprintf("%q in %s", subject, name)
 
 				if level == artifactcontroller.LevelNone && scan.Ignored == "" {

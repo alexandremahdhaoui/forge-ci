@@ -45,6 +45,11 @@ refuses until the stage before it has a green record. `--stage <name>
 substage's record and mints. That is what lets a compute engine render one
 job per stage, or one per substage with a promotion job per stage.
 
+Under `unmatched: error` only the newest commit of each release repo has
+to match a list. An older commit that matches none scores patch. History
+is never rewritten, so a bad message is fixed by a good commit on top, and
+the run that follows releases.
+
 forge-ci's own commit, the one a manager writes when it reconciles the CI
 resources, reads `forge-ci: self reconcile`. The prefix is the pipeline's
 `versioning.selfReconcileCommitPrefix`, default `forge-ci:`, and the

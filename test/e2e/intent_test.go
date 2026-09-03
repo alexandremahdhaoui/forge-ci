@@ -123,6 +123,15 @@ func TestAnUnclaimedSubjectFailsFast(t *testing.T) {
 	require.Contains(t, out, "pushed from the train")
 	require.NotContains(t, out, "stage build")
 	require.Equal(t, []string{"v0.1.0"}, strings.Fields(mustRun(t, origin, "git", "tag")))
+
+	// The fix is a good commit on top. The old one stays, scores patch, and
+	// the run releases.
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "README.md"), []byte("three"), 0o600))
+	mustRun(t, repo, "git", "commit", "-am", "docs: say it properly")
+
+	out = mustRun(t, root, "forge-ci", "apply", "--config", "forge-ci.yaml", "--root", ".")
+	require.Contains(t, out, "stage build")
+	require.Equal(t, "v0.1.1", fake.releases["owner/demo-repo"])
 }
 
 // The phases, one process each, reach the same release the whole apply

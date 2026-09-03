@@ -116,8 +116,10 @@ type Semantic struct {
 	// Unmatched is the level a subject scores when no list claims it.
 	// Empty means patch. Set it to "ignore" to make the vocabulary
 	// exhaustive, so an unrecognised subject releases nothing, or to
-	// "error" to enforce it: a subject no list claims then fails the run
-	// before anything builds, naming the subject.
+	// "error" to enforce it: the newest commit of each release repo must
+	// then match a list, or the run fails before anything builds, naming
+	// the subject. Older unmatched commits score patch: history is never
+	// rewritten, so the fix is a good commit on top.
 	Unmatched string `json:"unmatched,omitempty"`
 }
 
