@@ -61,22 +61,29 @@ func (c *Controller) Put(fs fsadapter.FS, in citypes.ArtifactPutInput) (citypes.
 		src := filepath.Join(in.Root, rel)
 		dst := filepath.Join(in.Root, ArtifactDir, in.Revision, rel)
 
-		// A directory artifact - a generated tree, an image layout - stays
-		// where it was built. A release uploads files, and a tree that
-		// must travel is a later refinement, not a copy of every file
-		// forge ever generated.
 		dir, err := fs.IsDir(src)
 		if err != nil {
 			return citypes.ArtifactPutOutput{}, fmt.Errorf("putting %s: %w", rel, err)
 		}
 
-		if dir {
+		// A directory artifact travels when a release reads it: an image
+		// layout is a tree of blobs the registry push needs. Any other tree
+		// - a generated tree, a command's whole output directory, which can
+		// be the repo itself - stays where it was built, because copying
+		// every file forge ever wrote is not what a release needs.
+		if dir && !treeTravels(artifact) {
 			out.Artifacts = append(out.Artifacts, artifact)
 
 			continue
 		}
 
-		if err := copyFile(fs, src, dst); err != nil {
+		if dir {
+			err = copyTree(fs, src, dst)
+		} else {
+			err = copyFile(fs, src, dst)
+		}
+
+		if err != nil {
 			return citypes.ArtifactPutOutput{}, fmt.Errorf("putting %s: %w", rel, err)
 		}
 
@@ -111,22 +118,34 @@ func (c *Controller) Get(fs fsadapter.FS, in citypes.ArtifactGetInput) (citypes.
 		src := filepath.Join(in.Root, ArtifactDir, revision, filepath.FromSlash(rel))
 		dst := filepath.Join(in.Root, filepath.FromSlash(rel))
 
-		if err := copyFile(fs, src, dst); err != nil {
-			return citypes.ArtifactGetOutput{}, fmt.Errorf("getting %s: %w", rel, err)
-		}
-
-		want, _, err := fsadapter.Digest(src)
+		dir, err := fs.IsDir(src)
 		if err != nil {
 			return citypes.ArtifactGetOutput{}, fmt.Errorf("getting %s: %w", rel, err)
 		}
 
-		got, _, err := fsadapter.Digest(dst)
-		if err != nil {
-			return citypes.ArtifactGetOutput{}, fmt.Errorf("getting %s: %w", rel, err)
+		// A tree comes back file by file, each verified, and its location
+		// is answered as the absolute file URL a layout reader expects. A
+		// file comes back as the root-relative path a release reads.
+		if dir {
+			files, err := fs.Walk(src)
+			if err != nil {
+				return citypes.ArtifactGetOutput{}, fmt.Errorf("getting %s: %w", rel, err)
+			}
+
+			for _, f := range files {
+				if err := restoreFile(fs, filepath.Join(src, filepath.FromSlash(f)), filepath.Join(dst, filepath.FromSlash(f))); err != nil {
+					return citypes.ArtifactGetOutput{}, fmt.Errorf("getting %s: %w", rel+"/"+f, err)
+				}
+			}
+
+			artifact.Location = "file://" + dst
+			out.Artifacts = append(out.Artifacts, artifact)
+
+			continue
 		}
 
-		if want != got {
-			return citypes.ArtifactGetOutput{}, fmt.Errorf("%w: %s", ErrArtifactSum, rel)
+		if err := restoreFile(fs, src, dst); err != nil {
+			return citypes.ArtifactGetOutput{}, fmt.Errorf("getting %s: %w", rel, err)
 		}
 
 		artifact.Location = filepath.ToSlash(rel)
@@ -134,6 +153,53 @@ func (c *Controller) Get(fs fsadapter.FS, in citypes.ArtifactGetInput) (citypes.
 	}
 
 	return out, nil
+}
+
+// treeTravels answers whether a directory artifact is one a release reads
+// on another machine. The container type is forge's own word for an image
+// layout, and the registry push is what reads it.
+func treeTravels(artifact forge.Artifact) bool {
+	return artifact.Type == "container"
+}
+
+// restoreFile copies one kept file back and verifies the bytes against
+// the copy put kept.
+func restoreFile(fs fsadapter.FS, src, dst string) error {
+	if err := copyFile(fs, src, dst); err != nil {
+		return err
+	}
+
+	want, _, err := fsadapter.Digest(src)
+	if err != nil {
+		return err
+	}
+
+	got, _, err := fsadapter.Digest(dst)
+	if err != nil {
+		return err
+	}
+
+	if want != got {
+		return ErrArtifactSum
+	}
+
+	return nil
+}
+
+// copyTree copies every file under src to the same place under dst.
+func copyTree(fs fsadapter.FS, src, dst string) error {
+	files, err := fs.Walk(src)
+	if err != nil {
+		return err
+	}
+
+	for _, f := range files {
+		if err := copyFile(fs, filepath.Join(src, filepath.FromSlash(f)), filepath.Join(dst, filepath.FromSlash(f))); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // localPath answers the root-relative path of a location that is a file

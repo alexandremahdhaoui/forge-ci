@@ -59,6 +59,39 @@ func TestPutThenGetRoundTripsAFileByRevision(t *testing.T) {
 	require.Equal(t, "bytes", string(data))
 }
 
+// An image layout is a tree the registry push reads, so it travels: put
+// keeps every file under it and get brings the tree back, verified, at the
+// absolute file URL the layout reader expects.
+func TestAnImageLayoutTravelsAsATree(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	layout := filepath.Join("member", "build", "images", "tool.oci")
+	require.NoError(t, os.MkdirAll(filepath.Join(root, layout, "blobs", "sha256"), 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(root, layout, "index.json"), []byte("{}"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(root, layout, "blobs", "sha256", "abc"), []byte("layer"), 0o600))
+
+	ctrl := computecontroller.New(nil, nil, nil)
+
+	put, err := ctrl.Put(fsadapter.New(), citypes.ArtifactPutInput{
+		Revision: "rev1", Root: root,
+		Artifacts: []forge.Artifact{{Name: "tool", Type: "container", Location: "file://" + filepath.Join(root, layout)}},
+	})
+	require.NoError(t, err)
+	require.Equal(t, computecontroller.ArtifactScheme+"rev1/member/build/images/tool.oci", put.Artifacts[0].Location)
+	require.FileExists(t, filepath.Join(root, computecontroller.ArtifactDir, "rev1", layout, "blobs", "sha256", "abc"))
+
+	require.NoError(t, os.RemoveAll(filepath.Join(root, layout)))
+
+	got, err := ctrl.Get(fsadapter.New(), citypes.ArtifactGetInput{Revision: "rev1", Root: root, Artifacts: put.Artifacts})
+	require.NoError(t, err)
+	require.Equal(t, "file://"+filepath.Join(root, layout), got.Artifacts[0].Location)
+
+	data, err := os.ReadFile(filepath.Join(root, layout, "blobs", "sha256", "abc"))
+	require.NoError(t, err)
+	require.Equal(t, "layer", string(data))
+}
+
 // A location this engine never answered is refused rather than guessed
 // at, and a path that escapes the root is never copied.
 func TestGetRefusesALocationNoPutAnswered(t *testing.T) {
