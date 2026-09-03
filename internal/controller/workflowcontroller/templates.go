@@ -193,16 +193,17 @@ func renderCommand(spec Spec, w WorkflowSpec) (string, error) {
 // The fixed jobs of one phased apply. Every job stands the workspace up on
 // its own and runs `<command> --phase <name>`; the jobs hand each other what
 // they decided through the state repo, and the files the stages built cross
-// to the release job as Actions artifacts under the directory the compute
-// engine's put keeps them in.
+// between them as Actions artifacts under the directory the compute engine's
+// put keeps them in.
 //
-// The stage jobs between evaluate and release are named by the pipeline:
-// one per stage, or one per substage with a promotion job per stage, as the
-// spec's jobs key says. A stage may not take one of these three names.
+// There are two fixed jobs and no more. A release is a substage, so the job
+// that publishes is a stage job like any other, named by the pipeline. Every
+// job after the evaluate one is named by the pipeline: one per stage, or one
+// per substage with a promotion job per stage, as the spec's jobs key says.
+// A stage may not take one of these two names.
 const (
 	jobSelfReconcile = "self-reconcile"
 	jobEvaluate      = "evaluate"
-	jobRelease       = "release"
 	jobStages        = "stages"
 )
 
@@ -215,8 +216,8 @@ const (
 // artifactDir is where a compute engine's put keeps what a run built, under
 // the factory root. Every job that runs targets uploads it under a name of
 // its own and downloads every name this run has written so far, so a stage
-// reads what the stages before it built and the release reads all of it, on
-// runners that built none of it.
+// reads what the stages before it built - the stage that publishes included -
+// on a runner that built none of it.
 const artifactDir = ".forge-ci/artifacts"
 
 // job is one rendered job of a phased workflow: its id, the step name a
@@ -233,8 +234,8 @@ type job struct {
 	flags string
 	needs []string
 	// download says the job brings back what the jobs before it built. Every
-	// job that runs targets needs it, because a stage reads what the stage
-	// before it made, and so does the release.
+	// job that does work needs it: a stage reads what the stage before it
+	// made, and the substage that publishes reads all of it.
 	download bool
 	upload   bool
 	// gated says the job runs only on proceed: everything after evaluate.
@@ -275,9 +276,9 @@ func phasedJobs(spec Spec, w WorkflowSpec) ([]job, error) {
 	}
 
 	for _, stage := range spec.Stages {
-		if stage.Name == jobSelfReconcile || stage.Name == jobEvaluate || stage.Name == jobRelease {
-			return nil, fmt.Errorf("stage %q takes the name of a fixed job; %s, %s and %s are reserved",
-				stage.Name, jobSelfReconcile, jobEvaluate, jobRelease)
+		if stage.Name == jobSelfReconcile || stage.Name == jobEvaluate {
+			return nil, fmt.Errorf("stage %q takes the name of a fixed job; %s and %s are reserved",
+				stage.Name, jobSelfReconcile, jobEvaluate)
 		}
 
 		if spec.Jobs != JobsPerSubstage {
@@ -316,11 +317,6 @@ func phasedJobs(spec Spec, w WorkflowSpec) ([]job, error) {
 		})
 		last = promote
 	}
-
-	jobs = append(jobs, job{
-		id: jobRelease, name: "Release", step: "Release", flags: "--phase " + jobRelease,
-		needs: []string{jobEvaluate, last}, gated: true, download: true,
-	})
 
 	seen := map[string]bool{}
 
@@ -450,7 +446,7 @@ func writePhasedJobs(b *strings.Builder, spec Spec, w WorkflowSpec, jobs []job) 
 		}
 
 		if j.upload {
-			fmt.Fprintf(b, "\n      - name: Keep what this job built for the release job\n        uses: actions/upload-artifact@v4\n        with:\n          name: built-${{ github.run_id }}-%s\n          path: %s\n          if-no-files-found: ignore\n          retention-days: 7\n", j.id, artifactDir)
+			fmt.Fprintf(b, "\n      - name: Keep what this job built for the jobs after it\n        uses: actions/upload-artifact@v4\n        with:\n          name: built-${{ github.run_id }}-%s\n          path: %s\n          if-no-files-found: ignore\n          retention-days: 7\n", j.id, artifactDir)
 		}
 
 		if j.push {
@@ -760,6 +756,7 @@ func writeSetup(b *strings.Builder, spec Spec) {
 func writeStoreRestore(b *strings.Builder) {
 	b.WriteString(`
       - name: Restore the tool store
+        id: tool-store
         uses: actions/cache/restore@v4
         with:
           path: ~/.cache/forge
@@ -770,10 +767,17 @@ func writeStoreRestore(b *strings.Builder) {
 }
 
 // writeStoreSave saves the tool store under a key derived from its own
-// content, so an unchanged store is never uploaded twice and any change
-// lands exactly once - a save whose key already exists is skipped by the
-// cache action itself. It runs whatever the pipeline concluded: the store
-// a red run installed is just as reusable as a green one's.
+// content, and only when this job's store is not the one the restore already
+// found. It runs whatever the pipeline concluded: the store a red run
+// installed is just as reusable as a green one's.
+//
+// The condition is the whole point. A save whose key already exists is
+// rejected by the cache service, but only AFTER the action has archived the
+// path to find that out - half a gigabyte of tar and zstd, measured at 60 to
+// 70 seconds, in every job of every run, to upload nothing. Comparing the
+// content key with the key the restore matched skips the archive as well as
+// the upload, and a job that did install something still saves, because its
+// key no longer matches what it started from.
 func writeStoreSave(b *strings.Builder) {
 	b.WriteString(`
       - name: Name the tool store by its content
@@ -783,7 +787,7 @@ func writeStoreSave(b *strings.Builder) {
           echo "key=$(find ~/.cache/forge -mindepth 1 -maxdepth 3 2>/dev/null | sort | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
 
       - name: Save the tool store
-        if: always()
+        if: always() && steps.tool-store.outputs.cache-matched-key != format('tool-store-{0}-{1}', runner.os, steps.tool-store-key.outputs.key)
         uses: actions/cache/save@v4
         with:
           path: ~/.cache/forge

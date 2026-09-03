@@ -120,7 +120,7 @@ func (c *Controller) decideRelease(
 		}, nil
 	}
 
-	set := releaseSet(p, revision)
+	set := releaseSet(p, index, revision)
 
 	names := make([]string, 0, len(set))
 	for name := range set {
@@ -223,32 +223,24 @@ func releasing(next, previous string, scan commitScan) string {
 }
 
 // releaseSet is the repos a release tags, at the shas the revision pinned:
-// the first releasing stage's releaseRepos, or every pipeline repo when it
-// names none. The release call enforces the same filter.
-func releaseSet(p config.Pipeline, revision citypes.Revision) map[string]string {
-	for _, stage := range p.Stages {
-		if stage.Release == "" {
-			continue
+// every repo the revision holds, less the ones the artifact engine was told
+// to leave alone. The publish call enforces the same filter, so what decides
+// the version is what gets tagged.
+func releaseSet(p config.Pipeline, index engineIndex, revision citypes.Revision) map[string]string {
+	ignored := map[string]bool{}
+
+	if engine, ok := firstArtifactEngine(p, index); ok {
+		for _, name := range config.IgnoreRepos(engine.Spec) {
+			ignored[name] = true
 		}
-
-		if len(stage.ReleaseRepos) == 0 {
-			break
-		}
-
-		set := map[string]string{}
-
-		for _, name := range stage.ReleaseRepos {
-			if sha, ok := revision.Repos[name]; ok {
-				set[name] = sha
-			}
-		}
-
-		return set
 	}
 
 	set := make(map[string]string, len(revision.Repos))
+
 	for name, sha := range revision.Repos {
-		set[name] = sha
+		if !ignored[name] {
+			set[name] = sha
+		}
 	}
 
 	return set

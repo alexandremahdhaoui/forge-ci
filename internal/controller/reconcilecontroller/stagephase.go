@@ -9,6 +9,7 @@ import (
 
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 	"github.com/alexandremahdhaoui/forge-ci/pkg/config"
+	"github.com/alexandremahdhaoui/forge/pkg/forge"
 )
 
 // One stage as a job of its own.
@@ -92,26 +93,29 @@ func (c *Controller) applyNamedStage(
 	}
 
 	// A promotion reads records and runs nothing, so it needs no files. Every
-	// other shape runs targets, and those targets read what the stages before
-	// this one built.
+	// other shape runs targets or publishes, and both read what the stages
+	// before this one built.
+	var (
+		carried []forge.Artifact
+		err     error
+	)
+
 	if !opts.Promote && at > 0 {
-		if err := c.carryForward(ctx, index, revision, root, p.Stages[:at]); err != nil {
+		carried, err = c.carryForward(ctx, index, revision, root, p.Stages[:at])
+		if err != nil {
 			return Report{}, fmt.Errorf("carrying what the stages before %q built: %w", stage.Name, err)
 		}
 	}
 
-	var (
-		stageReport StageReport
-		err         error
-	)
+	var stageReport StageReport
 
 	switch {
 	case opts.Promote:
 		stageReport, err = c.promoteRecorded(ctx, index, stage, revision)
 	case opts.Substage != "":
-		stageReport, err = c.applyOneSubstage(ctx, p, index, stage, opts.Substage, revision, decision.Version, root)
+		stageReport, err = c.applyOneSubstage(ctx, p, index, stage, opts.Substage, revision, decision, root, carried)
 	default:
-		stageReport, err = c.applyStage(ctx, p, index, stage, revision, decision.Version, root)
+		stageReport, err = c.applyStage(ctx, p, index, stage, revision, decision, root, carried)
 	}
 
 	if err != nil {
@@ -119,6 +123,7 @@ func (c *Controller) applyNamedStage(
 	}
 
 	report.Stages = []StageReport{stageReport}
+	report.Released = append(report.Released, stageReport.Released...)
 
 	// A substage job decides nothing for the stage; the promotion job, or
 	// the whole-stage job, does, and records it for the stage after it.
@@ -130,20 +135,6 @@ func (c *Controller) applyNamedStage(
 		Revision: revision.ID, Stage: stage.Name,
 		Advance: stageReport.Advance, Reason: stageReport.Reason, PromotedAt: c.now(),
 	}); err != nil {
-		return Report{}, err
-	}
-
-	if !stageReport.Advance || !stage.Mint {
-		return report, nil
-	}
-
-	if err := c.mint(ctx, index, revision); err != nil {
-		return Report{}, err
-	}
-
-	report.Minted = true
-
-	if err := c.recordDependencyLocks(ctx, index, revision, root); err != nil {
 		return Report{}, err
 	}
 
@@ -160,15 +151,16 @@ func (c *Controller) applyOneSubstage(
 	stage config.Stage,
 	name string,
 	revision citypes.Revision,
-	version string,
+	decision releaseDecision,
 	root string,
+	carried []forge.Artifact,
 ) (StageReport, error) {
 	for _, sub := range stage.Substages {
 		if sub.Name != name {
 			continue
 		}
 
-		run, reused, err := c.applySubstage(ctx, p, index, stage, sub, revision, version, root)
+		run, reused, out, err := c.applySubstage(ctx, p, index, stage, sub, revision, decision, root, carried)
 		if err != nil {
 			return StageReport{}, err
 		}
@@ -177,6 +169,10 @@ func (c *Controller) applyOneSubstage(
 
 		if reused {
 			report.Reused = 1
+		}
+
+		if out.Published || out.URL != "" {
+			report.Released = []citypes.ArtifactOutput{out}
 		}
 
 		if run.Status == citypes.StatusPassed && allGatesPassed(run) {

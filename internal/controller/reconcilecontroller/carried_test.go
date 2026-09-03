@@ -27,8 +27,8 @@ func TestAStageJobReadsWhatTheStageBeforeItBuilt(t *testing.T) {
 	}
 
 	p := pipeline(
-		mintlessStage("build", substage("default", []string{"build"})),
-		releasingStage("package", substage("default", []string{"build"})),
+		stage("build", substage("default", []string{"build"})),
+		stage("package", substage("default", []string{"build"})),
 	)
 
 	apply := func(opts reconcilecontroller.Options) (reconcilecontroller.Report, error) {
@@ -62,8 +62,8 @@ func TestAPromotionJobCarriesNothing(t *testing.T) {
 	}
 
 	p := pipeline(
-		mintlessStage("build", substage("default", []string{"build"})),
-		releasingStage("package", substage("default", []string{"build"})),
+		stage("build", substage("default", []string{"build"})),
+		stage("package", substage("default", []string{"build"})),
 	)
 
 	apply := func(opts reconcilecontroller.Options) (reconcilecontroller.Report, error) {

@@ -75,3 +75,7 @@ spec:
   type: list of strings
   required: false
   means: Root-relative globs of extra files to publish - the door for cross-built binaries no artifact record carries. A glob that matches nothing fails the release, because a distribution never shrinks silently.
+- key: ignoreRepos
+  type: list of strings
+  required: false
+  means: Members this release leaves alone. They stay in the revision, pinned at their shas, and are never tagged. That is what a factory holding a repo released elsewhere needs, and what a factory whose own pipeline writes into one of its members every run needs. The core reads it too, because the set that decides the version must be the set that gets tagged; every name must be a declared repo and must not repeat.

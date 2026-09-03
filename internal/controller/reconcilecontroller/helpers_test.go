@@ -34,6 +34,9 @@ type fakeEngines struct {
 	t     *testing.T
 	mu    sync.Mutex
 	store map[string]string
+	// puts is the kind of every state write, in order, so a test can say
+	// how MANY times a record family was written and not only that it was.
+	puts  []string
 	calls []call
 	live  int
 	peak  int
@@ -146,6 +149,7 @@ func (f *fakeEngines) dispatch(_ context.Context, uri, tool string, in, out any)
 
 		f.mu.Lock()
 		f.store[input.Kind+"/"+input.Key] = input.Payload
+		f.puts = append(f.puts, input.Kind)
 		f.mu.Unlock()
 
 		return nil
@@ -253,6 +257,23 @@ func (f *fakeEngines) leave() {
 	f.mu.Unlock()
 }
 
+// countedPut is how many records of one kind were written. The store keeps
+// only the last of a key, so a test that must say "once" counts the writes.
+func (f *fakeEngines) countedPut(kind string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	n := 0
+
+	for _, got := range f.puts {
+		if got == kind {
+			n++
+		}
+	}
+
+	return n
+}
+
 func (f *fakeEngines) counted(c call) int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -326,20 +347,34 @@ func pipeline(stages ...config.Stage) config.Pipeline {
 	}
 }
 
-// stage mints, because most tests here assert on the recorded revision. A
-// stage that must not mint is built with mintlessStage.
+// Minting is no stage's business any more - the evaluate phase does it, once,
+// for the whole run - and neither is releasing: a release is a substage like
+// any other, so a releasing stage is one that carries a publishing substage
+// beside whatever else it runs.
 func stage(name string, subs ...config.Substage) config.Stage {
-	return config.Stage{Name: name, Mint: true, Promotion: "all-pass", Substages: subs}
-}
-
-func mintlessStage(name string, subs ...config.Substage) config.Stage {
 	return config.Stage{Name: name, Promotion: "all-pass", Substages: subs}
 }
 
-func releasingStage(name string, subs ...config.Substage) config.Stage {
-	return config.Stage{
-		Name: name, Mint: true, Release: "gh", Promotion: "all-pass", Substages: subs,
+// releaseStage is a stage that only publishes.
+//
+// A release is a substage like any other, and the substages of one stage run
+// at the same time - so a release beside a build would publish while the build
+// was still running, and would read none of what it made. Stage order is what
+// holds it back, which is the same tool that orders everything else.
+func releaseStage() config.Stage {
+	return config.Stage{Name: "release", Promotion: "all-pass", Substages: []config.Substage{
+		{Name: "publish", Engine: "gh", Manager: "local"},
+	}}
+}
+
+// releasingPipeline is the ordinary shape: a stage that builds, then a stage
+// that publishes what it built.
+func releasingPipeline(subs ...config.Substage) config.Pipeline {
+	if len(subs) == 0 {
+		subs = []config.Substage{substage("default", []string{"build"})}
 	}
+
+	return pipeline(stage("build", subs...), releaseStage())
 }
 
 func substage(name string, targets []string, gates ...string) config.Substage {
@@ -395,4 +430,25 @@ func (f *fakeEngines) stripEvaluationRevision(t *testing.T, revision string) {
 	}
 
 	f.store[key] = string(stripped)
+}
+
+// ignoreRepos tells the pipeline's artifact engine to leave these members
+// alone: they stay in the revision, pinned, and the release never tags them.
+func ignoreRepos(p *config.Pipeline, names ...string) {
+	list := make([]any, 0, len(names))
+	for _, name := range names {
+		list = append(list, name)
+	}
+
+	for i, e := range p.Engines {
+		if e.Type != config.PortArtifact {
+			continue
+		}
+
+		if p.Engines[i].Spec == nil {
+			p.Engines[i].Spec = map[string]any{}
+		}
+
+		p.Engines[i].Spec["ignoreRepos"] = list
+	}
 }

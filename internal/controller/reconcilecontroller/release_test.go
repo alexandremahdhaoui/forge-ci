@@ -25,7 +25,7 @@ import (
 func TestARerunOfAReleasedRevisionReusesItsVersion(t *testing.T) {
 	f := newFakeEngines(t)
 	c := reconcilecontroller.New(f.caller(), gitAt(t, "abc123", "v0.1.9"), clock())
-	p := pipeline(releasingStage("build", substage("default", []string{"build"})))
+	p := releasingPipeline()
 
 	first, err := c.Apply(context.Background(), p, "/work", plain)
 	require.NoError(t, err)
@@ -52,11 +52,9 @@ func TestARerunOfAReleasedRevisionReusesItsVersion(t *testing.T) {
 func TestAnUnchangedReleaseSetConvergesWithoutTheEngine(t *testing.T) {
 	f := newFakeEngines(t)
 
-	s := releasingStage("build", substage("default", []string{"build"}))
-	s.ReleaseRepos = []string{"golden-rust"}
-
-	p := pipeline(s)
+	p := releasingPipeline()
 	p.Repos = append(p.Repos, config.Repo{Name: "golden-go", URL: "https://example.com/golden-go"})
+	ignoreRepos(&p, "golden-go")
 
 	_, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc123", "v0.1.9"), clock()).
 		Apply(context.Background(), p, "/work", plain)
@@ -89,7 +87,7 @@ func TestAnIgnoredOnlyRangeSkipsBeforeAnyBuild(t *testing.T) {
 	git.EXPECT().SubjectsSince(mock.Anything, mock.Anything, "v0.2.4").
 		Return([]string{"docs: how to open the door", "chore: tidy"}, nil).Maybe()
 
-	p := pipeline(releasingStage("build", substage("default", []string{"build"})))
+	p := releasingPipeline()
 	p.Versioning.Strategy = config.StrategySemantic
 	p.Versioning.Semantic = config.Semantic{Patch: []string{"fix:"}, Ignore: []string{"docs:", "chore:"}}
 
@@ -115,7 +113,7 @@ func TestAnUnclaimedSubjectFailsBeforeAnyBuild(t *testing.T) {
 	git.EXPECT().SubjectsSince(mock.Anything, mock.Anything, "v0.2.4").
 		Return([]string{"yolo pushed from the train", "fix: fine"}, nil).Maybe()
 
-	p := pipeline(releasingStage("build", substage("default", []string{"build"})))
+	p := releasingPipeline()
 	p.Versioning.Strategy = config.StrategySemantic
 	p.Versioning.Semantic = config.Semantic{Patch: []string{"fix:"}, Unmatched: config.UnmatchedError}
 
@@ -140,7 +138,7 @@ func TestAnOlderUnclaimedSubjectScoresPatchOnceANewerCommitFollowsTheRule(t *tes
 	git.EXPECT().SubjectsSince(mock.Anything, mock.Anything, "v0.2.4").
 		Return([]string{"docs: explain", "yolo pushed from the train"}, nil).Maybe()
 
-	p := pipeline(releasingStage("build", substage("default", []string{"build"})))
+	p := releasingPipeline()
 	p.Versioning.Strategy = config.StrategySemantic
 	p.Versioning.Semantic = config.Semantic{
 		Patch: []string{"fix:"}, Ignore: []string{"docs:"}, Unmatched: config.UnmatchedError,
@@ -159,7 +157,7 @@ func TestAnOlderUnclaimedSubjectScoresPatchOnceANewerCommitFollowsTheRule(t *tes
 // release phase releases under it.
 func TestAPhasedApplyCarriesTheDecisionThroughState(t *testing.T) {
 	f := newFakeEngines(t)
-	p := pipeline(releasingStage("build", substage("default", []string{"build"})))
+	p := releasingPipeline()
 
 	phase := func(name string) reconcilecontroller.Report {
 		t.Helper()
@@ -179,16 +177,14 @@ func TestAPhasedApplyCarriesTheDecisionThroughState(t *testing.T) {
 	require.Equal(t, "v0.1.10", evaluate.Version)
 	require.Contains(t, evaluate.Actions, "Release v0.1.10 (patch).")
 	require.Empty(t, evaluate.Stages)
+	require.True(t, evaluate.Minted, "the run gets its identity here, before any stage runs")
 
+	// The stage that carries the publishing substage releases when it runs.
+	// There is no phase after this one.
 	stages := phase(reconcilecontroller.PhaseStages)
-	require.Len(t, stages.Stages, 1)
-	require.True(t, stages.Minted)
-	require.Empty(t, stages.Released, "the stages phase releases nothing")
-	require.Empty(t, f.published)
-
-	release := phase(reconcilecontroller.PhaseRelease)
-	require.Len(t, release.Released, 1)
-	require.Equal(t, 1, release.Stages[0].Reused, "the release phase reuses what the stages phase proved")
+	require.Len(t, stages.Stages, 2)
+	require.False(t, stages.Minted, "the evaluate phase minted, before this one ran")
+	require.Len(t, stages.Released, 1)
 	require.Len(t, f.published, 1)
 	require.Equal(t, "v0.1.10", f.published[0].Version)
 }
@@ -197,7 +193,7 @@ func TestAPhasedApplyCarriesTheDecisionThroughState(t *testing.T) {
 // of order, and it says so rather than deriving a number of its own.
 func TestAPhaseWithoutAnEvaluationRefuses(t *testing.T) {
 	f := newFakeEngines(t)
-	p := pipeline(releasingStage("build", substage("default", []string{"build"})))
+	p := releasingPipeline()
 
 	_, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc123", "v0.1.9"), clock()).
 		Apply(context.Background(), p, "/work", reconcilecontroller.Options{Phase: reconcilecontroller.PhaseStages})
@@ -229,7 +225,7 @@ func TestIdenticalBytesConvergeOnThePreviousRelease(t *testing.T) {
 		Forge:  &citypes.ForgeResult{Artifacts: []forge.Artifact{{Name: "tool", Type: "binary", Location: rel}}},
 	}
 
-	p := pipeline(releasingStage("build", substage("default", []string{"build"})))
+	p := releasingPipeline()
 
 	first, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc123", "v0.1.9"), clock()).
 		Apply(context.Background(), p, root, plain)

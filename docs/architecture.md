@@ -30,20 +30,29 @@ runs where, and what gets promoted. It calls forge for the rest.
 keyboard all call the same thing and a duplicate call costs nothing.
 
 `apply --phase <name>` runs one part of the loop: `self-reconcile`,
-`evaluate`, `stages` or `release`. Each phase reads and writes state, so
-the next can run in another process. A compute engine renders the phases
-as jobs, so a run reads as what it is. The `evaluate` phase is where a
-revision with nothing to release ends: already released, no new commit in
-the release set, only commits of a kind that never releases, or the same
-code as the last release. It answers one word, `skip` or `proceed`, and the
-phases after it run only on `proceed`.
+`evaluate` or `stages`. Each phase reads and writes state, so the next can
+run in another process. A compute engine renders the phases as jobs, so a
+run reads as what it is. The `evaluate` phase is where a revision with
+nothing to release ends: already released, no new commit in the release
+set, only commits of a kind that never releases, or the same code as the
+last release. It answers one word, `skip` or `proceed`, and the phases
+after it run only on `proceed`. It also mints the revision, so every job of
+the run answers to one identity from the first stage to the last; whether
+those commits were PROVEN is what the run records and the release say.
+
+There is no release phase. A release is a substage that names an artifact
+engine, so it runs where the pipeline puts it, under `stages` like anything
+else. Substages of one stage run at the same time, so a release goes in a
+stage of its own after the one that builds: stage order is what holds it
+behind a green build, and the loop stops at the first stage that does not
+advance.
 
 The `stages` phase cuts further. `--stage <name>` runs one stage, and
 refuses until the stage before it has a green record. `--stage <name>
 --substage <name>` runs one substage and its gates and decides nothing;
 `--stage <name> --promote` asks the stage's promotion over every
-substage's record and mints. That is what lets a compute engine render one
-job per stage, or one per substage with a promotion job per stage.
+substage's record. That is what lets a compute engine render one job per
+stage, or one per substage with a promotion job per stage.
 
 A run proves one set of commits, and only its first phase resolves them.
 The `evaluate` phase records the revision beside its release decision and

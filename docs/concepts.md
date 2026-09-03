@@ -18,6 +18,7 @@ The question an engine answers. The list is closed.
 | `artifactStorePath` | Where forge-ci records its own artifacts. |
 | `cap` | The ceiling the bump may not cross, inclusive. "v0" holds the major at 0; "v0.50" holds major and minor. A bump that would cross it drops one level and retries, so a factory that is not ready for v1 keeps releasing rather than stopping. A full semver is refused: a cap on the patch would stop the only bump that always works. |
 | `displayName` | What to call this stage where a person reads it - a job title in a rendered pipeline, a heading in a report. Absent means a title is derived from the name, so a pipeline that says nothing still reads as words. |
+| `engine` | Alias of an engine whose type is compute or artifact. A compute substage runs targets; an artifact substage publishes what the stages before it built, under the version this run decided. Which of the two decides whether targets is required, so both rules are semantic. |
 | `engineURI` | Only forge:// and alias:// resolve. Anything else is a hard error, matching forge. |
 | `engines` | Named engine instances. An engine implements one port. It declares the resources it needs and never names a manager kind. |
 | `forge` | Arguments passed to forge. For example "test-all". |
@@ -27,15 +28,12 @@ The question an engine answers. The list is closed.
 | `in` | Repo names the target runs in. Empty means the pipeline root. |
 | `manager` | Alias of an entry in managers. |
 | `managers` | Named manager instances. A manager makes declared resources exist. It knows nothing about CI. |
-| `mint` | Write the revision to state when this stage advances. A revision is a claim that this tuple of commits was proven, so minting it before anything runs hands a broken build a revision that can propagate. Set it on the stage that builds and tests. Left unset on every stage, nothing is ever minted. |
 | `name` | Pipeline identifier. |
 | `needs` | The repos that must finish before this one starts, when a target runs in both. A dependency and not an order. |
 | `params` | User defined keys, templated into the targets as {{.Params.x}}. forge-ci never interprets these names. |
 | `port` | The question an engine answers. |
 | `promotion` | Alias of an engine whose type is promotion. It decides whether the stage advances, given every substage outcome. |
 | `ref` | Branch to track. |
-| `release` | Alias of an engine whose type is artifact. It runs after the stage advances, so nothing is published for a build that did not pass. |
-| `releaseRepos` | The repos this stage's release publishes. Only these reach the artifact engine, so only these are tagged. Empty or absent means every repo. Each name must be a declared repo and must not repeat, and the key needs a release engine on the same stage - both checked in the semantic pass, since they cross-reference. |
 | `repos` | The repos that form a revision. Optional. One repo is valid. A pipeline with no repos still runs, and its revision is the pipeline file itself. |
 | `selfReconcileCommitPrefix` | What the commit forge-ci writes when it reconciles its own CI resources starts with. Absent means "forge-ci:", so the commit reads "forge-ci: self reconcile". The release decision scores that commit as a patch unless a semantic list names the same prefix, in which case that list wins. |
 | `semantic` | The vocabulary the semantic strategy reads commit subjects with. It is a vocabulary and not a standard: a team writes the prefixes it actually uses, emoji included. Ignored by the other strategies. |

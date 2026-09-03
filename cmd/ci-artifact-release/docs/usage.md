@@ -40,6 +40,7 @@ engines:
       apiBaseURL: <string>
       tokenEnv: <string>
       assets: <list of strings>
+      ignoreRepos: <list of strings>
 ```
 
 ## Worth knowing

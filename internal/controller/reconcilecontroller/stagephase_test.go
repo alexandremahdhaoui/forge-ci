@@ -17,8 +17,9 @@ import (
 func TestOneJobPerStageReachesTheRelease(t *testing.T) {
 	f := newFakeEngines(t)
 	p := pipeline(
-		mintlessStage("check", substage("default", []string{"build"})),
-		releasingStage("build", substage("default", []string{"build"})),
+		stage("check", substage("default", []string{"build"})),
+		stage("build", substage("default", []string{"build"})),
+		releaseStage(),
 	)
 
 	apply := func(opts reconcilecontroller.Options) (reconcilecontroller.Report, error) {
@@ -39,16 +40,18 @@ func TestOneJobPerStageReachesTheRelease(t *testing.T) {
 	require.Len(t, check.Stages, 1)
 	require.Equal(t, "check", check.Stages[0].Name)
 	require.True(t, check.Stages[0].Advance)
-	require.False(t, check.Minted, "check does not mint")
+	require.False(t, check.Minted, "the evaluate job minted; a stage job never does")
 
 	build, err := apply(reconcilecontroller.Options{Phase: reconcilecontroller.PhaseStages, Stage: "build"})
 	require.NoError(t, err)
 	require.Len(t, build.Stages, 1)
-	require.True(t, build.Minted, "the minting stage mints in its own job")
-	require.Empty(t, build.Released, "a stage job releases nothing")
+	require.False(t, build.Minted, "no stage mints; the run had one identity before any of them ran")
+	require.Empty(t, build.Released, "this stage builds; the one after it publishes")
 	require.Empty(t, f.published)
 
-	release, err := apply(reconcilecontroller.Options{Phase: reconcilecontroller.PhaseRelease})
+	// The stage that publishes is a job like the two before it. There is no
+	// release phase to run after them.
+	release, err := apply(reconcilecontroller.Options{Phase: reconcilecontroller.PhaseStages, Stage: "release"})
 	require.NoError(t, err)
 	require.Len(t, release.Released, 1)
 	require.Len(t, f.published, 1)
@@ -63,8 +66,10 @@ func TestOneJobPerStageReachesTheRelease(t *testing.T) {
 // promotion, and mints. Asked before a substage ran, it refuses.
 func TestOneJobPerSubstageWithAPromotionJob(t *testing.T) {
 	f := newFakeEngines(t)
-	p := pipeline(releasingStage("build",
-		substage("default", []string{"build"}), substage("dist", []string{"build"})))
+	p := pipeline(
+		stage("build", substage("default", []string{"build"}), substage("dist", []string{"build"})),
+		releaseStage(),
+	)
 
 	apply := func(opts reconcilecontroller.Options) (reconcilecontroller.Report, error) {
 		return reconcilecontroller.New(f.caller(), gitAt(t, "abc123", "v0.1.9"), clock()).
@@ -93,13 +98,8 @@ func TestOneJobPerSubstageWithAPromotionJob(t *testing.T) {
 	require.Len(t, promoted.Stages[0].Runs, 2, "the promotion reads both records")
 	require.Equal(t, 2, promoted.Stages[0].Reused)
 	require.True(t, promoted.Stages[0].Advance)
-	require.True(t, promoted.Minted)
+	require.False(t, promoted.Minted, "a promotion job decides; it does not name the run")
 	require.Equal(t, 2, f.counted(call{uriCompute, "run"}), "the promotion job runs nothing")
-
-	release, err := apply(reconcilecontroller.Options{Phase: reconcilecontroller.PhaseRelease})
-	require.NoError(t, err)
-	require.Len(t, release.Released, 1)
-	require.Len(t, f.published, 1)
 
 	_, err = apply(reconcilecontroller.Options{Phase: reconcilecontroller.PhaseStages, Stage: "build", Substage: "nope"})
 	require.ErrorIs(t, err, reconcilecontroller.ErrUnknownStage)

@@ -17,7 +17,7 @@ import (
 // clone, and finds every record the run wrote.
 func TestALaterPhaseRunsOnTheRevisionItWasGiven(t *testing.T) {
 	f := newFakeEngines(t)
-	p := pipeline(releasingStage("build", substage("default", []string{"build"})))
+	p := releasingPipeline()
 
 	evaluate, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc123", "v0.1.9"), clock()).
 		Apply(context.Background(), p, "/work", reconcilecontroller.Options{
@@ -25,6 +25,7 @@ func TestALaterPhaseRunsOnTheRevisionItWasGiven(t *testing.T) {
 		})
 	require.NoError(t, err)
 	require.NotEmpty(t, evaluate.Revision.ID)
+	require.True(t, evaluate.Minted)
 
 	// The repo the publish stage writes has moved: this clone hashes to
 	// something else entirely.
@@ -42,14 +43,8 @@ func TestALaterPhaseRunsOnTheRevisionItWasGiven(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, evaluate.Revision.ID, stages.Revision.ID)
 	require.Equal(t, evaluate.Version, stages.Version)
-	require.True(t, stages.Minted)
-
-	release, err := moved.Apply(context.Background(), p, "/work", reconcilecontroller.Options{
-		Phase: reconcilecontroller.PhaseRelease, Revision: evaluate.Revision.ID,
-	})
-	require.NoError(t, err)
-	require.Len(t, release.Released, 1)
-	require.Equal(t, 1, release.Stages[0].Reused, "the release reuses what the stages phase proved")
+	require.False(t, stages.Minted, "the evaluate phase minted, before this one ran")
+	require.Len(t, stages.Released, 1)
 	require.Len(t, f.published, 1)
 	require.Equal(t, evaluate.Version, f.published[0].Version)
 }
@@ -59,7 +54,7 @@ func TestALaterPhaseRunsOnTheRevisionItWasGiven(t *testing.T) {
 // under a number it was not asked for.
 func TestARecordForAnotherRevisionRefuses(t *testing.T) {
 	f := newFakeEngines(t)
-	p := pipeline(releasingStage("build", substage("default", []string{"build"})))
+	p := releasingPipeline()
 	c := reconcilecontroller.New(f.caller(), gitAt(t, "abc123", "v0.1.9"), clock())
 
 	evaluate, err := c.Apply(context.Background(), p, "/work", reconcilecontroller.Options{
@@ -84,7 +79,7 @@ func TestARecordForAnotherRevisionRefuses(t *testing.T) {
 // started rather than dying on the upgrade.
 func TestADecisionWithNoRevisionStillResolvesLocally(t *testing.T) {
 	f := newFakeEngines(t)
-	p := pipeline(releasingStage("build", substage("default", []string{"build"})))
+	p := releasingPipeline()
 	c := reconcilecontroller.New(f.caller(), gitAt(t, "abc123", "v0.1.9"), clock())
 
 	evaluate, err := c.Apply(context.Background(), p, "/work", reconcilecontroller.Options{

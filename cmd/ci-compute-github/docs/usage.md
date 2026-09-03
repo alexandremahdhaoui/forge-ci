@@ -20,7 +20,7 @@ hand-edited workflow drifts back to what the spec says.
 |---|---|
 | `declare` | Answer one converged file per owned workflow, one Actions secret per declared secret, and enablement for every workflow file. |
 | `run` | Dispatch the runner workflow with a unique marker and the target script, correlate by the marker in the run name, and poll to conclusion. |
-| `put` | Keep what a run built under the root, keyed by revision, and answer the records with locations this engine serves again. The rendered phased workflow uploads that directory after the stages job and downloads it before the release job. |
+| `put` | Keep what a run built under the root, keyed by revision, and answer the records with locations this engine serves again. The rendered phased workflow uploads that directory after every job that runs targets and downloads every name the run has written so far before each of them, so a stage reads what the stages before it built. |
 | `get` | Bring artifacts a put handed out back to their paths under the root, bytes verified. |
 
 ## By hand

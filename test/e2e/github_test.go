@@ -170,7 +170,6 @@ targets:
     in: [demo-repo]
 stages:
   - name: remote
-    mint: true
     promotion: all-pass
     substages:
       - name: default

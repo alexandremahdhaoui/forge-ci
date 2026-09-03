@@ -666,10 +666,14 @@ func TestOneFailingSubstageStillReportsTheOthers(t *testing.T) {
 	require.Equal(t, citypes.StatusFailed, report.Stages[0].Runs[1].Status)
 }
 
-// A revision in state is a claim that this tuple of commits was proven. It used
-// to be written before anything ran, so a build that then failed still handed a
-// revision to whatever reads state next.
-func TestAFailedBuildMintsNothing(t *testing.T) {
+// A revision is the run's identity, not its verdict. A build that fails still
+// has one, because everything the run wrote - each run record, each artifact
+// the stages kept - is filed under it, and a run whose own name appeared only
+// on success would have nowhere to record the failure.
+//
+// Whether the commits were PROVEN is a different question, and the run records
+// answer it: this one says failed.
+func TestAFailedBuildStillHasARevision(t *testing.T) {
 	f := newFakeEngines(t)
 	f.runOutputs["build/default"] = citypes.RunOutput{Status: citypes.StatusFailed}
 
@@ -683,43 +687,30 @@ func TestAFailedBuildMintsNothing(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	require.NotEmpty(t, report.Revision.ID, "the id is still resolved, a run record is keyed by it")
-	require.False(t, report.Minted)
-	require.NotContains(t, f.store, "revision/"+report.Revision.ID,
-		"a broken build must not hand a revision to whatever reads state next")
+	require.False(t, report.Advanced())
+	require.True(t, report.Minted)
+	require.Contains(t, f.store, "revision/"+report.Revision.ID)
+	require.Equal(t, citypes.StatusFailed, report.Stages[0].Runs[0].Status,
+		"the run record is what says this revision was not proven")
 }
 
-func TestAStageThatDoesNotDeclareMintWritesNoRevision(t *testing.T) {
-	f := newFakeEngines(t)
-	c := reconcilecontroller.New(f.caller(), gitAt(t, "abc123"), clock())
-
-	report, err := c.Apply(
-		context.Background(),
-		pipeline(mintlessStage("build", substage("default", []string{"build"}))),
-		"/work",
-		plain,
-	)
-	require.NoError(t, err)
-	require.True(t, report.Advanced())
-	require.False(t, report.Minted)
-	require.NotContains(t, f.store, "revision/"+report.Revision.ID)
-}
-
-func TestAStageAfterTheMintingOneStillSeesTheRevision(t *testing.T) {
+// One run, one mint, whatever the pipeline looks like. No stage asks for it
+// and none can ask twice.
+func TestEveryRunMintsOnceBeforeItsFirstStage(t *testing.T) {
 	f := newFakeEngines(t)
 	c := reconcilecontroller.New(f.caller(), gitAt(t, "abc123"), clock())
 
 	p := pipeline(
 		stage("build", substage("default", []string{"build"})),
-		mintlessStage("staging", substage("default", []string{"build"})),
+		stage("staging", substage("default", []string{"build"})),
 	)
 
 	report, err := c.Apply(context.Background(), p, "/work", plain)
 	require.NoError(t, err)
 	require.True(t, report.Minted)
 	require.Len(t, report.Stages, 2)
-	require.Contains(t, f.store, "revision/"+report.Revision.ID,
-		"the build stage mints and staging runs against what it proved")
+	require.Contains(t, f.store, "revision/"+report.Revision.ID)
+	require.Equal(t, 1, f.countedPut("revision"))
 }
 
 func TestAStageThatDeclaresAReleasePublishesWhatItProved(t *testing.T) {
@@ -729,7 +720,7 @@ func TestAStageThatDeclaresAReleasePublishesWhatItProved(t *testing.T) {
 
 	c := reconcilecontroller.New(f.caller(), git, clock())
 
-	p := pipeline(releasingStage("build", substage("default", []string{"build"})))
+	p := releasingPipeline()
 
 	report, err := c.Apply(context.Background(), p, "/work", plain)
 	require.NoError(t, err)
@@ -746,15 +737,13 @@ func TestAStageThatDeclaresAReleasePublishesWhatItProved(t *testing.T) {
 		"the engine is told where the repos are")
 }
 
-func TestAReleaseSetKeepsTheOtherReposOutOfThePublish(t *testing.T) {
+func TestIgnoredReposStayOutOfThePublish(t *testing.T) {
 	f := newFakeEngines(t)
 	c := reconcilecontroller.New(f.caller(), gitAt(t, "abc123", "v0.1.9"), clock())
 
-	s := releasingStage("build", substage("default", []string{"build"}))
-	s.ReleaseRepos = []string{"golden-rust"}
-
-	p := pipeline(s)
+	p := releasingPipeline()
 	p.Repos = append(p.Repos, config.Repo{Name: "toolchain", URL: "git@example.com:toolchain.git"})
+	ignoreRepos(&p, "toolchain")
 
 	report, err := c.Apply(context.Background(), p, "/work", plain)
 	require.NoError(t, err)
@@ -773,7 +762,7 @@ func TestAFailedStagePublishesNothing(t *testing.T) {
 
 	c := reconcilecontroller.New(f.caller(), gitAt(t, "abc123"), clock())
 
-	p := pipeline(releasingStage("build", substage("default", []string{"build"})))
+	p := releasingPipeline()
 
 	report, err := c.Apply(context.Background(), p, "/work", plain)
 	require.NoError(t, err)
@@ -808,7 +797,7 @@ func TestTheDefaultStrategyMovesThePatch(t *testing.T) {
 	c := reconcilecontroller.New(f.caller(), git, clock())
 
 	report, err := c.Apply(context.Background(),
-		pipeline(releasingStage("build", substage("default", []string{"build"}))), "/work", plain)
+		releasingPipeline(), "/work", plain)
 	require.NoError(t, err)
 	require.Len(t, f.published, 1)
 	require.Equal(t, "v0.2.5", f.published[0].Version)
@@ -822,7 +811,7 @@ func TestTheMinorStrategyMovesTheMinor(t *testing.T) {
 
 	c := reconcilecontroller.New(f.caller(), git, clock())
 
-	p := pipeline(releasingStage("build", substage("default", []string{"build"})))
+	p := releasingPipeline()
 	p.Versioning.Strategy = config.StrategyMinor
 
 	_, err := c.Apply(context.Background(), p, "/work", plain)
@@ -844,7 +833,7 @@ func TestTheSemanticStrategyReadsEveryMember(t *testing.T) {
 
 	c := reconcilecontroller.New(f.caller(), git, clock())
 
-	p := pipeline(releasingStage("build", substage("default", []string{"build"})))
+	p := releasingPipeline()
 	p.Repos = append(p.Repos, config.Repo{Name: "golden-go", URL: "https://example.com/golden-go"})
 	p.Versioning.Strategy = config.StrategySemantic
 	p.Versioning.Semantic = config.Semantic{
@@ -870,7 +859,7 @@ func TestACapClampsTheBumpInsteadOfStoppingTheRelease(t *testing.T) {
 
 	c := reconcilecontroller.New(f.caller(), git, clock())
 
-	p := pipeline(releasingStage("build", substage("default", []string{"build"})))
+	p := releasingPipeline()
 	p.Versioning.Strategy = config.StrategySemantic
 	p.Versioning.Cap = "v0"
 	p.Versioning.Semantic = config.Semantic{Major: []string{"!:"}, Minor: []string{"feat:"}}
@@ -891,7 +880,7 @@ func TestTheTagPrefixReachesTheEngine(t *testing.T) {
 
 	c := reconcilecontroller.New(f.caller(), git, clock())
 
-	p := pipeline(releasingStage("build", substage("default", []string{"build"})))
+	p := releasingPipeline()
 	p.Versioning.TagPrefix = "forge"
 
 	_, err := c.Apply(context.Background(), p, "/work", plain)
@@ -905,7 +894,7 @@ func TestAWorkspaceThatNeverReleasedStartsAtTheFirstVersion(t *testing.T) {
 	c := reconcilecontroller.New(f.caller(), gitAt(t, "abc123"), clock())
 
 	_, err := c.Apply(context.Background(),
-		pipeline(releasingStage("build", substage("default", []string{"build"}))), "/work", plain)
+		releasingPipeline(), "/work", plain)
 	require.NoError(t, err)
 	require.Equal(t, "v0.1.0", f.published[0].Version)
 }

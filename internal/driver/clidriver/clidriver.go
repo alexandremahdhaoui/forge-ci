@@ -155,13 +155,13 @@ func (d *Driver) load(verb string, args []string) (config.Pipeline, string, reco
 	force := fs.Bool("force", false,
 		"rewrite a resource that exists and cannot be compared, which today means one thing: a secret")
 	phase := fs.String("phase", "",
-		"run one part of the apply: self-reconcile, evaluate, stages or release. Empty runs the whole loop")
+		"run one part of the apply: self-reconcile, evaluate or stages. Empty runs the whole loop")
 	stage := fs.String("stage", "",
 		"with --phase stages: run this one stage, after the stage before it has a green record")
 	substage := fs.String("substage", "",
 		"with --stage: run this one substage and its gates, and decide nothing for the stage")
 	promote := fs.Bool("promote", false,
-		"with --stage: ask the stage's promotion over every substage's record, and mint")
+		"with --stage: ask the stage's promotion over every substage's record")
 	revision := fs.String("revision", "",
 		"the revision this run is bound to, as the evaluate phase reported it")
 
@@ -204,10 +204,10 @@ func (d *Driver) load(verb string, args []string) (config.Pipeline, string, reco
 	// A run proves one set of commits, and only the phases after the
 	// evaluate one can be told which: the evaluate phase is what decides it,
 	// and a whole apply holds it in hand from its first stage to its last.
-	if *revision != "" && *phase != reconcilecontroller.PhaseStages && *phase != reconcilecontroller.PhaseRelease {
+	if *revision != "" && *phase != reconcilecontroller.PhaseStages {
 		return config.Pipeline{}, "", reconcilecontroller.Options{}, fmt.Errorf(
-			"%w: --revision needs --phase %s or --phase %s; every other phase resolves its own",
-			ErrUsage, reconcilecontroller.PhaseStages, reconcilecontroller.PhaseRelease)
+			"%w: --revision needs --phase %s; every other phase resolves its own",
+			ErrUsage, reconcilecontroller.PhaseStages)
 	}
 
 	opts := reconcilecontroller.Options{

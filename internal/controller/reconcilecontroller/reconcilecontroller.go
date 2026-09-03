@@ -20,6 +20,7 @@ import (
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/artifactcontroller"
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 	"github.com/alexandremahdhaoui/forge-ci/pkg/config"
+	"github.com/alexandremahdhaoui/forge/pkg/forge"
 )
 
 const (
@@ -54,6 +55,9 @@ type StageReport struct {
 	// being executed: the revision already carried a green record for the
 	// substage, so nothing ran.
 	Reused int `json:"reused,omitempty"`
+
+	// Released is what the substages of this stage that publish answered.
+	Released []citypes.ArtifactOutput `json:"released,omitempty"`
 }
 
 type Report struct {
@@ -71,7 +75,7 @@ type Report struct {
 	// never proven, so nothing downstream may act on it.
 	Minted bool `json:"minted"`
 
-	// Released is where each release landed, one per stage that declared one.
+	// Released is where each release landed, one per substage that published.
 	Released []citypes.ArtifactOutput `json:"released,omitempty"`
 
 	// Planned says this was a dry run. Nothing was written, anywhere, and
@@ -142,7 +146,7 @@ type Options struct {
 	Force  bool
 
 	// Phase is which part of the apply to run: empty for the whole thing,
-	// or one of self-reconcile, evaluate, stages, release. Each phase reads
+	// or one of self-reconcile, evaluate, stages. Each phase reads
 	// and writes state, so a phase can run in a process of its own and the
 	// next phase carries on from the record. That is what lets a compute
 	// engine render one apply as several jobs, each visible on its own.
@@ -152,7 +156,7 @@ type Options struct {
 	// engine can render one job per stage. It refuses to run before the
 	// stage in front of it has a green record. Substage narrows it further
 	// to one substage and its gates, for one job per substage; Promote then
-	// asks the stage's promotion over every substage's record, and mints.
+	// asks the stage's promotion over every substage's record.
 	Stage    string
 	Substage string
 	Promote  bool
@@ -171,16 +175,20 @@ type Options struct {
 
 // The phases of an apply. PhaseAll is the whole loop in one process,
 // which is what every apply was before phases existed.
+//
+// There is no release phase. A release is a substage of a stage, so it runs
+// where the pipeline says it runs, under PhaseStages like everything else.
+// Hoisting it into a phase of its own was what made a whole apply and a
+// phased apply fire the same releases at different points.
 const (
 	PhaseAll           = ""
 	PhaseSelfReconcile = "self-reconcile"
 	PhaseEvaluate      = "evaluate"
 	PhaseStages        = "stages"
-	PhaseRelease       = "release"
 )
 
 // Phases is every phase name a caller may ask for.
-var Phases = []string{PhaseSelfReconcile, PhaseEvaluate, PhaseStages, PhaseRelease}
+var Phases = []string{PhaseSelfReconcile, PhaseEvaluate, PhaseStages}
 
 type Controller struct {
 	caller engineadapter.Caller
@@ -366,6 +374,24 @@ func (c *Controller) applyPhases(
 		return report, nil
 	}
 
+	// The revision is minted here, before the first stage, and nowhere else.
+	//
+	// It is the run's identity, not its verdict. Every job of a phased run
+	// answers to it, the artifacts a stage keeps are filed under it, and a
+	// consumer that resolves a module by revision gets an alias that is fixed
+	// from the moment the pipeline decided to build. Waiting for green made
+	// the identity depend on the outcome, which is backwards: whether these
+	// commits were PROVEN is answered by the run records and by the release,
+	// each of which says so in its own words. Nothing reads a revision record
+	// as proof.
+	if phase == PhaseEvaluate || phase == PhaseAll {
+		if err := c.mint(ctx, index, revision); err != nil {
+			return Report{}, err
+		}
+
+		report.Minted = true
+	}
+
 	if phase == PhaseEvaluate {
 		report.Evaluation = EvaluationProceed
 
@@ -383,43 +409,29 @@ func (c *Controller) applyPhases(
 	}
 
 	for _, stage := range p.Stages {
-		stageReport, err := c.applyStage(ctx, p, index, stage, revision, decision.Version, root)
+		// Everything a stage of this apply built is still on this disk, where
+		// it built it, so only a stage that PUBLISHES needs the records
+		// brought back: an artifact engine is handed locations, and put
+		// rewrote them to ones only it can serve.
+		var carried []forge.Artifact
+
+		if publishes(index, stage) {
+			carried, err = c.carryForward(ctx, index, revision, root, stagesBefore(p, stage.Name))
+			if err != nil {
+				return Report{}, fmt.Errorf("carrying what the stages before %q built: %w", stage.Name, err)
+			}
+		}
+
+		stageReport, err := c.applyStage(ctx, p, index, stage, revision, decision, root, carried)
 		if err != nil {
 			return Report{}, err
 		}
 
 		report.Stages = append(report.Stages, stageReport)
+		report.Released = append(report.Released, stageReport.Released...)
 
 		if !stageReport.Advance {
 			break
-		}
-
-		// The release phase re-reads runs the stages phase recorded; minting
-		// again would only rewrite the same record, and re-reading the lock
-		// manifest on a machine that never locked is a refusal waiting to
-		// happen. The stages phase minted.
-		if stage.Mint && phase != PhaseRelease {
-			if err := c.mint(ctx, index, revision); err != nil {
-				return Report{}, err
-			}
-
-			report.Minted = true
-
-			// A minted revision carries its exact dependency closure: one
-			// record per lockfile the workspace's lock resolved, so the
-			// claim "proven with these bytes" outlives the runner.
-			if err := c.recordDependencyLocks(ctx, index, revision, root); err != nil {
-				return Report{}, err
-			}
-		}
-
-		if stage.Release != "" && phase != PhaseStages {
-			released, err := c.release(ctx, p, index, stage, revision, decision, root, report.Stages)
-			if err != nil {
-				return Report{}, err
-			}
-
-			report.Released = append(report.Released, released)
 		}
 	}
 
@@ -438,134 +450,6 @@ func (c *Controller) applyPhases(
 	return report, nil
 }
 
-// release hands a proven revision to the artifact engine. It runs after the
-// stage advanced, so nothing is published for a build that did not pass.
-func (c *Controller) release(
-	ctx context.Context,
-	p config.Pipeline,
-	index engineIndex,
-	stage config.Stage,
-	revision citypes.Revision,
-	decision releaseDecision,
-	root string,
-	stages []StageReport,
-) (citypes.ArtifactOutput, error) {
-	engine, err := index.require(stage.Release, config.PortArtifact)
-	if err != nil {
-		return citypes.ArtifactOutput{}, err
-	}
-
-	version := decision.Version
-
-	spec := map[string]any{}
-	for k, v := range engine.Spec {
-		spec[k] = v
-	}
-
-	if _, ok := spec["root"]; !ok {
-		spec["root"] = root
-	}
-
-	// What the runs built comes back through the engines that built it, so
-	// the release reads files on this machine whether or not this machine
-	// ran the build. A release on a fresh runner that reused every stage
-	// from state used to read paths nothing had written.
-	artifacts, err := c.restoreArtifacts(ctx, index, revision.ID, root, stages)
-	if err != nil {
-		return citypes.ArtifactOutput{}, fmt.Errorf("releasing stage %q: %w", stage.Name, err)
-	}
-
-	// The engine tags every repo it is handed, so the release set is
-	// enforced here by handing it less: a factory can hold members that
-	// are released elsewhere, and the revision keeps pinning their shas
-	// while the release never touches them.
-	repos := revision.Repos
-	if len(stage.ReleaseRepos) > 0 {
-		repos = map[string]string{}
-		for _, name := range stage.ReleaseRepos {
-			if sha, ok := revision.Repos[name]; ok {
-				repos[name] = sha
-			}
-		}
-	}
-
-	in := citypes.ArtifactInput{
-		Revision:  revision.ID,
-		Version:   version,
-		TagPrefix: p.Versioning.TagPrefix,
-		Repos:     repos,
-		Artifacts: artifacts,
-		Spec:      spec,
-	}
-
-	// The last check before anything is written: the bytes. What this run
-	// would upload is digested and set against what the previous release
-	// shipped. Identical, name for name and byte for byte, means the
-	// previous release already is this release, and the revision is
-	// recorded under that number so a rerun converges by the record.
-	if decision.Previous != "" {
-		previousTag := artifactcontroller.TagName(p.Versioning.TagPrefix, decision.Previous)
-
-		prev, err := c.readRelease(ctx, index, "by-tag/"+previousTag)
-		if err != nil {
-			return citypes.ArtifactOutput{}, err
-		}
-
-		plan, err := artifactcontroller.New().Plan(in)
-		if err != nil {
-			return citypes.ArtifactOutput{}, fmt.Errorf("releasing stage %q: %w", stage.Name, err)
-		}
-
-		same, err := sameBytes(root, plan.Uploads, prev)
-		if err != nil {
-			return citypes.ArtifactOutput{}, fmt.Errorf("releasing stage %q: %w", stage.Name, err)
-		}
-
-		if same {
-			reason := fmt.Sprintf("every asset is byte for byte what %s shipped; nothing to release", previousTag)
-
-			rec := *prev
-			rec.Revision = revision.ID
-			rec.ReleasedAt = c.now()
-
-			if err := c.putJSON(ctx, index, KindRelease, revision.ID, rec); err != nil {
-				return citypes.ArtifactOutput{}, err
-			}
-
-			return citypes.ArtifactOutput{URL: prev.URL, Reason: reason}, nil
-		}
-	}
-
-	var out citypes.ArtifactOutput
-
-	if err := c.caller.Call(ctx, engine.Engine, ToolPublish, in, &out); err != nil {
-		return citypes.ArtifactOutput{}, fmt.Errorf("releasing stage %q: %w", stage.Name, err)
-	}
-
-	// Published or converged, the revision now carries this number. The
-	// record is what stops the next run from deriving another.
-	if out.Published || out.URL != "" {
-		home, _ := spec["repo"].(string)
-
-		err := c.writeRelease(ctx, index, releaseRecord{
-			Revision:   revision.ID,
-			Version:    version,
-			Tag:        artifactcontroller.TagName(p.Versioning.TagPrefix, version),
-			Repo:       home,
-			Repos:      decision.Repos,
-			Trees:      decision.Trees,
-			Index:      out.Index,
-			URL:        out.URL,
-			ReleasedAt: c.now(),
-		})
-		if err != nil {
-			return citypes.ArtifactOutput{}, err
-		}
-	}
-
-	return out, nil
-}
-
 // releaseHome is the checkout the version line lives in: the one the release
 // is created in, because a workspace root is not a repo. It reports whether
 // this pipeline releases at all; one that does not has no line and needs no
@@ -576,24 +460,36 @@ func (c *Controller) release(
 // engine makes from its own repo key. One declaration, so the repo the tags
 // are read from and the repo the release is created in can never disagree.
 func releaseHome(p config.Pipeline, index engineIndex, root string) (string, bool) {
-	for _, stage := range p.Stages {
-		if stage.Release == "" {
-			continue
-		}
-
-		engine, err := index.require(stage.Release, config.PortArtifact)
-		if err != nil {
-			continue
-		}
-
-		if repo, _ := engine.Spec["repo"].(string); repo != "" {
-			return filepath.Join(root, path.Base(repo)), true
-		}
-
-		return root, true
+	engine, ok := firstArtifactEngine(p, index)
+	if !ok {
+		return "", false
 	}
 
-	return "", false
+	if repo, _ := engine.Spec["repo"].(string); repo != "" {
+		return filepath.Join(root, path.Base(repo)), true
+	}
+
+	return root, true
+}
+
+// firstArtifactEngine is the engine of the first substage that publishes, in
+// stage then substage order. A pipeline that declares several releases - one
+// for the assets, one for the image - shares one version line, and the first
+// is where the pipeline's own words about it live: the repo the tags are read
+// from, and the members it leaves alone.
+func firstArtifactEngine(p config.Pipeline, index engineIndex) (config.Engine, bool) {
+	for _, stage := range p.Stages {
+		for _, sub := range stage.Substages {
+			engine, err := index.require(sub.Engine, config.PortArtifact)
+			if err != nil {
+				continue
+			}
+
+			return engine, true
+		}
+	}
+
+	return config.Engine{}, false
 }
 
 // commitScan is what the semantic strategy read: how far the release moves,
@@ -873,13 +769,15 @@ func (c *Controller) applyStage(
 	index engineIndex,
 	stage config.Stage,
 	revision citypes.Revision,
-	version string,
+	decision releaseDecision,
 	root string,
+	carried []forge.Artifact,
 ) (StageReport, error) {
 	report := StageReport{Name: stage.Name, Runs: make([]citypes.Run, len(stage.Substages))}
 
 	failures := make([]error, len(stage.Substages))
 	reused := make([]bool, len(stage.Substages))
+	published := make([]citypes.ArtifactOutput, len(stage.Substages))
 
 	var wg sync.WaitGroup
 
@@ -889,9 +787,10 @@ func (c *Controller) applyStage(
 		go func() {
 			defer wg.Done()
 
-			run, wasReused, err := c.applySubstage(ctx, p, index, stage, sub, revision, version, root)
+			run, wasReused, out, err := c.applySubstage(ctx, p, index, stage, sub, revision, decision, root, carried)
 			report.Runs[i] = run
 			reused[i] = wasReused
+			published[i] = out
 			failures[i] = err
 		}()
 	}
@@ -901,6 +800,12 @@ func (c *Controller) applyStage(
 	for _, r := range reused {
 		if r {
 			report.Reused++
+		}
+	}
+
+	for _, out := range published {
+		if out.Published || out.URL != "" {
+			report.Released = append(report.Released, out)
 		}
 	}
 
@@ -928,30 +833,38 @@ func (c *Controller) applySubstage(
 	stage config.Stage,
 	sub config.Substage,
 	revision citypes.Revision,
-	version string,
+	decision releaseDecision,
 	root string,
-) (citypes.Run, bool, error) {
+	carried []forge.Artifact,
+) (citypes.Run, bool, citypes.ArtifactOutput, error) {
 	key := runKey(revision.ID, stage.Name, sub.Name)
 
 	existing, err := c.getRun(ctx, index, key)
 	if err != nil {
-		return citypes.Run{}, false, err
+		return citypes.Run{}, false, citypes.ArtifactOutput{}, err
 	}
 
 	if existing != nil && existing.Status == citypes.StatusPassed && allGatesPassed(*existing) {
-		return *existing, true, nil
+		return *existing, true, citypes.ArtifactOutput{}, nil
+	}
+
+	// A substage either runs targets or publishes what the stages before it
+	// built. Both are ordinary substages: the same reuse record, the same
+	// gates, the same promotion. Only the tool differs.
+	if engine, err := index.require(sub.Engine, config.PortArtifact); err == nil {
+		return c.publishSubstage(ctx, p, index, stage, sub, engine, revision, decision, root, carried)
 	}
 
 	engine, err := index.require(sub.Engine, config.PortCompute)
 	if err != nil {
-		return citypes.Run{}, false, fmt.Errorf("stage %q substage %q: %w", stage.Name, sub.Name, err)
+		return citypes.Run{}, false, citypes.ArtifactOutput{}, fmt.Errorf("stage %q substage %q: %w", stage.Name, sub.Name, err)
 	}
 
 	started := c.now()
 
 	out, err := c.run(ctx, engine, citypes.RunInput{
 		Revision: revision.ID,
-		Version:  version,
+		Version:  decision.Version,
 		Stage:    stage.Name,
 		Substage: sub.Name,
 		Sync:     sub.Sync,
@@ -962,7 +875,7 @@ func (c *Controller) applySubstage(
 		Spec:     orEmpty(engine.Spec),
 	})
 	if err != nil {
-		return citypes.Run{}, false, fmt.Errorf("stage %q substage %q: %w", stage.Name, sub.Name, err)
+		return citypes.Run{}, false, citypes.ArtifactOutput{}, fmt.Errorf("stage %q substage %q: %w", stage.Name, sub.Name, err)
 	}
 
 	// What a green run built is handed to the engine that built it before
@@ -970,7 +883,23 @@ func (c *Controller) applySubstage(
 	// serve again rather than paths on a disk that is gone with the runner.
 	if out.Status == citypes.StatusPassed {
 		if err := c.putArtifacts(ctx, engine, revision.ID, root, out.Forge); err != nil {
-			return citypes.Run{}, false, fmt.Errorf("stage %q substage %q: keeping what it built: %w", stage.Name, sub.Name, err)
+			return citypes.Run{}, false, citypes.ArtifactOutput{}, fmt.Errorf("stage %q substage %q: keeping what it built: %w", stage.Name, sub.Name, err)
+		}
+
+		// The closure this run was proven with, recorded by the job that
+		// holds it. This used to hang off the mint, and the mint has moved to
+		// the evaluate phase - which is the wrong place for it: a revision is
+		// an identity, decided before anything is fetched, and the lock
+		// manifest exists only on the machine that resolved the closure.
+		//
+		// So a substage records whatever manifest the root holds when it
+		// finishes. A machine that never locked has none and this is a no-op;
+		// a machine that did writes the same bytes under the same key however
+		// many substages it runs.
+		if err := c.recordDependencyLocks(ctx, index, revision, root); err != nil {
+			return citypes.Run{}, false, citypes.ArtifactOutput{}, fmt.Errorf(
+				"stage %q substage %q: recording the closure it was proven with: %w",
+				stage.Name, sub.Name, err)
 		}
 	}
 
@@ -989,16 +918,16 @@ func (c *Controller) applySubstage(
 
 	gates, err := c.evaluateGates(ctx, index, sub, run)
 	if err != nil {
-		return citypes.Run{}, false, fmt.Errorf("stage %q substage %q: %w", stage.Name, sub.Name, err)
+		return citypes.Run{}, false, citypes.ArtifactOutput{}, fmt.Errorf("stage %q substage %q: %w", stage.Name, sub.Name, err)
 	}
 
 	run.Gates = gates
 
 	if err := c.putJSON(ctx, index, KindRun, key, run); err != nil {
-		return citypes.Run{}, false, err
+		return citypes.Run{}, false, citypes.ArtifactOutput{}, err
 	}
 
-	return run, false, nil
+	return run, false, citypes.ArtifactOutput{}, nil
 }
 
 func (c *Controller) evaluateGates(

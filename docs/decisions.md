@@ -6,13 +6,13 @@ What was decided, why, and what it costs. A ↩ marks one that reversed an earli
 
 ## Reversals
 
-### A revision is minted on green, not up front ↩
+### A revision is the run's identity, minted before its first stage ↩
 
-**Decided.** A stage declares mint true. The revision reaches state when that stage advances, and never before.
+**Decided.** The evaluate phase mints the revision, once, before any stage runs. No stage declares it and the mint key is gone.
 
-**Why.** apply resolved the revision and wrote it to state before the first stage ran, so a build that then failed still handed a revision to whatever reads state next. A revision is a claim that this tuple of commits was proven, and nothing had proven anything yet. The id is still resolved up front because a run record is keyed by it.
+**Why.** Minting on green made the run's NAME depend on the run's OUTCOME, and everything that needs the name needs it from the start: every job of a phased run answers to it, every artifact a stage keeps is filed under it, every run record is keyed by it, and a consumer resolving a module by revision wants an alias fixed from the moment the pipeline decided to build. Whether the commits were proven is a different question, and the run records and the release record already answer it in their own words. This reverses the reversal below it, and the earlier position's real complaint - a failed build handing a revision to whatever reads state next - is answered by nothing reading a revision record as proof.
 
-**Costs.** A pipeline that declares mint on no stage never records a revision, which reads as nothing happening until you look at the flag.
+**Costs.** A revision exists for a run that failed, so a reader that mistook the record for a verdict now mistakes it every time rather than occasionally. The record says nothing about green, and callers must read a run or the release to learn it.
 
 ### Webhooks, not polling ↩
 

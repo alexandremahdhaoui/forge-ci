@@ -139,7 +139,6 @@ targets:
     in: [demo-repo]
 stages:
   - name: build
-    mint: true
     promotion: all-pass
     substages:
       - name: default
@@ -304,26 +303,25 @@ func TestAFailingStageBlocksAndExitsNonZero(t *testing.T) {
 	root, statePath := workspace(t, "exit 1")
 	config := filepath.Join(root, "forge-ci.yaml")
 
-	// What the bootstrap already recorded. It resolves a revision of its
-	// own, which is not a claim that anything was proven - only a mint is
-	// that - so the question here is what the FAILING run added.
-	before := revisionIDs(t, statePath)
-
 	out, err := run(t, root, "forge-ci", "apply", "--config", config)
 	require.Error(t, err, out)
 	require.Contains(t, out, "default failed")
 
-	// The run is the evidence of what happened and it is kept. The revision is
-	// the claim that this tuple was proven, and nothing proved anything.
-	failed := readRun(t, statePath, revisionFromOutput(t, out))
+	id := revisionFromOutput(t, out)
+
+	// The revision is the run's name, so a run that failed has one: it is
+	// what the failure is filed under. The run record is what says the
+	// commits were not proven, and it says failed.
+	failed := readRun(t, statePath, id)
 	require.Equal(t, citypes.StatusFailed, failed.Status)
 
-	require.Equal(t, before, revisionIDs(t, statePath),
-		"a build that failed must mint no revision")
+	require.Contains(t, revisionIDs(t, statePath), id,
+		"a failing run is still a run, and it answers to a name")
 }
 
-// revisionFromOutput reads the id off the report. A failed build records a run
-// and no revision, so the id cannot be found by listing what was minted.
+// revisionFromOutput reads the id off the report. The report is the one place
+// that names this run's revision without a listing to disambiguate it from
+// every other revision the store holds.
 func revisionFromOutput(t *testing.T, out string) string {
 	t.Helper()
 
@@ -464,15 +462,20 @@ func TestAnUncommittedBreakIsCaught(t *testing.T) {
 	require.Contains(t, out, "-dirty")
 	require.Contains(t, out, "default failed")
 
-	// The uncommitted edit is its own revision and the report says so. It is
-	// not minted, because the edit broke the build. An uncommitted break must
-	// never reuse a passing run, and it must not mint one of its own either.
+	// The uncommitted edit is its own revision and the report says so. That
+	// is the whole point: an uncommitted break must never reuse the passing
+	// run recorded under the clean revision.
 	dirty := revisionFromOutput(t, out)
 	require.NotEqual(t, clean[0], dirty, "an uncommitted edit must be its own revision")
 	require.True(t, strings.HasSuffix(dirty, "-dirty"))
 
 	after := revisionIDs(t, statePath)
-	require.Equal(t, clean, after, "a broken build mints nothing, so state did not move")
+	require.Contains(t, after, dirty, "the broken run answers to a name of its own")
+	require.Contains(t, after, clean[0], "and the clean revision it must not borrow is untouched")
+
+	broke := readRun(t, statePath, dirty)
+	require.Equal(t, citypes.StatusFailed, broke.Status,
+		"the run record under the dirty revision is what says the edit broke the build")
 }
 
 func revisionIDs(t *testing.T, statePath string) []string {

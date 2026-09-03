@@ -111,10 +111,10 @@ func TestAReleasingStageNeedsNoVersionOnThePipeline(t *testing.T) {
 		},
 		Targets: []config.Target{{Alias: "t", Forge: "test-all"}},
 		Stages: []config.Stage{{
-			Name:    "prod",
-			Release: "gh",
+			Name: "prod",
 			Substages: []config.Substage{
 				{Name: "default", Engine: "here", Manager: "local", Targets: []string{"t"}},
+				{Name: "publish", Engine: "gh", Manager: "local"},
 			},
 		}},
 	}.Validate()

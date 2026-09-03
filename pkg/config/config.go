@@ -167,18 +167,9 @@ type Stage struct {
 	// DisplayName is what to call this stage where a person reads it. Empty
 	// means a caller derives a title from the name, so a pipeline that says
 	// nothing still reads as words rather than as an identifier.
-	DisplayName string `json:"displayName,omitempty"`
-	Mint        bool   `json:"mint,omitempty"`
-	Release     string `json:"release,omitempty"`
-	// ReleaseRepos is the set of repos this stage's release publishes:
-	// only these are handed to the artifact engine, so only these are
-	// tagged. Empty means every repo, which is what a factory that owns
-	// all its members wants. A factory that also carries repos released
-	// elsewhere - a toolchain developed inside a consumer's checkout -
-	// names its own here, and the revision keeps pinning the rest.
-	ReleaseRepos []string   `json:"releaseRepos,omitempty"`
-	Promotion    string     `json:"promotion,omitempty"`
-	Substages    []Substage `json:"substages"`
+	DisplayName string     `json:"displayName,omitempty"`
+	Promotion   string     `json:"promotion,omitempty"`
+	Substages   []Substage `json:"substages"`
 }
 
 type Substage struct {
@@ -186,12 +177,15 @@ type Substage struct {
 	// DisplayName is what to call this substage where a person reads it.
 	// Empty means a caller derives a title from the stage and substage
 	// names.
-	DisplayName string            `json:"displayName,omitempty"`
-	Engine      string            `json:"engine"`
-	Manager     string            `json:"manager"`
-	Targets     []string          `json:"targets"`
-	Gates       []string          `json:"gates,omitempty"`
-	Params      map[string]string `json:"params,omitempty"`
+	DisplayName string `json:"displayName,omitempty"`
+	// Engine names a compute engine, which runs targets, or an artifact
+	// engine, which publishes what the stages before it built. Which of the
+	// two it is decides whether Targets is required or refused.
+	Engine  string            `json:"engine"`
+	Manager string            `json:"manager"`
+	Targets []string          `json:"targets,omitempty"`
+	Gates   []string          `json:"gates,omitempty"`
+	Params  map[string]string `json:"params,omitempty"`
 	// Sync makes the compute engine converge the workspace - manifests,
 	// then the dependency closure - before this substage's targets run. A
 	// multi-repo workspace builds against generated manifests, so at least
@@ -328,6 +322,26 @@ func (p Pipeline) Validate() error {
 		}
 
 		engines[e.Alias] = e.Type
+
+		// An artifact engine may be told which of the factory's members to
+		// leave alone. The engine cannot check the names - it never learns
+		// what the factory holds - so the pipeline does, here, where both
+		// lists are in hand.
+		if e.Type == PortArtifact {
+			ignored := map[string]bool{}
+
+			for _, name := range IgnoreRepos(e.Spec) {
+				if !repos[name] {
+					add("%s: spec.ignoreRepos names %q, which is not a declared repo", where, name)
+				}
+
+				if ignored[name] {
+					add("%s: spec.ignoreRepos repeats %q", where, name)
+				}
+
+				ignored[name] = true
+			}
+		}
 	}
 
 	requirePort := func(where, alias string, want Port) {
@@ -400,27 +414,6 @@ func (p Pipeline) Validate() error {
 			requirePort(where+": promotion", s.Promotion, PortPromotion)
 		}
 
-		if s.Release != "" {
-			requirePort(where+": release", s.Release, PortArtifact)
-		}
-
-		if len(s.ReleaseRepos) > 0 && s.Release == "" {
-			add("%s: releaseRepos needs a release engine on the same stage", where)
-		}
-
-		released := map[string]bool{}
-		for _, name := range s.ReleaseRepos {
-			if !repos[name] {
-				add("%s: releaseRepos names %q, which is not a declared repo", where, name)
-			}
-
-			if released[name] {
-				add("%s: releaseRepos repeats %q", where, name)
-			}
-
-			released[name] = true
-		}
-
 		if len(s.Substages) == 0 {
 			add("%s: at least one substage is required", where)
 		}
@@ -439,13 +432,24 @@ func (p Pipeline) Validate() error {
 
 			subs[sub.Name] = true
 
-			requirePort(subWhere, sub.Engine, PortCompute)
+			// A substage either runs something or publishes something. Which
+			// it does is the engine's port, and the two shapes take opposite
+			// answers on targets: a compute substage with none does nothing,
+			// and an artifact substage with any carries a key nobody reads.
+			publishes := engines[sub.Engine] == PortArtifact
+			if !publishes {
+				requirePort(subWhere, sub.Engine, PortCompute)
+			}
 
 			if !managers[sub.Manager] {
 				add("%s: manager %q is not declared", subWhere, sub.Manager)
 			}
 
-			if len(sub.Targets) == 0 {
+			switch {
+			case publishes && len(sub.Targets) > 0:
+				add("%s: an artifact substage publishes what the stages before it built "+
+					"and runs no target, so it must declare none", subWhere)
+			case !publishes && len(sub.Targets) == 0:
 				add("%s: targets must name at least one target", subWhere)
 			}
 
@@ -572,4 +576,30 @@ func (v Versioning) problems() []string {
 func (s Semantic) empty() bool {
 	return len(s.Major) == 0 && len(s.Minor) == 0 && len(s.Patch) == 0 &&
 		len(s.Ignore) == 0 && s.Unmatched == ""
+}
+
+// IgnoreRepos is the members an artifact engine is told to leave alone: they
+// stay in the revision, pinned at their shas, and the engine never tags them.
+// It lives in the engine's own spec because what to publish is the engine's
+// question, and it is read here because the names are the pipeline's - a
+// factory that writes into one of its own repos every run keeps that repo out
+// of its release set this way.
+//
+// A spec is free-form on the wire, so the shape is read defensively: anything
+// that is not a list of strings answers nothing rather than half of it.
+func IgnoreRepos(spec map[string]any) []string {
+	raw, ok := spec["ignoreRepos"].([]any)
+	if !ok {
+		return nil
+	}
+
+	out := make([]string, 0, len(raw))
+
+	for _, v := range raw {
+		if name, ok := v.(string); ok {
+			out = append(out, name)
+		}
+	}
+
+	return out
 }

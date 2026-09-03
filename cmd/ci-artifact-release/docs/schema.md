@@ -11,5 +11,6 @@ The `spec` block on this engine's entry in `forge-ci.yaml`.
 | `apiBaseURL` | string | no | GitHub API base. Defaults to https://api.github.com; a fake in tests, a mirror in an airgap. |
 | `tokenEnv` | string | no | Environment variable holding the token the release authenticates with. Defaults to GITHUB_TOKEN. |
 | `assets` | list of strings | no | Root-relative globs of extra files to publish - the door for cross-built binaries no artifact record carries. A glob that matches nothing fails the release, because a distribution never shrinks silently. |
+| `ignoreRepos` | list of strings | no | Members this release leaves alone. They stay in the revision, pinned at their shas, and are never tagged. That is what a factory holding a repo released elsewhere needs, and what a factory whose own pipeline writes into one of its members every run needs. The core reads it too, because the set that decides the version must be the set that gets tagged; every name must be a declared repo and must not repeat. |
 
 forge-ci never validates a spec. This engine does, because only it knows what the keys mean.

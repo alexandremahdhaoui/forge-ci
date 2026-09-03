@@ -5,6 +5,7 @@ import (
 
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 	"github.com/alexandremahdhaoui/forge-ci/pkg/config"
+	"github.com/alexandremahdhaoui/forge/pkg/forge"
 )
 
 // What one stage builds, the stage after it reads.
@@ -23,7 +24,8 @@ import (
 
 // carryForward brings back what the stages before this one built, so a
 // stage job reads its predecessors' files whether or not this machine wrote
-// them.
+// them, and answers the records with the locations they came back to - which
+// is what a substage that publishes is handed.
 //
 // A substage with no record has not run, which a promotion tolerant of
 // failure allows, and it is skipped rather than refused: whether this stage
@@ -34,7 +36,7 @@ func (c *Controller) carryForward(
 	revision citypes.Revision,
 	root string,
 	before []config.Stage,
-) error {
+) ([]forge.Artifact, error) {
 	stages := make([]StageReport, 0, len(before))
 
 	for _, stage := range before {
@@ -43,7 +45,7 @@ func (c *Controller) carryForward(
 		for _, sub := range stage.Substages {
 			run, err := c.getRun(ctx, index, runKey(revision.ID, stage.Name, sub.Name))
 			if err != nil {
-				return err
+				return nil, err
 			}
 
 			if run == nil {
@@ -59,10 +61,8 @@ func (c *Controller) carryForward(
 	}
 
 	if len(stages) == 0 {
-		return nil
+		return nil, nil
 	}
 
-	_, err := c.restoreArtifacts(ctx, index, revision.ID, root, stages)
-
-	return err
+	return c.restoreArtifacts(ctx, index, revision.ID, root, stages)
 }

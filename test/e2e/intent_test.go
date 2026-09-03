@@ -149,25 +149,27 @@ func TestThePhasesReachTheSameReleaseAsOneApply(t *testing.T) {
 	require.True(t, strings.HasSuffix(strings.TrimSpace(out), "evaluate: proceed"), out)
 	require.Contains(t, out, "Release v0.1.1 (patch).")
 
-	out = mustRun(t, root, "forge-ci", "apply", "--config", "forge-ci.yaml", "--root", ".", "--phase", "stages")
+	out = mustRun(t, root, "forge-ci", "apply", "--config", "forge-ci.yaml", "--root", ".",
+		"--phase", "stages", "--stage", "build")
 	require.Contains(t, out, "stage build")
-	require.Equal(t, "v0.1.0", fake.releases["owner/demo-repo"], "the stages phase releases nothing")
+	require.Equal(t, "v0.1.0", fake.releases["owner/demo-repo"], "the build stage releases nothing")
 
-	// The release phase reads the recorded file back through the engine
-	// that kept it, so the build output can go the way a runner's disk
-	// goes. Only the recorded artifact: a spec.assets glob names files no
-	// record carries, and those still live where the release runs.
+	// The stage that publishes reads the recorded file back through the
+	// engine that kept it, so the build output can go the way a runner's
+	// disk goes. Only the recorded artifact: a spec.assets glob names files
+	// no record carries, and those still live where the release runs.
 	require.NoError(t, os.Remove(filepath.Join(repo, "build", "dist", "demo-tool_linux_amd64")))
 
-	mustRun(t, root, "forge-ci", "apply", "--config", "forge-ci.yaml", "--root", ".", "--phase", "release")
+	mustRun(t, root, "forge-ci", "apply", "--config", "forge-ci.yaml", "--root", ".",
+		"--phase", "stages", "--stage", "release")
 	require.Equal(t, "v0.1.1", fake.releases["owner/demo-repo"])
 	require.ElementsMatch(t, []string{"v0.1.0", "v0.1.1"}, strings.Fields(mustRun(t, origin, "git", "tag")))
 	require.Contains(t, string(fake.assets["demo-tool_linux_amd64"]), "demo-tool works")
 }
 
 // The stages phase cut as a compute engine renders it with one job per
-// substage: the substage runs alone, the promotion reads its record and
-// mints, and the release reads the file the substage job kept. Run out of
+// substage: the substage runs alone, the promotion reads its record, and the
+// stage that publishes reads the file the substage job kept. Run out of
 // order, a job refuses by name.
 func TestTheStageJobsReachTheSameReleaseAsOneApply(t *testing.T) {
 	fake := newReleaseFake(t)
@@ -200,7 +202,7 @@ func TestTheStageJobsReachTheSameReleaseAsOneApply(t *testing.T) {
 
 	require.NoError(t, os.Remove(filepath.Join(repo, "build", "dist", "demo-tool_linux_amd64")))
 
-	_, err = apply("--phase", "release")
+	_, err = apply("--phase", "stages", "--stage", "release", "--substage", "publish")
 	require.NoError(t, err)
 	require.Equal(t, "v0.1.1", fake.releases["owner/demo-repo"])
 	require.ElementsMatch(t, []string{"v0.1.0", "v0.1.1"}, strings.Fields(mustRun(t, origin, "git", "tag")))
@@ -233,7 +235,7 @@ func TestAPhaseCarriesOnAfterAStageMovedAPipelineRepo(t *testing.T) {
 
 	revision := revisionFrom(t, out)
 
-	out, err = apply("--phase", "stages")
+	out, err = apply("--phase", "stages", "--stage", "build")
 	require.NoError(t, err, out)
 
 	// The stage did its job: a commit lands in a repo the revision hashes.
@@ -242,11 +244,11 @@ func TestAPhaseCarriesOnAfterAStageMovedAPipelineRepo(t *testing.T) {
 	mustRun(t, repo, "git", "add", "published.txt")
 	mustRun(t, repo, "git", "commit", "-m", "forge-ci: publish")
 
-	out, err = apply("--phase", "release")
-	require.Error(t, err, "without the revision, the release phase looks for a record nothing wrote")
+	out, err = apply("--phase", "stages", "--stage", "release")
+	require.Error(t, err, "without the revision, the stage looks for a record nothing wrote")
 	require.Contains(t, out, "no evaluation recorded")
 
-	out, err = apply("--phase", "release", "--revision", revision)
+	out, err = apply("--phase", "stages", "--stage", "release", "--revision", revision)
 	require.NoError(t, err, out)
 	require.Equal(t, "v0.1.1", fake.releases["owner/demo-repo"])
 	require.ElementsMatch(t, []string{"v0.1.0", "v0.1.1"}, strings.Fields(mustRun(t, origin, "git", "tag")))

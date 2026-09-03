@@ -191,14 +191,18 @@ targets:
     in: [demo-repo]
 stages:
   - name: build
-    mint: true
-    release: publish
     promotion: all-pass
     substages:
       - name: default
         engine: here
         manager: local
         targets: [build-all]
+  - name: release
+    promotion: all-pass
+    substages:
+      - name: publish
+        engine: publish
+        manager: local
 `
 }
 

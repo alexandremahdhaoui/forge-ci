@@ -52,10 +52,11 @@ func renderCI(t *testing.T, spec workflowcontroller.Spec) string {
 	return ""
 }
 
-// One apply rendered as jobs: the two fixed ones, one per stage in the
-// pipeline's order, and the release. The evaluate job's last line is its
-// output, and every job after it runs only on proceed - GitHub's own skipped
-// state for a revision with nothing to release.
+// One apply rendered as jobs: the two fixed ones and then one per stage, in
+// the pipeline's order. There is no release job - a release is a substage, so
+// the stage that publishes is a stage job like any other. The evaluate job's
+// last line is its output, and every job after it runs only on proceed -
+// GitHub's own skipped state for a revision with nothing to release.
 func TestPhasesRenderOneJobPerStageGatedOnTheEvaluation(t *testing.T) {
 	t.Parallel()
 
@@ -68,18 +69,15 @@ func TestPhasesRenderOneJobPerStageGatedOnTheEvaluation(t *testing.T) {
 		"  check:\n    name: check\n    needs: [evaluate]\n    if: needs.evaluate.outputs.outcome == 'proceed'\n",
 		"  build:\n    name: build\n    needs: [evaluate, check]\n    if: needs.evaluate.outputs.outcome == 'proceed'\n",
 		"  publish:\n    name: publish\n    needs: [evaluate, build]\n    if: needs.evaluate.outputs.outcome == 'proceed'\n",
-		"  release:\n    name: Release\n    needs: [evaluate, publish]\n    if: needs.evaluate.outputs.outcome == 'proceed'\n",
 		"- name: Reconcile CI resources\n",
 		"- name: Evaluate next steps\n",
 		"- name: Run stage check\n",
 		"- name: Run stage publish\n",
-		"- name: Release\n",
 		"forge-ci apply --config forge-ci.yaml --root . --phase self-reconcile",
 		"--phase evaluate)",
 		"sed -n 's/^evaluate: //p' | tail -n 1",
 		"forge-ci apply --config forge-ci.yaml --root . --phase stages --stage check --revision ${{ needs.evaluate.outputs.revision }}\n",
 		"forge-ci apply --config forge-ci.yaml --root . --phase stages --stage publish --revision ${{ needs.evaluate.outputs.revision }}\n",
-		"forge-ci apply --config forge-ci.yaml --root . --phase release --revision ${{ needs.evaluate.outputs.revision }}",
 		"name: built-${{ github.run_id }}-check\n",
 		"name: built-${{ github.run_id }}-publish\n",
 		"pattern: built-${{ github.run_id }}-*\n          merge-multiple: true\n",
@@ -92,21 +90,22 @@ func TestPhasesRenderOneJobPerStageGatedOnTheEvaluation(t *testing.T) {
 	assert.NotContains(t, ci, "--substage")
 	assert.NotContains(t, ci, "--promote")
 
-	// Every job stands the workspace up inside the container: six
-	// checkouts, six images, no toolchain install.
-	assert.Equal(t, 6, strings.Count(ci, "image: ghcr.io/o/toolchain:v1"))
-	assert.Equal(t, 6, strings.Count(ci, "forge clone git@github.com:o/r.git ."))
+	// Every job stands the workspace up inside the container: five
+	// checkouts, five images, no toolchain install.
+	assert.Equal(t, 5, strings.Count(ci, "image: ghcr.io/o/toolchain:v1"))
+	assert.Equal(t, 5, strings.Count(ci, "forge clone git@github.com:o/r.git ."))
 	assert.Equal(t, 3, strings.Count(ci, "uses: actions/upload-artifact@v4"))
-	// Three stage jobs and the release: a stage reads what the stage before
-	// it built, not only the release.
-	assert.Equal(t, 4, strings.Count(ci, "uses: actions/download-artifact@v4"))
+	// Every stage job downloads: a stage reads what the stage before it
+	// built, and the stage that publishes reads all of it.
+	assert.Equal(t, 3, strings.Count(ci, "uses: actions/download-artifact@v4"))
+	assert.NotContains(t, ci, "--phase release")
 	assert.NotContains(t, ci, "Install the toolchain")
 	assert.Equal(t, 1, strings.Count(ci, "jobs:\n"))
 }
 
 // jobs: substage cuts each stage into one job per substage, running beside
-// each other, and one promotion job that needs them all. The next stage
-// needs the promotion, and so does the release.
+// each other, and one promotion job that needs them all. The next stage needs
+// the promotion.
 func TestJobsPerSubstageRenderAPromotionJobPerStage(t *testing.T) {
 	t.Parallel()
 
@@ -122,7 +121,6 @@ func TestJobsPerSubstageRenderAPromotionJobPerStage(t *testing.T) {
 		"  publish-default:\n    name: publish › default\n    needs: [evaluate, build-promotion-gate]\n",
 		"  publish-dist:\n    name: publish › dist\n    needs: [evaluate, build-promotion-gate]\n",
 		"  publish-promotion-gate:\n    name: publish › promotion gate\n    needs: [evaluate, publish-default, publish-dist]\n",
-		"  release:\n    name: Release\n    needs: [evaluate, publish-promotion-gate]\n",
 		"- name: Run publish dist\n",
 		"- name: Promotion gate for stage publish\n",
 		"--phase stages --stage publish --substage dist --revision ${{ needs.evaluate.outputs.revision }}\n",
@@ -134,12 +132,12 @@ func TestJobsPerSubstageRenderAPromotionJobPerStage(t *testing.T) {
 
 	// Four substage jobs upload; the three promotion jobs build nothing.
 	assert.Equal(t, 4, strings.Count(ci, "uses: actions/upload-artifact@v4"))
-	// The same four download, and so does the release. A promotion gate
-	// reads records and runs no target, so it needs no files.
-	assert.Equal(t, 5, strings.Count(ci, "uses: actions/download-artifact@v4"))
-	gate := ci[strings.Index(ci, "  publish-promotion-gate:"):strings.Index(ci, "  release:")]
+	// The same four download. A promotion gate reads records and runs no
+	// target, so it needs no files.
+	assert.Equal(t, 4, strings.Count(ci, "uses: actions/download-artifact@v4"))
+	gate := ci[strings.Index(ci, "  publish-promotion-gate:"):]
 	assert.NotContains(t, gate, "download-artifact")
-	assert.Equal(t, 10, strings.Count(ci, "forge clone git@github.com:o/r.git ."))
+	assert.Equal(t, 9, strings.Count(ci, "forge clone git@github.com:o/r.git ."))
 }
 
 // With no stage names handed in - an older core - the stages are one job,
@@ -153,7 +151,6 @@ func TestPhasesWithoutStageNamesRenderOneStagesJob(t *testing.T) {
 
 	ci := renderCI(t, spec)
 	assert.Contains(t, ci, "  stages:\n    name: Run the stages\n    needs: [evaluate]\n    if: needs.evaluate.outputs.outcome == 'proceed'\n")
-	assert.Contains(t, ci, "  release:\n    name: Release\n    needs: [evaluate, stages]\n")
 	assert.Contains(t, ci, "--phase stages --revision ${{ needs.evaluate.outputs.revision }}\n")
 	assert.Contains(t, ci, "name: built-${{ github.run_id }}-stages\n")
 }
@@ -164,11 +161,11 @@ func TestAStageNamedLikeAFixedJobIsRefused(t *testing.T) {
 	t.Parallel()
 
 	spec := phasedSpec()
-	spec.Stages = []citypes.DeclaredStage{{Name: "release", Substages: []citypes.DeclaredSubstage{{Name: "default"}}}}
+	spec.Stages = []citypes.DeclaredStage{{Name: "evaluate", Substages: []citypes.DeclaredSubstage{{Name: "default"}}}}
 
 	_, err := workflowcontroller.RenderAll(spec)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), `stage "release" takes the name of a fixed job`)
+	require.Contains(t, err.Error(), `stage "evaluate" takes the name of a fixed job`)
 
 	spec.Jobs = workflowcontroller.JobsPerSubstage
 	spec.Stages = []citypes.DeclaredStage{
