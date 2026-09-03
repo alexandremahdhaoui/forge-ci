@@ -581,6 +581,21 @@ func TestAnUnknownPhaseIsRefused(t *testing.T) {
 	require.Contains(t, err.Error(), "self-reconcile, evaluate, stages, release")
 }
 
+// A workflow rendered by an earlier forge-ci still names the phases it
+// knew. Its first job must reach the self reconcile under the old spelling,
+// or the workflow can never re-render itself.
+func TestARetiredPhaseNameStillReachesItsPhase(t *testing.T) {
+	var out bytes.Buffer
+
+	r := clidrivermock.NewMockReconciler(t)
+	r.EXPECT().Apply(mock.Anything, mock.Anything, mock.Anything, reconcilecontroller.Options{Phase: "self-reconcile"}).
+		Return(reconcilecontroller.Report{}, nil).Once()
+
+	err := clidriver.New(&out, r).Run(context.Background(),
+		[]string{"apply", "--config", write(t, minimal), "--phase", "reconcile"})
+	require.NoError(t, err)
+}
+
 // A stage job is a stages phase narrowed by name, and the flags that narrow
 // it need each other in one order: --stage needs the stages phase, the two
 // after it need --stage, and a substage and a promotion are two jobs.

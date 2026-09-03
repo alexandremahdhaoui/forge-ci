@@ -29,6 +29,13 @@ var (
 	ErrNoGit   = errors.New("this build was wired without a GitHub client")
 )
 
+// retiredPhases maps a phase name a workflow rendered by an earlier
+// forge-ci may still carry to the name it has now.
+var retiredPhases = map[string]string{
+	"reconcile": reconcilecontroller.PhaseSelfReconcile,
+	"intent":    reconcilecontroller.PhaseEvaluate,
+}
+
 type Reconciler interface {
 	Bootstrap(context.Context, config.Pipeline, string, reconcilecontroller.Options) (reconcilecontroller.Report, error)
 	Apply(context.Context, config.Pipeline, string, reconcilecontroller.Options) (reconcilecontroller.Report, error)
@@ -158,6 +165,15 @@ func (d *Driver) load(verb string, args []string) (config.Pipeline, string, reco
 
 	if err := fs.Parse(args); err != nil {
 		return config.Pipeline{}, "", reconcilecontroller.Options{}, fmt.Errorf("parsing flags: %w", err)
+	}
+
+	// A rendered workflow carries the phase names of the forge-ci that
+	// rendered it, and the job that re-renders it is the first phase. So a
+	// spelling this binary retired must still reach that phase, or a
+	// pipeline that adopts a new image can never converge its own
+	// workflow: golden run 24 died exactly there.
+	if renamed, ok := retiredPhases[*phase]; ok {
+		*phase = renamed
 	}
 
 	if *phase != "" && !slices.Contains(reconcilecontroller.Phases, *phase) {
