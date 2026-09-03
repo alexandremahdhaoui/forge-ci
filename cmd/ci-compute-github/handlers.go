@@ -176,13 +176,21 @@ func fromArtifacts(in []forge.Artifact) ([]ForgeArtifact, error) {
 	return out, nil
 }
 
-// toStages reads the pipeline's stage names off the wire, the shape the
-// phased renderer lays its jobs out from.
+// toStages reads the pipeline's stages off the wire, the shape the phased
+// renderer lays its jobs out from. The display names come with them, so a job
+// is titled by the factory that declared it rather than by this engine.
 func toStages(in []DeclaredStage) []citypes.DeclaredStage {
 	out := make([]citypes.DeclaredStage, 0, len(in))
 
 	for _, s := range in {
-		out = append(out, citypes.DeclaredStage{Name: s.Name, Substages: s.Substages})
+		subs := make([]citypes.DeclaredSubstage, 0, len(s.Substages))
+		for _, sub := range s.Substages {
+			subs = append(subs, citypes.DeclaredSubstage{Name: sub.Name, DisplayName: sub.DisplayName})
+		}
+
+		out = append(out, citypes.DeclaredStage{
+			Name: s.Name, DisplayName: s.DisplayName, Substages: subs,
+		})
 	}
 
 	return out

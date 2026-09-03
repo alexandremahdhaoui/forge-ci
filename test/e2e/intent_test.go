@@ -206,3 +206,64 @@ func TestTheStageJobsReachTheSameReleaseAsOneApply(t *testing.T) {
 	require.ElementsMatch(t, []string{"v0.1.0", "v0.1.1"}, strings.Fields(mustRun(t, origin, "git", "tag")))
 	require.Contains(t, string(fake.assets["demo-tool_linux_amd64"]), "demo-tool works")
 }
+
+// Run 27's shape, with real git repos and real processes.
+//
+// A stage publishes into one of the pipeline's own repos, so the commit it
+// writes moves that repo's HEAD and every later phase, cloning fresh, would
+// derive a revision this run never wrote a record under. Handed the revision
+// the evaluate phase reported, the later phases answer for the run instead of
+// for the checkout, and the release lands.
+func TestAPhaseCarriesOnAfterAStageMovedAPipelineRepo(t *testing.T) {
+	fake := newReleaseFake(t)
+	root, repo, origin := releasingRepo(t, fake, "")
+
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "README.md"), []byte("two"), 0o600))
+	mustRun(t, repo, "git", "commit", "-am", "fix: the door")
+
+	apply := func(args ...string) (string, error) {
+		return run(t, root, "forge-ci", append([]string{"apply", "--config", "forge-ci.yaml", "--root", "."}, args...)...)
+	}
+
+	_, err := apply("--phase", "self-reconcile")
+	require.NoError(t, err)
+
+	out, err := apply("--phase", "evaluate")
+	require.NoError(t, err, out)
+
+	revision := revisionFrom(t, out)
+
+	out, err = apply("--phase", "stages")
+	require.NoError(t, err, out)
+
+	// The stage did its job: a commit lands in a repo the revision hashes.
+	// From here a phase measuring its own checkout answers for another run.
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "published.txt"), []byte("catalog"), 0o600))
+	mustRun(t, repo, "git", "add", "published.txt")
+	mustRun(t, repo, "git", "commit", "-m", "forge-ci: publish")
+
+	out, err = apply("--phase", "release")
+	require.Error(t, err, "without the revision, the release phase looks for a record nothing wrote")
+	require.Contains(t, out, "no evaluation recorded")
+
+	out, err = apply("--phase", "release", "--revision", revision)
+	require.NoError(t, err, out)
+	require.Equal(t, "v0.1.1", fake.releases["owner/demo-repo"])
+	require.ElementsMatch(t, []string{"v0.1.0", "v0.1.1"}, strings.Fields(mustRun(t, origin, "git", "tag")))
+}
+
+// revisionFrom reads the revision off the first line of a report, the same
+// line a rendered workflow captures as the evaluate job's output.
+func revisionFrom(t *testing.T, report string) string {
+	t.Helper()
+
+	for _, line := range strings.Split(report, "\n") {
+		if rest, ok := strings.CutPrefix(line, "revision "); ok {
+			return strings.TrimSpace(rest)
+		}
+	}
+
+	t.Fatalf("no revision line in the report:\n%s", report)
+
+	return ""
+}

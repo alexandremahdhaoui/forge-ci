@@ -635,3 +635,37 @@ func TestTheStageFlagsNeedEachOther(t *testing.T) {
 		[]string{"apply", "--config", write(t, minimal), "--phase", "stages", "--stage", "build", "--promote"})
 	require.NoError(t, err)
 }
+
+// A run proves one set of commits, and only the phases after the evaluate one
+// can be told which: the evaluate phase decides it, and a whole apply holds it
+// from its first stage to its last. So --revision reaches a stages or release
+// phase and is refused everywhere else.
+func TestTheRevisionFlagBelongsToThePhasesAfterTheEvaluation(t *testing.T) {
+	for name, args := range map[string][]string{
+		"a whole apply":  {"--revision", "abc123"},
+		"the reconcile":  {"--phase", "self-reconcile", "--revision", "abc123"},
+		"the evaluation": {"--phase", "evaluate", "--revision", "abc123"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var out bytes.Buffer
+
+			err := clidriver.New(&out, clidrivermock.NewMockReconciler(t)).Run(context.Background(),
+				append([]string{"apply", "--config", write(t, minimal)}, args...))
+			require.ErrorIs(t, err, clidriver.ErrUsage)
+		})
+	}
+
+	for name, phase := range map[string]string{"stages": "stages", "release": "release"} {
+		t.Run(name, func(t *testing.T) {
+			var out bytes.Buffer
+
+			r := clidrivermock.NewMockReconciler(t)
+			r.EXPECT().Apply(mock.Anything, mock.Anything, mock.Anything, reconcilecontroller.Options{
+				Phase: phase, Revision: "abc123",
+			}).Return(reconcilecontroller.Report{Revision: citypes.Revision{ID: "abc123"}}, nil).Once()
+
+			require.NoError(t, clidriver.New(&out, r).Run(context.Background(),
+				[]string{"apply", "--config", write(t, minimal), "--phase", phase, "--revision", "abc123"}))
+		})
+	}
+}

@@ -74,6 +74,12 @@ type releaseRecord struct {
 // says the run ends here, converged, for Reason. Otherwise Version is the
 // number every stage stamps and the release tags, and Reason says why.
 type releaseDecision struct {
+	// Revision is the revision this decision was made for, whole: the id
+	// every later record is keyed by, and the sha each repo stood at when
+	// the run started. A phase running in a process of its own is handed
+	// the id and reads the rest from here, so the run keeps one answer to
+	// "which commits am I proving" from its first job to its last.
+	Revision citypes.Revision  `json:"revision,omitempty"`
 	Version  string            `json:"version,omitempty"`
 	Tag      string            `json:"tag,omitempty"`
 	Previous string            `json:"previous,omitempty"`

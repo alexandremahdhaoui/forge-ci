@@ -98,7 +98,7 @@ spec:
 - key: phases
   type: bool
   required: false
-  means: 'Render every command workflow as jobs - self-reconcile, evaluate, one per stage (or per substage, see jobs), release - each running one phase of the apply with --phase, so the run reads as what it is instead of one job named after its first step. The evaluate job answers one word, skip or proceed; every job after it runs only on proceed, so a run with nothing to release shows them skipped. Each stage job uploads what it built as an Actions artifact and the release job downloads them all. A stage named self-reconcile, evaluate or release is refused. Off, a command workflow is one job running the whole apply.'
+  means: 'Render every command workflow as jobs - self-reconcile, evaluate, one per stage (or per substage, see jobs), release - each running one phase of the apply with --phase, so the run reads as what it is instead of one job named after its first step. The evaluate job answers one word, skip or proceed; every job after it runs only on proceed, so a run with nothing to release shows them skipped. Each stage job uploads what it built as an Actions artifact and the release job downloads them all. The evaluate job also reports the revision this run proves, and every job after it is handed it with --revision, so a run whose own stages move one of the pipeline''s repos still answers for the commits it started with. Every job is titled from the stage and substage names unless the pipeline declares a displayName, and a stage''s promotion job is <stage>-promotion-gate. A stage named self-reconcile, evaluate or release is refused. Off, a command workflow is one job running the whole apply.'
 - key: jobs
   type: string
   required: false

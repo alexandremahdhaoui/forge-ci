@@ -156,6 +156,17 @@ type Options struct {
 	Stage    string
 	Substage string
 	Promote  bool
+
+	// Revision is the revision this phase is bound to: the one the evaluate
+	// phase decided for, handed on by whatever rendered the jobs. A run has
+	// exactly one revision, fixed before its first stage, and a phase in a
+	// process of its own has no other way to learn it - its own checkout
+	// answers whatever the repos hold NOW, which is a different question.
+	//
+	// A stage that publishes into a repo this pipeline writes moves that
+	// repo mid-run, so without this the next job resolves another revision
+	// and finds none of the records the run wrote under the first one.
+	Revision string
 }
 
 // The phases of an apply. PhaseAll is the whole loop in one process,
@@ -291,7 +302,20 @@ func (c *Controller) applyPhases(
 	// not written yet. A revision in state is a claim that this tuple of
 	// commits was proven, and minting it before anything runs hands a broken
 	// build a revision that can propagate.
-	revision, err := c.resolveRevision(ctx, p, root)
+	//
+	// Unless this phase was handed the one its run is bound to, in which case
+	// it reads it rather than deriving it: see pinned.go.
+	var (
+		revision citypes.Revision
+		pinned   releaseDecision
+	)
+
+	if opts.Revision != "" {
+		revision, pinned, err = c.pinnedRevision(ctx, p, index, root, opts.Revision)
+	} else {
+		revision, err = c.resolveRevision(ctx, p, root)
+	}
+
 	if err != nil {
 		return Report{}, err
 	}
@@ -312,12 +336,18 @@ func (c *Controller) applyPhases(
 		}
 
 		// A phased apply hands the decision to the phases that follow in
-		// other processes through state. A whole apply keeps it in hand.
+		// other processes through state, and the revision travels with it:
+		// a later phase resolving its own would answer for whatever the
+		// repos hold by then. A whole apply keeps both in hand.
 		if phase == PhaseEvaluate {
+			decision.Revision = revision
+
 			if err := c.writeEvaluation(ctx, index, revision.ID, decision); err != nil {
 				return Report{}, err
 			}
 		}
+	} else if opts.Revision != "" {
+		decision = pinned
 	} else {
 		decision, err = c.readEvaluation(ctx, index, revision.ID)
 		if err != nil {
@@ -1150,18 +1180,21 @@ func (c *Controller) reconcileResources(
 	return actions, changed, published, nil
 }
 
-// declaredStages is the pipeline's stages by name, with their substage
-// names, the shape an engine that renders jobs is handed.
+// declaredStages is the pipeline's stages with their substages, the shape an
+// engine that renders jobs is handed. The display names travel with them, so
+// what a person reads is decided by the factory rather than by the engine.
 func declaredStages(p config.Pipeline) []citypes.DeclaredStage {
 	out := make([]citypes.DeclaredStage, 0, len(p.Stages))
 
 	for _, stage := range p.Stages {
-		names := make([]string, 0, len(stage.Substages))
+		subs := make([]citypes.DeclaredSubstage, 0, len(stage.Substages))
 		for _, sub := range stage.Substages {
-			names = append(names, sub.Name)
+			subs = append(subs, citypes.DeclaredSubstage{Name: sub.Name, DisplayName: sub.DisplayName})
 		}
 
-		out = append(out, citypes.DeclaredStage{Name: stage.Name, Substages: names})
+		out = append(out, citypes.DeclaredStage{
+			Name: stage.Name, DisplayName: stage.DisplayName, Substages: subs,
+		})
 	}
 
 	return out

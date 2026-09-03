@@ -163,9 +163,13 @@ type Target struct {
 }
 
 type Stage struct {
-	Name    string `json:"name"`
-	Mint    bool   `json:"mint,omitempty"`
-	Release string `json:"release,omitempty"`
+	Name string `json:"name"`
+	// DisplayName is what to call this stage where a person reads it. Empty
+	// means a caller derives a title from the name, so a pipeline that says
+	// nothing still reads as words rather than as an identifier.
+	DisplayName string `json:"displayName,omitempty"`
+	Mint        bool   `json:"mint,omitempty"`
+	Release     string `json:"release,omitempty"`
 	// ReleaseRepos is the set of repos this stage's release publishes:
 	// only these are handed to the artifact engine, so only these are
 	// tagged. Empty means every repo, which is what a factory that owns
@@ -178,12 +182,16 @@ type Stage struct {
 }
 
 type Substage struct {
-	Name    string            `json:"name"`
-	Engine  string            `json:"engine"`
-	Manager string            `json:"manager"`
-	Targets []string          `json:"targets"`
-	Gates   []string          `json:"gates,omitempty"`
-	Params  map[string]string `json:"params,omitempty"`
+	Name string `json:"name"`
+	// DisplayName is what to call this substage where a person reads it.
+	// Empty means a caller derives a title from the stage and substage
+	// names.
+	DisplayName string            `json:"displayName,omitempty"`
+	Engine      string            `json:"engine"`
+	Manager     string            `json:"manager"`
+	Targets     []string          `json:"targets"`
+	Gates       []string          `json:"gates,omitempty"`
+	Params      map[string]string `json:"params,omitempty"`
 	// Sync makes the compute engine converge the workspace - manifests,
 	// then the dependency closure - before this substage's targets run. A
 	// multi-repo workspace builds against generated manifests, so at least

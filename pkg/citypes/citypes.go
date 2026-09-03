@@ -47,10 +47,19 @@ type DeclareInput struct {
 	Stages []DeclaredStage `json:"stages,omitempty"`
 }
 
-// DeclaredStage is one stage by name with its substage names, in order.
+// DeclaredStage is one stage by name with its substages, in order. An engine
+// that renders jobs is handed these, so DisplayName is what a person should
+// see where an engine would otherwise show the identifier.
 type DeclaredStage struct {
-	Name      string   `json:"name"`
-	Substages []string `json:"substages,omitempty"`
+	Name        string             `json:"name"`
+	DisplayName string             `json:"displayName,omitempty"`
+	Substages   []DeclaredSubstage `json:"substages,omitempty"`
+}
+
+// DeclaredSubstage is one substage by name.
+type DeclaredSubstage struct {
+	Name        string `json:"name"`
+	DisplayName string `json:"displayName,omitempty"`
 }
 
 type DeclareOutput struct {

@@ -45,6 +45,22 @@ refuses until the stage before it has a green record. `--stage <name>
 substage's record and mints. That is what lets a compute engine render one
 job per stage, or one per substage with a promotion job per stage.
 
+A run proves one set of commits, and only its first phase resolves them.
+The `evaluate` phase records the revision beside its release decision and
+reports it on its first line; every phase after it is handed that id with
+`--revision`, and reads the revision from the record rather than measuring
+its own checkout. Without that, each phase in its own process answers for
+whatever the repos hold when it clones them - and a stage that publishes
+into one of the pipeline's own repos moves one of them halfway through the
+run, so the phases after it would look for records under an id nothing
+wrote. A record for another revision is refused; a record from before the
+revision travelled has none, and the phase resolves its own, so an apply
+in flight over an upgrade finishes the way it started.
+
+Every rendered job carries a title: derived from the stage and substage
+names, unless the stage or substage declares a `displayName`, which is used
+verbatim. A stage's promotion job is `<stage>-promotion-gate`.
+
 Under `unmatched: error` only the newest commit of each release repo has
 to match a list. An older commit that matches none scores patch. History
 is never rewritten, so a bad message is fixed by a good commit on top, and

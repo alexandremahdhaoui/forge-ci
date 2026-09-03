@@ -340,3 +340,50 @@ func substage(name string, targets []string, gates ...string) config.Substage {
 }
 
 func mockAny() any { return mock.Anything }
+
+// rekeyEvaluation files the decision recorded for one revision under another
+// key, which is what a state store that answered the wrong record looks like
+// from the caller's side.
+func (f *fakeEngines) rekeyEvaluation(t *testing.T, from, to string) {
+	t.Helper()
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	payload, ok := f.store["owned/evaluate-"+from]
+	if !ok {
+		t.Fatalf("no evaluation recorded for %s", from)
+	}
+
+	f.store["owned/evaluate-"+to] = payload
+}
+
+// stripEvaluationRevision drops the revision from a recorded decision, which
+// is the shape a forge-ci from before the revision travelled wrote.
+func (f *fakeEngines) stripEvaluationRevision(t *testing.T, revision string) {
+	t.Helper()
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	key := "owned/evaluate-" + revision
+
+	payload, ok := f.store[key]
+	if !ok {
+		t.Fatalf("no evaluation recorded for %s", revision)
+	}
+
+	var record map[string]any
+	if err := json.Unmarshal([]byte(payload), &record); err != nil {
+		t.Fatalf("reading the evaluation for %s: %v", revision, err)
+	}
+
+	delete(record, "revision")
+
+	stripped, err := json.Marshal(record)
+	if err != nil {
+		t.Fatalf("rewriting the evaluation for %s: %v", revision, err)
+	}
+
+	f.store[key] = string(stripped)
+}

@@ -17,6 +17,7 @@ The question an engine answers. The list is closed.
 | `alias` | Lowercase kebab-case identifier. |
 | `artifactStorePath` | Where forge-ci records its own artifacts. |
 | `cap` | The ceiling the bump may not cross, inclusive. "v0" holds the major at 0; "v0.50" holds major and minor. A bump that would cross it drops one level and retries, so a factory that is not ready for v1 keeps releasing rather than stopping. A full semver is refused: a cap on the patch would stop the only bump that always works. |
+| `displayName` | What to call this stage where a person reads it - a job title in a rendered pipeline, a heading in a report. Absent means a title is derived from the name, so a pipeline that says nothing still reads as words. |
 | `engineURI` | Only forge:// and alias:// resolve. Anything else is a hard error, matching forge. |
 | `engines` | Named engine instances. An engine implements one port. It declares the resources it needs and never names a manager kind. |
 | `forge` | Arguments passed to forge. For example "test-all". |
@@ -28,6 +29,7 @@ The question an engine answers. The list is closed.
 | `managers` | Named manager instances. A manager makes declared resources exist. It knows nothing about CI. |
 | `mint` | Write the revision to state when this stage advances. A revision is a claim that this tuple of commits was proven, so minting it before anything runs hands a broken build a revision that can propagate. Set it on the stage that builds and tests. Left unset on every stage, nothing is ever minted. |
 | `name` | Pipeline identifier. |
+| `needs` | The repos that must finish before this one starts, when a target runs in both. A dependency and not an order. |
 | `params` | User defined keys, templated into the targets as {{.Params.x}}. forge-ci never interprets these names. |
 | `port` | The question an engine answers. |
 | `promotion` | Alias of an engine whose type is promotion. It decides whether the stage advances, given every substage outcome. |
@@ -46,7 +48,7 @@ The question an engine answers. The list is closed.
 | `tagPrefix` | Goes in front of the semver, joined with a dash. Absent means no prefix, which is what every factory does: v0.50.0. Set it only when one repo is released by more than one factory, so the two lines do not read each other's tags. |
 | `targets` | Named units of work. A target names a forge target or a forge-ci verb. This is the only place a forge target appears. |
 | `triggers` | Aliases of engines whose type is trigger. |
-| `unmatched` | What a subject no list claims scores. Absent means patch. Set it to ignore to make the vocabulary exhaustive, or to error to enforce it: a subject no list claims then fails the run before anything builds, naming the subject. |
+| `unmatched` | What a subject no list claims scores. Absent means patch. Set it to ignore to make the vocabulary exhaustive, or to error to enforce it: the newest commit of each release repo must then match a list, or the run fails before anything builds, naming the subject. Older unmatched commits score patch, because the fix is a good commit on top and never a rewritten history. |
 | `versioning` | How the one number this factory releases under is derived. Every member is tagged with it, so a workspace has one version line rather than one per repo. There is no field to type a version into: a version is derived or it is nothing, so it can never be re-pointed at a release that already exists. |
 
 See [architecture.md](architecture.md) for how they fit together, and

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 )
 
 // File is one rendered workflow: its name (without extension) and its
@@ -220,7 +222,12 @@ const artifactDir = ".forge-ci/artifacts"
 // human reads, the flags after `--phase`, what it needs, and whether it
 // carries built files out.
 type job struct {
-	id     string
+	id string
+	// name is the job's title: what a person reads in a list of jobs, where
+	// the platform would otherwise show the identifier. Derived from the
+	// stage and substage names unless the pipeline declares a display name,
+	// which is then used verbatim.
+	name   string
 	step   string
 	flags  string
 	needs  []string
@@ -239,8 +246,15 @@ type job struct {
 // the wire.
 func phasedJobs(spec Spec, w WorkflowSpec) ([]job, error) {
 	jobs := []job{
-		{id: jobSelfReconcile, step: "Reconcile CI resources", flags: "--phase " + jobSelfReconcile},
-		{id: jobEvaluate, step: "Evaluate next steps", flags: "--phase " + jobEvaluate, needs: []string{jobSelfReconcile}},
+		{
+			id: jobSelfReconcile, name: "Reconcile CI resources",
+			step: "Reconcile CI resources", flags: "--phase " + jobSelfReconcile,
+		},
+		{
+			id: jobEvaluate, name: "Evaluate next steps",
+			step: "Evaluate next steps", flags: "--phase " + jobEvaluate,
+			needs: []string{jobSelfReconcile},
+		},
 	}
 
 	// The job the release needs: the last thing that decided a stage.
@@ -248,7 +262,8 @@ func phasedJobs(spec Spec, w WorkflowSpec) ([]job, error) {
 
 	if len(spec.Stages) == 0 {
 		jobs = append(jobs, job{
-			id: jobStages, step: "Run the stages", flags: "--phase stages",
+			id: jobStages, name: "Run the stages", step: "Run the stages",
+			flags: "--phase stages",
 			needs: []string{jobEvaluate}, gated: true, upload: true, push: w.Push,
 		})
 		last = jobStages
@@ -262,7 +277,8 @@ func phasedJobs(spec Spec, w WorkflowSpec) ([]job, error) {
 
 		if spec.Jobs != JobsPerSubstage {
 			jobs = append(jobs, job{
-				id: stage.Name, step: "Run stage " + stage.Name,
+				id: stage.Name, name: stageTitle(stage),
+				step:  "Run stage " + stage.Name,
 				flags: "--phase stages --stage " + stage.Name,
 				needs: []string{jobEvaluate, last}, gated: true, upload: true, push: w.Push,
 			})
@@ -273,21 +289,23 @@ func phasedJobs(spec Spec, w WorkflowSpec) ([]job, error) {
 
 		// One job per substage, running beside each other, and one
 		// promotion after them all - the shape the stage has in the core.
-		promote := stage.Name + "-promote"
+		promote := stage.Name + "-promotion-gate"
 		subs := []string{jobEvaluate}
 
 		for _, sub := range stage.Substages {
-			id := stage.Name + "-" + sub
+			id := stage.Name + "-" + sub.Name
 			subs = append(subs, id)
 			jobs = append(jobs, job{
-				id: id, step: "Run " + stage.Name + " " + sub,
-				flags: "--phase stages --stage " + stage.Name + " --substage " + sub,
+				id: id, name: substageTitle(stage, sub),
+				step:  "Run " + stage.Name + " " + sub.Name,
+				flags: "--phase stages --stage " + stage.Name + " --substage " + sub.Name,
 				needs: []string{jobEvaluate, last}, gated: true, upload: true, push: w.Push,
 			})
 		}
 
 		jobs = append(jobs, job{
-			id: promote, step: "Promote stage " + stage.Name,
+			id: promote, name: stageTitle(stage) + " › promotion gate",
+			step:  "Promotion gate for stage " + stage.Name,
 			flags: "--phase stages --stage " + stage.Name + " --promote",
 			needs: subs, gated: true,
 		})
@@ -295,7 +313,7 @@ func phasedJobs(spec Spec, w WorkflowSpec) ([]job, error) {
 	}
 
 	jobs = append(jobs, job{
-		id: jobRelease, step: "Release", flags: "--phase " + jobRelease,
+		id: jobRelease, name: "Release", step: "Release", flags: "--phase " + jobRelease,
 		needs: []string{jobEvaluate, last}, gated: true,
 	})
 
@@ -314,6 +332,26 @@ func phasedJobs(spec Spec, w WorkflowSpec) ([]job, error) {
 	}
 
 	return jobs, nil
+}
+
+// stageTitle and substageTitle are what a person reads. A pipeline that
+// declares a display name gets it verbatim; one that declares none gets a
+// title derived from the names it already has, so nothing has to be typed
+// twice to read as words.
+func stageTitle(stage citypes.DeclaredStage) string {
+	if stage.DisplayName != "" {
+		return stage.DisplayName
+	}
+
+	return stage.Name
+}
+
+func substageTitle(stage citypes.DeclaredStage, sub citypes.DeclaredSubstage) string {
+	if sub.DisplayName != "" {
+		return sub.DisplayName
+	}
+
+	return stageTitle(stage) + " › " + sub.Name
 }
 
 func dedupe(in []string) []string {
@@ -342,6 +380,10 @@ func writePhasedJobs(b *strings.Builder, spec Spec, w WorkflowSpec, jobs []job) 
 	for _, j := range jobs {
 		fmt.Fprintf(b, "  %s:\n", j.id)
 
+		if j.name != "" {
+			fmt.Fprintf(b, "    name: %s\n", j.name)
+		}
+
 		if len(j.needs) > 0 {
 			fmt.Fprintf(b, "    needs: [%s]\n", strings.Join(j.needs, ", "))
 		}
@@ -351,7 +393,8 @@ func writePhasedJobs(b *strings.Builder, spec Spec, w WorkflowSpec, jobs []job) 
 		}
 
 		if j.id == jobEvaluate {
-			b.WriteString("    outputs:\n      outcome: ${{ steps.phase.outputs.outcome }}\n")
+			b.WriteString("    outputs:\n      outcome: ${{ steps.phase.outputs.outcome }}\n" +
+				"      revision: ${{ steps.phase.outputs.revision }}\n")
 		}
 
 		b.WriteString("    runs-on: ubuntu-latest\n")
@@ -376,14 +419,22 @@ func writePhasedJobs(b *strings.Builder, spec Spec, w WorkflowSpec, jobs []job) 
 		b.WriteString("        run: |\n")
 
 		command := strings.TrimSpace(w.Command) + " " + j.flags
+		if j.gated {
+			command += " --revision ${{ needs." + jobEvaluate + ".outputs.revision }}"
+		}
 
 		if j.id == jobEvaluate {
-			// The last line of the report is the word. It is captured
-			// rather than parsed from the middle: a report can say
-			// anything before it, and the last line is the contract.
+			// Two lines of the report are contracts. The last is the
+			// word, captured rather than parsed from the middle because a
+			// report can say anything before it. The first is the revision
+			// this run proves, which every job after this one is told, so
+			// that a job whose own checkout has moved on - a stage of this
+			// run publishes into one of the pipeline's own repos - still
+			// answers for the commits the run started with.
 			writeIndented(b, "out=$("+command+")\n"+
 				"printf '%s\\n' \"$out\"\n"+
-				"echo \"outcome=$(printf '%s\\n' \"$out\" | sed -n 's/^"+jobEvaluate+": //p' | tail -n 1)\" >> \"$GITHUB_OUTPUT\"")
+				"echo \"outcome=$(printf '%s\\n' \"$out\" | sed -n 's/^"+jobEvaluate+": //p' | tail -n 1)\" >> \"$GITHUB_OUTPUT\"\n"+
+				"echo \"revision=$(printf '%s\\n' \"$out\" | sed -n 's/^revision //p' | head -n 1)\" >> \"$GITHUB_OUTPUT\"")
 		} else {
 			writeIndented(b, command)
 		}

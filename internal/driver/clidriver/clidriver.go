@@ -162,6 +162,8 @@ func (d *Driver) load(verb string, args []string) (config.Pipeline, string, reco
 		"with --stage: run this one substage and its gates, and decide nothing for the stage")
 	promote := fs.Bool("promote", false,
 		"with --stage: ask the stage's promotion over every substage's record, and mint")
+	revision := fs.String("revision", "",
+		"the revision this run is bound to, as the evaluate phase reported it")
 
 	if err := fs.Parse(args); err != nil {
 		return config.Pipeline{}, "", reconcilecontroller.Options{}, fmt.Errorf("parsing flags: %w", err)
@@ -199,9 +201,19 @@ func (d *Driver) load(verb string, args []string) (config.Pipeline, string, reco
 			"%w: --substage runs one substage and --promote decides the stage; pick one", ErrUsage)
 	}
 
+	// A run proves one set of commits, and only the phases after the
+	// evaluate one can be told which: the evaluate phase is what decides it,
+	// and a whole apply holds it in hand from its first stage to its last.
+	if *revision != "" && *phase != reconcilecontroller.PhaseStages && *phase != reconcilecontroller.PhaseRelease {
+		return config.Pipeline{}, "", reconcilecontroller.Options{}, fmt.Errorf(
+			"%w: --revision needs --phase %s or --phase %s; every other phase resolves its own",
+			ErrUsage, reconcilecontroller.PhaseStages, reconcilecontroller.PhaseRelease)
+	}
+
 	opts := reconcilecontroller.Options{
 		DryRun: *dryRun, Force: *force, Phase: *phase,
 		Stage: *stage, Substage: *substage, Promote: *promote,
+		Revision: *revision,
 	}
 
 	p, err := Load(*path)
