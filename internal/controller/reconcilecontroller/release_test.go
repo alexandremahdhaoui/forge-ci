@@ -38,9 +38,9 @@ func TestARerunOfAReleasedRevisionReusesItsVersion(t *testing.T) {
 		Apply(context.Background(), p, "/work", plain)
 	require.NoError(t, err)
 	require.True(t, second.Skipped)
-	require.Equal(t, reconcilecontroller.IntentSkip, second.Intent)
+	require.Equal(t, reconcilecontroller.EvaluationSkip, second.Evaluation)
 	require.Equal(t, "v0.1.10", second.Version, "the recorded number, never a bump")
-	require.Contains(t, second.Reason, "already released as v0.1.10")
+	require.Contains(t, second.Reason, "was released as v0.1.10")
 	require.Empty(t, second.Stages, "nothing runs for a revision that was already released")
 	require.Len(t, f.published, 1, "the artifact engine is never called again")
 }
@@ -75,7 +75,7 @@ func TestAnUnchangedReleaseSetConvergesWithoutTheEngine(t *testing.T) {
 	second, err := reconcilecontroller.New(f.caller(), git, clock()).Apply(context.Background(), p, "/work", plain)
 	require.NoError(t, err)
 	require.True(t, second.Skipped)
-	require.Contains(t, second.Reason, "release set is unchanged since v0.1.10")
+	require.Contains(t, second.Reason, "holds the same code as v0.1.10")
 	require.Len(t, f.published, 1)
 }
 
@@ -96,7 +96,7 @@ func TestAnIgnoredOnlyRangeSkipsBeforeAnyBuild(t *testing.T) {
 	report, err := reconcilecontroller.New(f.caller(), git, clock()).Apply(context.Background(), p, "/work", plain)
 	require.NoError(t, err)
 	require.True(t, report.Skipped)
-	require.Contains(t, report.Reason, "nothing releasable since v0.2.4")
+	require.Equal(t, `Nothing to release. 2 commits since v0.2.4, and each one is a kind that never releases. Example: "docs: how to open the door" in golden-rust.`, report.Reason)
 	require.Empty(t, report.Stages)
 	require.Empty(t, f.published)
 
@@ -146,13 +146,14 @@ func TestAPhasedApplyCarriesTheDecisionThroughState(t *testing.T) {
 		return report
 	}
 
-	reconcile := phase(reconcilecontroller.PhaseReconcile)
+	reconcile := phase(reconcilecontroller.PhaseSelfReconcile)
 	require.Empty(t, reconcile.Revision.ID, "the reconcile phase resolves no revision")
 
-	intent := phase(reconcilecontroller.PhaseIntent)
-	require.Equal(t, reconcilecontroller.IntentProceed, intent.Intent)
-	require.Equal(t, "v0.1.10", intent.Version)
-	require.Empty(t, intent.Stages)
+	evaluate := phase(reconcilecontroller.PhaseEvaluate)
+	require.Equal(t, reconcilecontroller.EvaluationProceed, evaluate.Evaluation)
+	require.Equal(t, "v0.1.10", evaluate.Version)
+	require.Contains(t, evaluate.Actions, "Release v0.1.10 (patch).")
+	require.Empty(t, evaluate.Stages)
 
 	stages := phase(reconcilecontroller.PhaseStages)
 	require.Len(t, stages.Stages, 1)
@@ -167,15 +168,15 @@ func TestAPhasedApplyCarriesTheDecisionThroughState(t *testing.T) {
 	require.Equal(t, "v0.1.10", f.published[0].Version)
 }
 
-// A stages or release phase with no intent recorded is a phase run out of
-// order, and it says so rather than deriving a number of its own.
-func TestAPhaseWithoutAnIntentRefuses(t *testing.T) {
+// A stages or release phase with no evaluation recorded is a phase run out
+// of order, and it says so rather than deriving a number of its own.
+func TestAPhaseWithoutAnEvaluationRefuses(t *testing.T) {
 	f := newFakeEngines(t)
 	p := pipeline(releasingStage("build", substage("default", []string{"build"})))
 
 	_, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc123", "v0.1.9"), clock()).
 		Apply(context.Background(), p, "/work", reconcilecontroller.Options{Phase: reconcilecontroller.PhaseStages})
-	require.ErrorIs(t, err, reconcilecontroller.ErrNoIntent)
+	require.ErrorIs(t, err, reconcilecontroller.ErrNoEvaluation)
 }
 
 // The last check before a release writes anything: the bytes. A build that

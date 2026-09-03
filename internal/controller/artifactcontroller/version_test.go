@@ -41,7 +41,7 @@ func TestClassifyScoresAgainstTheVocabularyItIsGiven(t *testing.T) {
 		"a subject nothing claims":     artifactcontroller.LevelPatch,
 		"chore: BREAKING CHANGE in it": artifactcontroller.LevelMajor,
 	} {
-		assert.Equal(t, want, artifactcontroller.Classify(vocab, subject), "subject %q", subject)
+		assert.Equal(t, want, artifactcontroller.Classify(vocab, "", subject), "subject %q", subject)
 	}
 }
 
@@ -55,8 +55,8 @@ func TestClassifyTakesTheLongestMatch(t *testing.T) {
 		Major: []string{"feat!:"},
 	}
 
-	assert.Equal(t, artifactcontroller.LevelMajor, artifactcontroller.Classify(vocab, "feat!: moved"))
-	assert.Equal(t, artifactcontroller.LevelMinor, artifactcontroller.Classify(vocab, "feat: added"))
+	assert.Equal(t, artifactcontroller.LevelMajor, artifactcontroller.Classify(vocab, "", "feat!: moved"))
+	assert.Equal(t, artifactcontroller.LevelMinor, artifactcontroller.Classify(vocab, "", "feat: added"))
 }
 
 // An exhaustive vocabulary is one where an unrecognised subject releases
@@ -65,26 +65,14 @@ func TestUnmatchedDecidesWhatAnUnknownSubjectScores(t *testing.T) {
 	t.Parallel()
 
 	assert.Equal(t, artifactcontroller.LevelPatch,
-		artifactcontroller.Classify(config.Semantic{}, "anything at all"),
+		artifactcontroller.Classify(config.Semantic{}, "", "anything at all"),
 		"an empty unmatched means patch, which is the safe default")
 
 	assert.Equal(t, artifactcontroller.LevelNone,
-		artifactcontroller.Classify(config.Semantic{Unmatched: "ignore"}, "anything at all"))
+		artifactcontroller.Classify(config.Semantic{Unmatched: "ignore"}, "", "anything at all"))
 
 	assert.Equal(t, artifactcontroller.LevelMinor,
-		artifactcontroller.Classify(config.Semantic{Unmatched: "minor"}, "anything at all"))
-}
-
-func TestHighestLevelIsTheStrongestClaimAnySubjectMakes(t *testing.T) {
-	t.Parallel()
-
-	vocab := config.Semantic{Major: []string{"!:"}, Minor: []string{"feat:"}, Patch: []string{"fix:"}}
-
-	assert.Equal(t, artifactcontroller.LevelMajor, artifactcontroller.HighestLevel(vocab,
-		[]string{"fix: small", "feat!: huge", "fix: another"}))
-
-	assert.Equal(t, artifactcontroller.LevelNone, artifactcontroller.HighestLevel(vocab, nil),
-		"an empty range asks for nothing")
+		artifactcontroller.Classify(config.Semantic{Unmatched: "minor"}, "", "anything at all"))
 }
 
 func TestBumpMovesTheLevelItIsGiven(t *testing.T) {
@@ -164,6 +152,34 @@ func TestBumpRefusesAPreviousItCannotRead(t *testing.T) {
 
 	_, err := artifactcontroller.Bump("v1.2", artifactcontroller.LevelPatch, "")
 	require.ErrorIs(t, err, artifactcontroller.ErrPrevious)
+}
+
+// forge-ci's own commit starts with the self reconcile prefix. No list has
+// to name it: it scores patch, and it is never unclaimed. A list that does
+// name it wins, because the lists are the team's words.
+func TestTheSelfReconcilePrefixScoresPatchUnlessAListNamesIt(t *testing.T) {
+	t.Parallel()
+
+	vocab := config.Semantic{Minor: []string{"feat:"}, Ignore: []string{"docs:"}, Unmatched: "error"}
+	subject := "forge-ci: self reconcile"
+
+	assert.Equal(t, artifactcontroller.LevelPatch, artifactcontroller.Classify(vocab, "forge-ci:", subject))
+	assert.Empty(t, artifactcontroller.Unclaimed(vocab, "forge-ci:", []string{subject}))
+
+	// The prefix is a prefix, not a substring: a subject that mentions it
+	// in the middle is not forge-ci's.
+	assert.Equal(t, []string{"revert forge-ci: self reconcile"},
+		artifactcontroller.Unclaimed(vocab, "forge-ci:", []string{"revert forge-ci: self reconcile"}))
+
+	// An empty prefix names nothing, and an unnamed prefix is unclaimed.
+	assert.Equal(t, []string{subject}, artifactcontroller.Unclaimed(vocab, "", []string{subject}))
+
+	// A list that names the prefix wins over the default.
+	named := config.Semantic{Minor: []string{"forge-ci:"}}
+	assert.Equal(t, artifactcontroller.LevelMinor, artifactcontroller.Classify(named, "forge-ci:", subject))
+
+	ignored := config.Semantic{Ignore: []string{"forge-ci:"}}
+	assert.Equal(t, artifactcontroller.LevelNone, artifactcontroller.Classify(ignored, "forge-ci:", subject))
 }
 
 func TestBumpRefusesACapItCannotRead(t *testing.T) {

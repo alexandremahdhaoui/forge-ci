@@ -36,8 +36,42 @@ type Ownership struct {
 	Manager  string `json:"manager" jsonschema:"Alias of the manager that created it"`
 }
 
+// DeclareInput is what an engine is asked with when it reports what it
+// needs: its spec, the pipeline root, and the pipeline's stages by name. The
+// stages are for a compute engine that renders the run as one job per stage
+// or per substage - it needs the names before anything runs. An engine that
+// renders nothing ignores them.
+type DeclareInput struct {
+	Spec   map[string]any  `json:"spec,omitempty"`
+	Root   string          `json:"root,omitempty"`
+	Stages []DeclaredStage `json:"stages,omitempty"`
+}
+
+// DeclaredStage is one stage by name with its substage names, in order.
+type DeclaredStage struct {
+	Name      string   `json:"name"`
+	Substages []string `json:"substages,omitempty"`
+}
+
 type DeclareOutput struct {
 	Resources []Resource `json:"resources"`
+}
+
+// DefaultCommitPrefix is what the commit a manager writes to make its own
+// changes durable starts with, when the pipeline names no other. The core
+// scores a subject starting with it as a patch, so a converge push proves
+// the revision and releases; a factory that lists the prefix in a semantic
+// list overrides that.
+const DefaultCommitPrefix = "forge-ci:"
+
+// SelfReconcileMessage is the commit message a manager writes under a
+// prefix: the prefix, then the two words that say who wrote it and why.
+func SelfReconcileMessage(prefix string) string {
+	if prefix == "" {
+		prefix = DefaultCommitPrefix
+	}
+
+	return prefix + " self reconcile"
 }
 
 type ReconcileInput struct {
@@ -59,6 +93,10 @@ type ReconcileInput struct {
 	// silently replaces whatever was there, and two operators with different
 	// credentials leave one winner. Without this, an existing one is kept.
 	Force bool `json:"force,omitempty"`
+	// CommitPrefix is what the commit a settle writes starts with: the
+	// pipeline's versioning.selfReconcileCommitPrefix, so the release
+	// decision recognizes the commit it caused. Empty means the default.
+	CommitPrefix string `json:"commitPrefix,omitempty"`
 }
 
 type ReconcileOutput struct {

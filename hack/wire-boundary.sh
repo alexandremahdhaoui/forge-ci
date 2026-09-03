@@ -107,6 +107,38 @@ for dir in cmd/ci-*; do
             fail=1
         fi
     done
+
+    # CommitPrefix dropped is a settle that commits under the default prefix
+    # while the release decision looks for the one the pipeline declared:
+    # every converge push then scores by the vocabulary, or fails it.
+    for field in CommitPrefix; do
+        grep -q "	$field string" "$spec" || continue
+
+        if ! grep -qE "$field: *in\.$field" "$handlers"; then
+            echo "$handlers drops ReconcileInput.$field: the wire carries it and the mapping does not copy it." >&2
+            echo "  A missing field here is not a compile error, it is a zero value at runtime." >&2
+            fail=1
+        fi
+    done
+done
+
+# The stage names ride the declare call for the one engine that renders
+# jobs from them. Dropped, a phased workflow renders one stages job and
+# every jobs: substage declaration is silently a lie.
+for dir in cmd/ci-compute-*; do
+    handlers="$dir/handlers.go"
+    spec="$dir/zz_generated.spec.go"
+
+    [ -f "$handlers" ] && [ -f "$spec" ] || continue
+
+    grep -q 'ctrl.Declare(in.Spec, in.Root' "$handlers" || continue
+    grep -q "	Stages \[\]DeclaredStage" "$spec" || continue
+
+    if ! grep -qE "in\.Stages" "$handlers"; then
+        echo "$handlers drops DeclareInput.Stages: the wire carries it and the mapping does not copy it." >&2
+        echo "  A missing field here is not a compile error, it is one stages job at runtime." >&2
+        fail=1
+    fi
 done
 
 # The artifact engines answer outward too. Index is the staged distribution

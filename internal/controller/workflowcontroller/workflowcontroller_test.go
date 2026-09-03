@@ -201,7 +201,7 @@ func TestAContainerFileResolvesThePinFromTheWorkspace(t *testing.T) {
 	spec["containerFile"] = ".forge/toolchain-image"
 	spec["workspace"] = map[string]any{"bootstrapCommand": "true"}
 
-	out, err := c.Declare(spec, root)
+	out, err := c.Declare(spec, root, nil)
 	require.NoError(t, err)
 
 	rendered := false
@@ -224,7 +224,7 @@ func TestAMissingContainerFileNamesTheSyncThatWritesIt(t *testing.T) {
 	spec := specMap(t)
 	spec["containerFile"] = ".forge/toolchain-image"
 
-	_, err := c.Declare(spec, t.TempDir())
+	_, err := c.Declare(spec, t.TempDir(), nil)
 	require.ErrorContains(t, err, "sync first")
 }
 
@@ -241,7 +241,7 @@ func TestAnEmptyContainerFileIsRefused(t *testing.T) {
 	spec := specMap(t)
 	spec["containerFile"] = ".forge/toolchain-image"
 
-	_, err := c.Declare(spec, root)
+	_, err := c.Declare(spec, root, nil)
 	require.ErrorContains(t, err, "is empty")
 }
 
@@ -359,7 +359,7 @@ func TestDeclareEmitsEveryGitHubResource(t *testing.T) {
 		map[string]any{"name": "release", "kind": "release", "secret": "FORGE_CI_GITHUB_TOKEN"},
 	}
 
-	out, err := c.Declare(spec, "")
+	out, err := c.Declare(spec, "", nil)
 	require.NoError(t, err)
 
 	ids := make([]string, 0, len(out.Resources))
@@ -571,7 +571,7 @@ func TestDeclareRefusesANamelessSecret(t *testing.T) {
 	spec := specMap(t)
 	spec["secrets"] = []any{map[string]any{"fromEnv": "X"}}
 
-	_, err := c.Declare(spec, "")
+	_, err := c.Declare(spec, "", nil)
 	require.ErrorContains(t, err, "secrets entry has no name")
 }
 

@@ -103,16 +103,16 @@ type Report struct {
 	Skipped bool   `json:"skipped,omitempty"`
 	Reason  string `json:"reason,omitempty"`
 
-	// Intent is the one word the intent phase answers, skip or proceed,
-	// which a rendered workflow reads to decide whether the phases after
-	// it run at all. Empty outside that phase.
-	Intent string `json:"intent,omitempty"`
+	// Evaluation is the one word the evaluate phase answers, skip or
+	// proceed, which a rendered workflow reads to decide whether the phases
+	// after it run at all. Empty outside that phase.
+	Evaluation string `json:"evaluation,omitempty"`
 }
 
-// The words an intent phase answers.
+// The words the evaluate phase answers.
 const (
-	IntentSkip    = "skip"
-	IntentProceed = "proceed"
+	EvaluationSkip    = "skip"
+	EvaluationProceed = "proceed"
 )
 
 // Advanced reports whether anything blocked. A superseded report did not
@@ -142,25 +142,34 @@ type Options struct {
 	Force  bool
 
 	// Phase is which part of the apply to run: empty for the whole thing,
-	// or one of reconcile, intent, stages, release. Each phase reads and
-	// writes state, so a phase can run in a process of its own and the
+	// or one of self-reconcile, evaluate, stages, release. Each phase reads
+	// and writes state, so a phase can run in a process of its own and the
 	// next phase carries on from the record. That is what lets a compute
 	// engine render one apply as several jobs, each visible on its own.
 	Phase string
+
+	// Stage narrows the stages phase to one stage by name, so a compute
+	// engine can render one job per stage. It refuses to run before the
+	// stage in front of it has a green record. Substage narrows it further
+	// to one substage and its gates, for one job per substage; Promote then
+	// asks the stage's promotion over every substage's record, and mints.
+	Stage    string
+	Substage string
+	Promote  bool
 }
 
 // The phases of an apply. PhaseAll is the whole loop in one process,
 // which is what every apply was before phases existed.
 const (
-	PhaseAll       = ""
-	PhaseReconcile = "reconcile"
-	PhaseIntent    = "intent"
-	PhaseStages    = "stages"
-	PhaseRelease   = "release"
+	PhaseAll           = ""
+	PhaseSelfReconcile = "self-reconcile"
+	PhaseEvaluate      = "evaluate"
+	PhaseStages        = "stages"
+	PhaseRelease       = "release"
 )
 
 // Phases is every phase name a caller may ask for.
-var Phases = []string{PhaseReconcile, PhaseIntent, PhaseStages, PhaseRelease}
+var Phases = []string{PhaseSelfReconcile, PhaseEvaluate, PhaseStages, PhaseRelease}
 
 type Controller struct {
 	caller engineadapter.Caller
@@ -194,11 +203,11 @@ func (c *Controller) Apply(
 	// A phase after the reconcile trusts the reconcile that ran before it,
 	// in the process that ran it: the phases are one apply cut into jobs,
 	// and the first job is the one that converged the surface.
-	if phase == PhaseAll || phase == PhaseReconcile {
+	if phase == PhaseAll || phase == PhaseSelfReconcile {
 		return c.applyFrom(ctx, p, index, root, opts, phase)
 	}
 
-	return c.applyPhases(ctx, p, index, root, phase, actions)
+	return c.applyPhases(ctx, p, index, root, opts, actions)
 }
 
 // applyFrom is an apply that starts at the reconcile: a whole run, or the
@@ -257,11 +266,11 @@ func (c *Controller) applyFrom(
 			"reconcile changed resources nothing publishes, so no push will re-fire this pipeline; continuing on the converged state")
 	}
 
-	if phase == PhaseReconcile {
+	if phase == PhaseSelfReconcile {
 		return Report{Actions: actions}, nil
 	}
 
-	return c.applyPhases(ctx, p, index, root, phase, actions)
+	return c.applyPhases(ctx, p, index, root, opts, actions)
 }
 
 // applyPhases is everything after the reconcile: the revision, the release
@@ -271,10 +280,12 @@ func (c *Controller) applyPhases(
 	p config.Pipeline,
 	index engineIndex,
 	root string,
-	phase string,
+	opts Options,
 	actions []string,
 ) (Report, error) {
 	var err error
+
+	phase := opts.Phase
 
 	// The revision is resolved here because a run record is keyed by it. It is
 	// not written yet. A revision in state is a claim that this tuple of
@@ -294,7 +305,7 @@ func (c *Controller) applyPhases(
 	// the run that follows a real one.
 	var decision releaseDecision
 
-	if phase == PhaseAll || phase == PhaseIntent {
+	if phase == PhaseAll || phase == PhaseEvaluate {
 		decision, err = c.decideRelease(ctx, p, index, root, revision)
 		if err != nil {
 			return Report{}, err
@@ -302,13 +313,13 @@ func (c *Controller) applyPhases(
 
 		// A phased apply hands the decision to the phases that follow in
 		// other processes through state. A whole apply keeps it in hand.
-		if phase == PhaseIntent {
-			if err := c.writeIntent(ctx, index, revision.ID, decision); err != nil {
+		if phase == PhaseEvaluate {
+			if err := c.writeEvaluation(ctx, index, revision.ID, decision); err != nil {
 				return Report{}, err
 			}
 		}
 	} else {
-		decision, err = c.readIntent(ctx, index, revision.ID)
+		decision, err = c.readEvaluation(ctx, index, revision.ID)
 		if err != nil {
 			return Report{}, err
 		}
@@ -319,16 +330,26 @@ func (c *Controller) applyPhases(
 	if decision.Skip {
 		report.Skipped = true
 		report.Reason = decision.Reason
-		report.Intent = IntentSkip
+		report.Evaluation = EvaluationSkip
 		report.Released = []citypes.ArtifactOutput{{URL: decision.URL, Reason: decision.Reason}}
 
 		return report, nil
 	}
 
-	if phase == PhaseIntent {
-		report.Intent = IntentProceed
+	if phase == PhaseEvaluate {
+		report.Evaluation = EvaluationProceed
+
+		if decision.Reason != "" {
+			report.Actions = append(report.Actions, decision.Reason)
+		}
 
 		return report, nil
+	}
+
+	// One stage, or one substage, or one stage's promotion: a job of its
+	// own, carried on from the records the jobs before it wrote.
+	if opts.Stage != "" {
+		return c.applyNamedStage(ctx, p, index, root, revision, decision, opts, report)
 	}
 
 	for _, stage := range p.Stages {
@@ -545,6 +566,17 @@ func releaseHome(p config.Pipeline, index engineIndex, root string) (string, boo
 	return "", false
 }
 
+// commitScan is what the semantic strategy read: how far the release moves,
+// how many commits it read, the commit that decided the level, and one it
+// ignored - the words the decision is explained with.
+type commitScan struct {
+	Level    artifactcontroller.Level
+	Count    int
+	Deciding string
+	Ignored  string
+	Semantic bool
+}
+
 // bumpLevel is how far the release moves. The semantic strategy reads the
 // release set's commit subjects since the last release, because a factory
 // releases its members together and a breaking change in any one of them is
@@ -561,36 +593,69 @@ func (c *Controller) bumpLevel(
 	root string,
 	previous string,
 	set []string,
-) (artifactcontroller.Level, error) {
+) (commitScan, error) {
 	switch p.Versioning.Strategy {
 	case config.StrategyMinor:
-		return artifactcontroller.LevelMinor, nil
+		return commitScan{Level: artifactcontroller.LevelMinor}, nil
 
 	case config.StrategySemantic:
 		tag := artifactcontroller.TagName(p.Versioning.TagPrefix, previous)
+		vocab := p.Versioning.Semantic
+		prefix := p.Versioning.CommitPrefix()
 
-		subjects := []string{}
+		scan := commitScan{Semantic: true}
 
 		for _, name := range set {
 			got, err := c.git.SubjectsSince(ctx, filepath.Join(root, name), tag)
 			if err != nil {
-				return 0, fmt.Errorf("reading what changed in %q: %w", name, err)
+				return commitScan{}, fmt.Errorf("reading what changed in %q: %w", name, err)
 			}
 
-			subjects = append(subjects, got...)
-		}
+			if vocab.Unmatched == config.UnmatchedError {
+				if unclaimed := artifactcontroller.Unclaimed(vocab, prefix, got); len(unclaimed) > 0 {
+					return commitScan{}, fmt.Errorf(
+						"%w: the commit %q in %s starts with no known release kind. Use one of: %s, or set semantic.unmatched to a level",
+						ErrUnclaimedSubject, unclaimed[0], name, strings.Join(knownKinds(vocab, prefix), ", "))
+				}
+			}
 
-		if p.Versioning.Semantic.Unmatched == config.UnmatchedError {
-			if unclaimed := artifactcontroller.Unclaimed(p.Versioning.Semantic, subjects); len(unclaimed) > 0 {
-				return 0, fmt.Errorf("%w: %q", ErrUnclaimedSubject, unclaimed[0])
+			for _, subject := range got {
+				scan.Count++
+
+				level := artifactcontroller.Classify(vocab, prefix, subject)
+				where := fmt.Sprintf("%q in %s", subject, name)
+
+				if level == artifactcontroller.LevelNone && scan.Ignored == "" {
+					scan.Ignored = where
+				}
+
+				if level > scan.Level {
+					scan.Level, scan.Deciding = level, where
+				}
 			}
 		}
 
-		return artifactcontroller.HighestLevel(p.Versioning.Semantic, subjects), nil
+		return scan, nil
 
 	default:
-		return artifactcontroller.LevelPatch, nil
+		return commitScan{Level: artifactcontroller.LevelPatch}, nil
 	}
+}
+
+// knownKinds is every prefix the vocabulary and the self reconcile commit
+// use, the list a refused subject is told to pick from.
+func knownKinds(vocab config.Semantic, prefix string) []string {
+	out := []string{}
+
+	for _, tokens := range [][]string{vocab.Major, vocab.Minor, vocab.Patch, vocab.Ignore} {
+		out = append(out, tokens...)
+	}
+
+	if prefix != "" {
+		out = append(out, prefix)
+	}
+
+	return out
 }
 
 // mint records the revision as proven. Writing it twice is harmless, because
@@ -981,10 +1046,11 @@ func (c *Controller) reconcileResources(
 
 		// The root rides along so an engine whose spec names workspace
 		// files - a resolved pin a sync generated - can read them at
-		// declare time. Optional on the wire: an engine that reads nothing
-		// validates without it.
+		// declare time, and the stage names so an engine that renders the
+		// run as jobs knows them. Both optional on the wire: an engine that
+		// reads nothing validates without them.
 		if err := c.caller.Call(ctx, engine.Engine, ToolDeclare,
-			map[string]any{"spec": orEmpty(engine.Spec), "root": root}, &declared); err != nil {
+			citypes.DeclareInput{Spec: orEmpty(engine.Spec), Root: root, Stages: declaredStages(p)}, &declared); err != nil {
 			return nil, false, false, fmt.Errorf("asking engine %q what it needs: %w", engine.Alias, err)
 		}
 
@@ -1037,6 +1103,9 @@ func (c *Controller) reconcileResources(
 			Spec:      spec,
 			DryRun:    opts.DryRun,
 			Force:     opts.Force,
+			// The commit a settle writes starts with the pipeline's prefix,
+			// so the release decision recognizes the commit it caused.
+			CommitPrefix: p.Versioning.CommitPrefix(),
 		}, &out); err != nil {
 			return nil, false, false, fmt.Errorf("manager %q: %w", alias, err)
 		}
@@ -1066,6 +1135,23 @@ func (c *Controller) reconcileResources(
 	}
 
 	return actions, changed, published, nil
+}
+
+// declaredStages is the pipeline's stages by name, with their substage
+// names, the shape an engine that renders jobs is handed.
+func declaredStages(p config.Pipeline) []citypes.DeclaredStage {
+	out := make([]citypes.DeclaredStage, 0, len(p.Stages))
+
+	for _, stage := range p.Stages {
+		names := make([]string, 0, len(stage.Substages))
+		for _, sub := range stage.Substages {
+			names = append(names, sub.Name)
+		}
+
+		out = append(out, citypes.DeclaredStage{Name: stage.Name, Substages: names})
+	}
+
+	return out
 }
 
 func (c *Controller) resolveRevision(

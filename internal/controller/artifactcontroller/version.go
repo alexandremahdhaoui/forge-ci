@@ -60,7 +60,12 @@ func TagName(prefix, version string) string {
 // Classify scores one commit subject against the vocabulary. Longest match
 // wins, so a vocabulary carrying both "feat:" and "feat!:" behaves the way it
 // reads rather than by list order.
-func Classify(vocab config.Semantic, subject string) Level {
+//
+// selfPrefix is what forge-ci's own commit starts with - the settle that made
+// a reconcile durable. No list has to name it: a subject starting with it
+// scores patch, so a converge push proves the revision and releases. A list
+// that does name it wins, because the lists are the team's words.
+func Classify(vocab config.Semantic, selfPrefix, subject string) Level {
 	subject = strings.TrimSpace(subject)
 
 	best, bestLen := LevelNone, -1
@@ -88,6 +93,10 @@ func Classify(vocab config.Semantic, subject string) Level {
 		return best
 	}
 
+	if isSelf(selfPrefix, subject) {
+		return LevelPatch
+	}
+
 	if vocab.Unmatched == "" {
 		return LevelPatch
 	}
@@ -99,7 +108,7 @@ func Classify(vocab config.Semantic, subject string) Level {
 // unmatched: error refuses on: a vocabulary the team wrote down is a rule,
 // and a subject outside it is a mistake to report before anything builds
 // rather than a patch to release quietly.
-func Unclaimed(vocab config.Semantic, subjects []string) []string {
+func Unclaimed(vocab config.Semantic, selfPrefix string, subjects []string) []string {
 	out := []string{}
 
 	for _, s := range subjects {
@@ -108,7 +117,7 @@ func Unclaimed(vocab config.Semantic, subjects []string) []string {
 			continue
 		}
 
-		claimed := false
+		claimed := isSelf(selfPrefix, s)
 
 		for _, tokens := range [][]string{vocab.Ignore, vocab.Patch, vocab.Minor, vocab.Major} {
 			for _, token := range tokens {
@@ -126,18 +135,10 @@ func Unclaimed(vocab config.Semantic, subjects []string) []string {
 	return out
 }
 
-// HighestLevel is what a range of commits asks for: the strongest claim any
-// one subject makes. An empty range asks for nothing.
-func HighestLevel(vocab config.Semantic, subjects []string) Level {
-	out := LevelNone
-
-	for _, s := range subjects {
-		if l := Classify(vocab, s); l > out {
-			out = l
-		}
-	}
-
-	return out
+// isSelf answers whether a subject is forge-ci's own commit: it starts with
+// the self reconcile prefix. An empty prefix names nothing.
+func isSelf(selfPrefix, subject string) bool {
+	return selfPrefix != "" && strings.HasPrefix(subject, selfPrefix)
 }
 
 // Bump moves previous by level, then clamps under cap. A bump the cap forbids

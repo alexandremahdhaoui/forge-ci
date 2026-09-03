@@ -42,13 +42,14 @@ func toReconcileInput(in ReconcileInput) citypes.ReconcileInput {
 	}
 
 	return citypes.ReconcileInput{
-		Manager:   in.Manager,
-		Resources: resources,
-		Owned:     owned,
-		Bootstrap: in.Bootstrap,
-		Spec:      in.Spec,
-		DryRun:    in.DryRun,
-		Force:     in.Force,
+		Manager:      in.Manager,
+		Resources:    resources,
+		Owned:        owned,
+		Bootstrap:    in.Bootstrap,
+		Spec:         in.Spec,
+		DryRun:       in.DryRun,
+		Force:        in.Force,
+		CommitPrefix: in.CommitPrefix,
 	}
 }
 

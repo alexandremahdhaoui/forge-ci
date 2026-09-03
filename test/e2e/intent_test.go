@@ -65,9 +65,8 @@ func TestARerunOfAReleasedRevisionReusesItsVersion(t *testing.T) {
 	require.Contains(t, mustRun(t, repo, "git", "tag"), "v0.1.0", "this clone carries the tag, or the test proves nothing")
 
 	out := mustRun(t, root, "forge-ci", "apply", "--config", "forge-ci.yaml", "--root", ".")
-	require.Contains(t, out, "skipped: revision")
-	require.Contains(t, out, "already released as v0.1.0")
-	require.Contains(t, out, "intent: skip")
+	require.Contains(t, out, "skipped: This revision was released as v0.1.0. Nothing to do.")
+	require.Contains(t, out, "evaluate: skip")
 
 	require.Equal(t, []string{"v0.1.0"}, strings.Fields(mustRun(t, origin, "git", "tag")))
 	require.Equal(t, "v0.1.0", fake.releases["owner/demo-repo"])
@@ -75,7 +74,7 @@ func TestARerunOfAReleasedRevisionReusesItsVersion(t *testing.T) {
 }
 
 // A commit the vocabulary ignores is a new revision with nothing to
-// release. The run ends at the intent, before any build, and the next fix
+// release. The run ends at the evaluation, before any build, and the next fix
 // releases the patch.
 func TestADocsOnlyCommitSkipsBeforeAnyBuildAndTheNextFixReleases(t *testing.T) {
 	fake := newReleaseFake(t)
@@ -90,7 +89,7 @@ func TestADocsOnlyCommitSkipsBeforeAnyBuildAndTheNextFixReleases(t *testing.T) {
 	mustRun(t, repo, "git", "commit", "-am", "docs: explain the door")
 
 	out := mustRun(t, root, "forge-ci", "apply", "--config", "forge-ci.yaml", "--root", ".")
-	require.Contains(t, out, "skipped: nothing releasable since v0.1.0")
+	require.Contains(t, out, `skipped: Nothing to release. 1 commit since v0.1.0, and it is a kind that never releases: "docs: explain the door" in demo-repo.`)
 	require.NotContains(t, out, "stage build", "a skipped run builds nothing")
 	require.Equal(t, []string{"v0.1.0"}, strings.Fields(mustRun(t, origin, "git", "tag")))
 
@@ -127,7 +126,7 @@ func TestAnUnclaimedSubjectFailsFast(t *testing.T) {
 }
 
 // The phases, one process each, reach the same release the whole apply
-// reaches, and the intent phase prints the word a rendered workflow reads.
+// reaches, and the evaluate phase prints the word a rendered workflow reads.
 func TestThePhasesReachTheSameReleaseAsOneApply(t *testing.T) {
 	fake := newReleaseFake(t)
 	root, repo, origin := releasingRepo(t, fake, "")
@@ -135,10 +134,11 @@ func TestThePhasesReachTheSameReleaseAsOneApply(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(repo, "README.md"), []byte("two"), 0o600))
 	mustRun(t, repo, "git", "commit", "-am", "fix: the door")
 
-	mustRun(t, root, "forge-ci", "apply", "--config", "forge-ci.yaml", "--root", ".", "--phase", "reconcile")
+	mustRun(t, root, "forge-ci", "apply", "--config", "forge-ci.yaml", "--root", ".", "--phase", "self-reconcile")
 
-	out := mustRun(t, root, "forge-ci", "apply", "--config", "forge-ci.yaml", "--root", ".", "--phase", "intent")
-	require.True(t, strings.HasSuffix(strings.TrimSpace(out), "intent: proceed"), out)
+	out := mustRun(t, root, "forge-ci", "apply", "--config", "forge-ci.yaml", "--root", ".", "--phase", "evaluate")
+	require.True(t, strings.HasSuffix(strings.TrimSpace(out), "evaluate: proceed"), out)
+	require.Contains(t, out, "Release v0.1.1 (patch).")
 
 	out = mustRun(t, root, "forge-ci", "apply", "--config", "forge-ci.yaml", "--root", ".", "--phase", "stages")
 	require.Contains(t, out, "stage build")
@@ -151,6 +151,48 @@ func TestThePhasesReachTheSameReleaseAsOneApply(t *testing.T) {
 	require.NoError(t, os.Remove(filepath.Join(repo, "build", "dist", "demo-tool_linux_amd64")))
 
 	mustRun(t, root, "forge-ci", "apply", "--config", "forge-ci.yaml", "--root", ".", "--phase", "release")
+	require.Equal(t, "v0.1.1", fake.releases["owner/demo-repo"])
+	require.ElementsMatch(t, []string{"v0.1.0", "v0.1.1"}, strings.Fields(mustRun(t, origin, "git", "tag")))
+	require.Contains(t, string(fake.assets["demo-tool_linux_amd64"]), "demo-tool works")
+}
+
+// The stages phase cut as a compute engine renders it with one job per
+// substage: the substage runs alone, the promotion reads its record and
+// mints, and the release reads the file the substage job kept. Run out of
+// order, a job refuses by name.
+func TestTheStageJobsReachTheSameReleaseAsOneApply(t *testing.T) {
+	fake := newReleaseFake(t)
+	root, repo, origin := releasingRepo(t, fake, "")
+
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "README.md"), []byte("two"), 0o600))
+	mustRun(t, repo, "git", "commit", "-am", "fix: the door")
+
+	apply := func(args ...string) (string, error) {
+		return run(t, root, "forge-ci", append([]string{"apply", "--config", "forge-ci.yaml", "--root", "."}, args...)...)
+	}
+
+	_, err := apply("--phase", "self-reconcile")
+	require.NoError(t, err)
+
+	_, err = apply("--phase", "evaluate")
+	require.NoError(t, err)
+
+	out, err := apply("--phase", "stages", "--stage", "build", "--promote")
+	require.Error(t, err, "the promotion over a stage nothing ran is refused")
+	require.Contains(t, out, `substage "default"`)
+
+	out, err = apply("--phase", "stages", "--stage", "build", "--substage", "default")
+	require.NoError(t, err, out)
+	require.Contains(t, out, "stage build")
+
+	out, err = apply("--phase", "stages", "--stage", "build", "--promote")
+	require.NoError(t, err, out)
+	require.Equal(t, "v0.1.0", fake.releases["owner/demo-repo"], "the promotion releases nothing")
+
+	require.NoError(t, os.Remove(filepath.Join(repo, "build", "dist", "demo-tool_linux_amd64")))
+
+	_, err = apply("--phase", "release")
+	require.NoError(t, err)
 	require.Equal(t, "v0.1.1", fake.releases["owner/demo-repo"])
 	require.ElementsMatch(t, []string{"v0.1.0", "v0.1.1"}, strings.Fields(mustRun(t, origin, "git", "tag")))
 	require.Contains(t, string(fake.assets["demo-tool_linux_amd64"]), "demo-tool works")

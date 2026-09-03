@@ -30,7 +30,7 @@ func NewHandlers() Handlers {
 
 	return Handlers{
 		Declare: func(_ context.Context, in DeclareInput) (*DeclareOutput, error) {
-			out, err := ctrl.Declare(in.Spec, in.Root)
+			out, err := ctrl.Declare(in.Spec, in.Root, toStages(in.Stages))
 			if err != nil {
 				return nil, err
 			}
@@ -174,4 +174,16 @@ func fromArtifacts(in []forge.Artifact) ([]ForgeArtifact, error) {
 	}
 
 	return out, nil
+}
+
+// toStages reads the pipeline's stage names off the wire, the shape the
+// phased renderer lays its jobs out from.
+func toStages(in []DeclaredStage) []citypes.DeclaredStage {
+	out := make([]citypes.DeclaredStage, 0, len(in))
+
+	for _, s := range in {
+		out = append(out, citypes.DeclaredStage{Name: s.Name, Substages: s.Substages})
+	}
+
+	return out
 }

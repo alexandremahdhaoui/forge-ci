@@ -78,7 +78,11 @@ type Settler interface {
 	// hangs on: a published change re-fires the pipeline, so the run may
 	// stop superseded; a change nobody published cannot re-trigger
 	// anything, and a run that stopped for one would strand the pipeline.
-	Settle(paths []string) (Action, bool, error)
+	//
+	// message is the commit subject to write, built by the caller from the
+	// pipeline's self reconcile prefix, so the release decision recognizes
+	// the commit it caused.
+	Settle(paths []string, message string) (Action, bool, error)
 }
 
 type Controller struct {
@@ -177,7 +181,7 @@ func (c *Controller) Reconcile(in citypes.ReconcileInput) (citypes.ReconcileOutp
 	//
 	// A dry run settles nothing, because it changed nothing.
 	if settler, ok := c.realizer.(Settler); ok && !in.DryRun && len(changed) > 0 {
-		action, published, err := settler.Settle(changed)
+		action, published, err := settler.Settle(changed, citypes.SelfReconcileMessage(in.CommitPrefix))
 		if err != nil {
 			failures = append(failures, fmt.Errorf("settling what changed: %w", err))
 		} else {

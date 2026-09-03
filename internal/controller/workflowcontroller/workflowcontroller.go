@@ -73,15 +73,26 @@ type Spec struct {
 	// Runner configures the run tool's dispatch target. Empty name means
 	// the engine declares no runner and cannot run substages.
 	Runner RunnerSpec `json:"runner,omitzero"`
-	// Phases renders every command workflow as four jobs - reconcile,
-	// intent, stages, release - each running one phase of the apply, so the
-	// run reads as what it is instead of one job named after its first
-	// step. A skipped intent shows the jobs after it as skipped, which is
-	// GitHub's own word for it. The files a build produces cross from the
-	// stages job to the release job as an Actions artifact. Off, a command
-	// workflow is one job running the whole apply, which is what every
-	// pipeline was before phases existed.
+	// Phases renders every command workflow as jobs - self-reconcile,
+	// evaluate, the stages, release - each running one phase of the apply,
+	// so the run reads as what it is instead of one job named after its
+	// first step. A skipped evaluation shows the jobs after it as skipped,
+	// which is GitHub's own word for it. The files a build produces cross
+	// from the stage jobs to the release job as Actions artifacts. Off, a
+	// command workflow is one job running the whole apply, which is what
+	// every pipeline was before phases existed.
 	Phases bool `json:"phases,omitempty"`
+	// Jobs is how fine the stage jobs are cut: "stage" renders one job per
+	// pipeline stage, its substages running beside each other inside it;
+	// "substage" renders one job per substage and one promotion job per
+	// stage, so a failure and a gate show where they happened, at the cost
+	// of one workspace checkout per job. Empty means stage.
+	Jobs string `json:"jobs,omitempty"`
+
+	// Stages are the pipeline's stages by name, handed in at declare time
+	// and never read from the spec: the pipeline declares them once, and
+	// the rendered jobs follow.
+	Stages []citypes.DeclaredStage `json:"-"`
 }
 
 // Workspace is the checkout preamble: one command that stands the whole
@@ -302,6 +313,17 @@ func ParseSpec(raw map[string]any) (Spec, error) {
 		}
 	}
 
+	switch s.Jobs {
+	case "":
+		s.Jobs = JobsPerStage
+	case JobsPerStage, JobsPerSubstage:
+		if !s.Phases {
+			return Spec{}, errors.New("spec.jobs cuts the stage jobs of a phased workflow; set spec.phases: true or drop it")
+		}
+	default:
+		return Spec{}, fmt.Errorf("spec.jobs %q is not %s or %s", s.Jobs, JobsPerStage, JobsPerSubstage)
+	}
+
 	if s.Container != "" && s.ContainerFile != "" {
 		return Spec{}, errors.New(
 			"exactly one of spec.container or spec.containerFile pins the image: " +
@@ -348,12 +370,15 @@ func New(
 // file per owned workflow (runner included), one Actions secret per
 // declared secret, and enablement for every owned workflow file. root is
 // where the pipeline runs, so a containerFile resolves against the
-// workspace the sync wrote it into.
-func (c *Controller) Declare(raw map[string]any, root string) (citypes.DeclareOutput, error) {
+// workspace the sync wrote it into; stages are the pipeline's stages by
+// name, which a phased workflow renders as jobs.
+func (c *Controller) Declare(raw map[string]any, root string, stages []citypes.DeclaredStage) (citypes.DeclareOutput, error) {
 	spec, err := ParseSpec(raw)
 	if err != nil {
 		return citypes.DeclareOutput{}, err
 	}
+
+	spec.Stages = stages
 
 	if spec.ContainerFile != "" {
 		pin, err := c.fs.ReadFile(filepath.Join(root, filepath.FromSlash(spec.ContainerFile)))

@@ -29,13 +29,27 @@ runs where, and what gets promoted. It calls forge for the rest.
 `apply` is idempotent, so triggers are dumb. A webhook, a cron and your
 keyboard all call the same thing and a duplicate call costs nothing.
 
-`apply --phase <name>` runs one part of the loop: `reconcile`, `intent`,
-`stages` or `release`. Each phase reads and writes state, so the next can
-run in another process. A compute engine renders the phases as jobs, so a
-run reads as what it is. The `intent` phase is where a revision with
-nothing to release ends: already released, every commit since the last tag
-ignored by the vocabulary, or the release set unchanged. It answers one
-word, `skip` or `proceed`, and the phases after it run only on `proceed`.
+`apply --phase <name>` runs one part of the loop: `self-reconcile`,
+`evaluate`, `stages` or `release`. Each phase reads and writes state, so
+the next can run in another process. A compute engine renders the phases
+as jobs, so a run reads as what it is. The `evaluate` phase is where a
+revision with nothing to release ends: already released, no new commit in
+the release set, only commits of a kind that never releases, or the same
+code as the last release. It answers one word, `skip` or `proceed`, and the
+phases after it run only on `proceed`.
+
+The `stages` phase cuts further. `--stage <name>` runs one stage, and
+refuses until the stage before it has a green record. `--stage <name>
+--substage <name>` runs one substage and its gates and decides nothing;
+`--stage <name> --promote` asks the stage's promotion over every
+substage's record and mints. That is what lets a compute engine render one
+job per stage, or one per substage with a promotion job per stage.
+
+forge-ci's own commit, the one a manager writes when it reconciles the CI
+resources, reads `forge-ci: self reconcile`. The prefix is the pipeline's
+`versioning.selfReconcileCommitPrefix`, default `forge-ci:`, and the
+release decision scores a commit starting with it as a patch unless a
+semantic list names the same prefix.
 
 ## The loop
 

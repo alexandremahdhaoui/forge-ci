@@ -95,6 +95,25 @@ func TestASettleCommitsAndPushesWhatItConverged(t *testing.T) {
 
 	assert.Contains(t, out(t, remote, "show", "main:.github/workflows/ci.yaml"), "on: push",
 		"the remote carries it, which is what makes the next run find no drift")
+
+	assert.Equal(t, "forge-ci: self reconcile\n", out(t, member, "log", "-1", "--format=%s"),
+		"the commit says who wrote it, under the default prefix, so the release decision recognizes it")
+}
+
+// The commit prefix is the pipeline's, handed in on the wire: a factory
+// that writes its own convention gets its own subject, and the two words
+// after it stay so a human still knows the commit was not theirs.
+func TestASettleCommitsUnderThePrefixThePipelineNames(t *testing.T) {
+	root, member, _ := workspace(t)
+
+	first, err := settling(t, root).Reconcile(citypes.ReconcileInput{
+		Manager:      "github",
+		Resources:    []citypes.Resource{fileContent("member/.github/workflows/ci.yaml", "on: push\n")},
+		CommitPrefix: "🤖",
+	})
+	require.NoError(t, err)
+	assert.True(t, first.Changed)
+	assert.Equal(t, "🤖 self reconcile\n", out(t, member, "log", "-1", "--format=%s"))
 }
 
 // The termination proof. A second reconcile over the settled state finds

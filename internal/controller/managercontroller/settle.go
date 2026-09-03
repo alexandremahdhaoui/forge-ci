@@ -10,11 +10,6 @@ import (
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/gitadapter"
 )
 
-// commitMessage is what a settle records. It names no repo and no file: the
-// diff already says which, and the subject is what a human scanning the log
-// reads to know this commit was not theirs.
-const commitMessage = "chore: converge the resources this pipeline declares"
-
 var _ Settler = GitHubRealizer{}
 
 // Settle commits and pushes the files this reconcile converged.
@@ -28,7 +23,12 @@ var _ Settler = GitHubRealizer{}
 // else was uncommitted would publish a human's half-finished work under the
 // pipeline's name, which is not the pipeline's to publish. That is why this
 // stages an explicit list and never the worktree.
-func (r GitHubRealizer) Settle(paths []string) (Action, bool, error) {
+//
+// message is the commit subject, handed in by the caller. It names no repo
+// and no file: the diff already says which, and the subject is what a human
+// scanning the log reads to know this commit was not theirs - and what the
+// release decision reads to know it was forge-ci's.
+func (r GitHubRealizer) Settle(paths []string, message string) (Action, bool, error) {
 	if r.git == nil {
 		return Action{}, false, nil
 	}
@@ -61,7 +61,7 @@ func (r GitHubRealizer) Settle(paths []string) (Action, bool, error) {
 	)
 
 	for _, dir := range dirs {
-		line, pushed, err := r.settleRepo(dir, byRepo[dir])
+		line, pushed, err := r.settleRepo(dir, byRepo[dir], message)
 		if err != nil {
 			failures = append(failures, err)
 
@@ -84,7 +84,7 @@ func (r GitHubRealizer) Settle(paths []string) (Action, bool, error) {
 // commit was pushed. Committed-but-unpushed (no remote, detached HEAD) is
 // durable on this machine and published nowhere - the caller's stop
 // decision needs the difference.
-func (r GitHubRealizer) settleRepo(dir string, paths []string) (string, bool, error) {
+func (r GitHubRealizer) settleRepo(dir string, paths []string, message string) (string, bool, error) {
 	sort.Strings(paths)
 
 	for _, p := range paths {
@@ -106,7 +106,7 @@ func (r GitHubRealizer) settleRepo(dir string, paths []string) (string, bool, er
 		return fmt.Sprintf("nothing to commit in %s: what changed already matches HEAD", dir), false, nil
 	}
 
-	if err := r.git.Commit(r.ctx, dir, commitMessage, paths...); err != nil {
+	if err := r.git.Commit(r.ctx, dir, message, paths...); err != nil {
 		return "", false, err
 	}
 

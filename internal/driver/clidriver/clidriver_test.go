@@ -542,33 +542,33 @@ func TestASkippedApplyReportsTheReasonAndTheWord(t *testing.T) {
 	var out bytes.Buffer
 
 	r := clidrivermock.NewMockReconciler(t)
-	r.EXPECT().Apply(mock.Anything, mock.Anything, mock.Anything, reconcilecontroller.Options{Phase: "intent"}).
+	r.EXPECT().Apply(mock.Anything, mock.Anything, mock.Anything, reconcilecontroller.Options{Phase: "evaluate"}).
 		Return(reconcilecontroller.Report{
-			Revision: citypes.Revision{ID: "abc123def456"},
-			Version:  "v0.5.6",
-			Skipped:  true,
-			Reason:   "revision abc123def456 is already released as v0.5.6",
-			Intent:   reconcilecontroller.IntentSkip,
+			Revision:   citypes.Revision{ID: "abc123def456"},
+			Version:    "v0.5.6",
+			Skipped:    true,
+			Reason:     "This revision was released as v0.5.6. Nothing to do.",
+			Evaluation: reconcilecontroller.EvaluationSkip,
 		}, nil).Once()
 
 	err := clidriver.New(&out, r).Run(context.Background(),
-		[]string{"apply", "--config", write(t, minimal), "--phase", "intent"})
+		[]string{"apply", "--config", write(t, minimal), "--phase", "evaluate"})
 	require.NoError(t, err)
-	require.Contains(t, out.String(), "skipped: revision abc123def456 is already released as v0.5.6")
-	require.True(t, strings.HasSuffix(out.String(), "intent: skip\n"), out.String())
+	require.Contains(t, out.String(), "skipped: This revision was released as v0.5.6. Nothing to do.")
+	require.True(t, strings.HasSuffix(out.String(), "evaluate: skip\n"), out.String())
 
 	out.Reset()
-	r.EXPECT().Apply(mock.Anything, mock.Anything, mock.Anything, reconcilecontroller.Options{Phase: "intent"}).
+	r.EXPECT().Apply(mock.Anything, mock.Anything, mock.Anything, reconcilecontroller.Options{Phase: "evaluate"}).
 		Return(reconcilecontroller.Report{
-			Revision: citypes.Revision{ID: "abc123def456"},
-			Version:  "v0.5.7",
-			Intent:   reconcilecontroller.IntentProceed,
+			Revision:   citypes.Revision{ID: "abc123def456"},
+			Version:    "v0.5.7",
+			Evaluation: reconcilecontroller.EvaluationProceed,
 		}, nil).Once()
 
 	err = clidriver.New(&out, r).Run(context.Background(),
-		[]string{"apply", "--config", write(t, minimal), "--phase", "intent"})
+		[]string{"apply", "--config", write(t, minimal), "--phase", "evaluate"})
 	require.NoError(t, err)
-	require.True(t, strings.HasSuffix(out.String(), "intent: proceed\n"), out.String())
+	require.True(t, strings.HasSuffix(out.String(), "evaluate: proceed\n"), out.String())
 }
 
 // A phase nobody implements is refused by name, before anything runs.
@@ -578,5 +578,45 @@ func TestAnUnknownPhaseIsRefused(t *testing.T) {
 	err := clidriver.New(&out, clidrivermock.NewMockReconciler(t)).Run(context.Background(),
 		[]string{"apply", "--config", write(t, minimal), "--phase", "deploy"})
 	require.ErrorIs(t, err, clidriver.ErrUsage)
-	require.Contains(t, err.Error(), "reconcile, intent, stages, release")
+	require.Contains(t, err.Error(), "self-reconcile, evaluate, stages, release")
+}
+
+// A stage job is a stages phase narrowed by name, and the flags that narrow
+// it need each other in one order: --stage needs the stages phase, the two
+// after it need --stage, and a substage and a promotion are two jobs.
+func TestTheStageFlagsNeedEachOther(t *testing.T) {
+	for name, args := range map[string][]string{
+		"stage without the phase":      {"--stage", "build"},
+		"stage on another phase":       {"--phase", "release", "--stage", "build"},
+		"substage without a stage":     {"--phase", "stages", "--substage", "default"},
+		"promote without a stage":      {"--phase", "stages", "--promote"},
+		"substage and promote at once": {"--phase", "stages", "--stage", "build", "--substage", "default", "--promote"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var out bytes.Buffer
+
+			err := clidriver.New(&out, clidrivermock.NewMockReconciler(t)).Run(context.Background(),
+				append([]string{"apply", "--config", write(t, minimal)}, args...))
+			require.ErrorIs(t, err, clidriver.ErrUsage)
+		})
+	}
+
+	var out bytes.Buffer
+
+	r := clidrivermock.NewMockReconciler(t)
+	r.EXPECT().Apply(mock.Anything, mock.Anything, mock.Anything, reconcilecontroller.Options{
+		Phase: "stages", Stage: "build", Substage: "default",
+	}).Return(reconcilecontroller.Report{Revision: citypes.Revision{ID: "abc"}}, nil).Once()
+
+	err := clidriver.New(&out, r).Run(context.Background(),
+		[]string{"apply", "--config", write(t, minimal), "--phase", "stages", "--stage", "build", "--substage", "default"})
+	require.NoError(t, err)
+
+	r.EXPECT().Apply(mock.Anything, mock.Anything, mock.Anything, reconcilecontroller.Options{
+		Phase: "stages", Stage: "build", Promote: true,
+	}).Return(reconcilecontroller.Report{Revision: citypes.Revision{ID: "abc"}}, nil).Once()
+
+	err = clidriver.New(&out, r).Run(context.Background(),
+		[]string{"apply", "--config", write(t, minimal), "--phase", "stages", "--stage", "build", "--promote"})
+	require.NoError(t, err)
 }

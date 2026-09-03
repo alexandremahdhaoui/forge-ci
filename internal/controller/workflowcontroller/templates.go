@@ -41,7 +41,7 @@ func render(spec Spec, w WorkflowSpec) (string, error) {
 
 	switch w.Kind {
 	case KindCommand:
-		return renderCommand(spec, w), nil
+		return renderCommand(spec, w)
 	case KindFanOut:
 		return renderFanOut(spec, w), nil
 	case KindRelease:
@@ -55,7 +55,7 @@ func render(spec Spec, w WorkflowSpec) (string, error) {
 // workspace and runs a command in the repo checkout: the on-block, the
 // setup-go step, the workspace checkout, the toolchain install, the
 // command, and optionally the push of what the command wrote.
-func renderCommand(spec Spec, w WorkflowSpec) string {
+func renderCommand(spec Spec, w WorkflowSpec) (string, error) {
 	var b strings.Builder
 
 	b.WriteString(w.Header)
@@ -118,9 +118,14 @@ func renderCommand(spec Spec, w WorkflowSpec) string {
 	b.WriteString("\nconcurrency:\n  group: ${{ github.workflow }}\n  cancel-in-progress: false\n")
 
 	if spec.Phases {
-		writePhasedJobs(&b, spec, w)
+		jobs, err := phasedJobs(spec, w)
+		if err != nil {
+			return "", err
+		}
 
-		return b.String()
+		writePhasedJobs(&b, spec, w, jobs)
+
+		return b.String(), nil
 	}
 
 	writeRunsOn(&b, spec, job)
@@ -180,58 +185,172 @@ func renderCommand(spec Spec, w WorkflowSpec) string {
 	writeStoreSave(&b)
 	writeFailureReport(&b, w)
 
-	return b.String()
+	return b.String(), nil
 }
 
-// The phases of one apply, as the jobs that run them. Each job stands the
-// workspace up on its own and runs `<command> --phase <name>`; the phases
-// hand each other what they decided through the state repo, and the files
-// the stages built cross to the release job as an Actions artifact under
-// the directory the compute engine's put keeps them in.
-var phases = []struct {
-	name string
-	step string
-}{
-	{"reconcile", "Reconcile the pipeline's own resources"},
-	{"intent", "Decide whether this revision has anything to release"},
-	{"stages", "Run the stages"},
-	{"release", "Release"},
-}
+// The fixed jobs of one phased apply. Every job stands the workspace up on
+// its own and runs `<command> --phase <name>`; the jobs hand each other what
+// they decided through the state repo, and the files the stages built cross
+// to the release job as Actions artifacts under the directory the compute
+// engine's put keeps them in.
+//
+// The stage jobs between evaluate and release are named by the pipeline:
+// one per stage, or one per substage with a promotion job per stage, as the
+// spec's jobs key says. A stage may not take one of these three names.
+const (
+	jobSelfReconcile = "self-reconcile"
+	jobEvaluate      = "evaluate"
+	jobRelease       = "release"
+	jobStages        = "stages"
+)
+
+// The two granularities of the stage jobs.
+const (
+	JobsPerStage    = "stage"
+	JobsPerSubstage = "substage"
+)
 
 // artifactDir is where a compute engine's put keeps what a run built, under
-// the workspace root. The stages job uploads it and the release job
-// downloads it, so a release reads files on a runner that never built them.
+// the workspace root. Every stage job uploads it under a name of its own
+// and the release job downloads them all merged, so a release reads files
+// on a runner that never built them.
 const artifactDir = ".forge-ci/artifacts"
 
-// writePhasedJobs renders one apply as four jobs. The intent job's last
-// line is one word, skip or proceed, captured as its output; the two jobs
-// after it run only on proceed, so a run with nothing to release shows them
-// skipped rather than green. A reconcile that superseded itself exits 0
-// with no revision, and the intent job then runs on the superseded state
-// and skips on its own - the run that push fired carries the work.
-func writePhasedJobs(b *strings.Builder, spec Spec, w WorkflowSpec) {
+// job is one rendered job of a phased workflow: its id, the step name a
+// human reads, the flags after `--phase`, what it needs, and whether it
+// carries built files out.
+type job struct {
+	id     string
+	step   string
+	flags  string
+	needs  []string
+	upload bool
+	// gated says the job runs only on proceed: everything after evaluate.
+	gated bool
+	// push says the workflow's push step follows the command, for a
+	// pipeline whose stages write into its own checkout.
+	push bool
+}
+
+// phasedJobs lays the jobs out: the two fixed ones in front, the stage
+// jobs the pipeline names, and the release at the end. With no stage names
+// known - an older core that declares without them - the stages are one
+// job, which is what every phased workflow rendered before names crossed
+// the wire.
+func phasedJobs(spec Spec, w WorkflowSpec) ([]job, error) {
+	jobs := []job{
+		{id: jobSelfReconcile, step: "Reconcile CI resources", flags: "--phase " + jobSelfReconcile},
+		{id: jobEvaluate, step: "Evaluate next steps", flags: "--phase " + jobEvaluate, needs: []string{jobSelfReconcile}},
+	}
+
+	// The job the release needs: the last thing that decided a stage.
+	last := jobEvaluate
+
+	if len(spec.Stages) == 0 {
+		jobs = append(jobs, job{
+			id: jobStages, step: "Run the stages", flags: "--phase stages",
+			needs: []string{jobEvaluate}, gated: true, upload: true, push: w.Push,
+		})
+		last = jobStages
+	}
+
+	for _, stage := range spec.Stages {
+		if stage.Name == jobSelfReconcile || stage.Name == jobEvaluate || stage.Name == jobRelease {
+			return nil, fmt.Errorf("stage %q takes the name of a fixed job; %s, %s and %s are reserved",
+				stage.Name, jobSelfReconcile, jobEvaluate, jobRelease)
+		}
+
+		if spec.Jobs != JobsPerSubstage {
+			jobs = append(jobs, job{
+				id: stage.Name, step: "Run stage " + stage.Name,
+				flags: "--phase stages --stage " + stage.Name,
+				needs: []string{jobEvaluate, last}, gated: true, upload: true, push: w.Push,
+			})
+			last = stage.Name
+
+			continue
+		}
+
+		// One job per substage, running beside each other, and one
+		// promotion after them all - the shape the stage has in the core.
+		promote := stage.Name + "-promote"
+		subs := []string{jobEvaluate}
+
+		for _, sub := range stage.Substages {
+			id := stage.Name + "-" + sub
+			subs = append(subs, id)
+			jobs = append(jobs, job{
+				id: id, step: "Run " + stage.Name + " " + sub,
+				flags: "--phase stages --stage " + stage.Name + " --substage " + sub,
+				needs: []string{jobEvaluate, last}, gated: true, upload: true, push: w.Push,
+			})
+		}
+
+		jobs = append(jobs, job{
+			id: promote, step: "Promote stage " + stage.Name,
+			flags: "--phase stages --stage " + stage.Name + " --promote",
+			needs: subs, gated: true,
+		})
+		last = promote
+	}
+
+	jobs = append(jobs, job{
+		id: jobRelease, step: "Release", flags: "--phase " + jobRelease,
+		needs: []string{jobEvaluate, last}, gated: true,
+	})
+
+	seen := map[string]bool{}
+
+	for i, j := range jobs {
+		// The first stage needs the evaluation twice over: once for its
+		// word and once as the job before it. Once is enough.
+		jobs[i].needs = dedupe(j.needs)
+
+		if seen[j.id] {
+			return nil, fmt.Errorf("two jobs would be named %q; a stage and a substage of another stage collide", j.id)
+		}
+
+		seen[j.id] = true
+	}
+
+	return jobs, nil
+}
+
+func dedupe(in []string) []string {
+	out := make([]string, 0, len(in))
+	seen := map[string]bool{}
+
+	for _, s := range in {
+		if !seen[s] {
+			out = append(out, s)
+			seen[s] = true
+		}
+	}
+
+	return out
+}
+
+// writePhasedJobs renders one apply as jobs. The evaluate job's last line
+// is one word, skip or proceed, captured as its output; every job after it
+// runs only on proceed, so a run with nothing to release shows them skipped
+// rather than green. A self reconcile that superseded itself exits 0 with
+// no revision, and the evaluate job then runs on the superseded state and
+// skips on its own - the run that push fired carries the work.
+func writePhasedJobs(b *strings.Builder, spec Spec, w WorkflowSpec, jobs []job) {
 	b.WriteString("\njobs:\n")
 
-	for i, phase := range phases {
-		fmt.Fprintf(b, "  %s:\n", phase.name)
+	for _, j := range jobs {
+		fmt.Fprintf(b, "  %s:\n", j.id)
 
-		if i > 0 {
-			// Every job after the first needs intent: the two after it
-			// read its word, and a job can only read the outputs of a job
-			// it names.
-			needs := []string{phases[i-1].name}
-			if i > 2 {
-				needs = []string{"intent", phases[i-1].name}
-			}
-
-			fmt.Fprintf(b, "    needs: [%s]\n", strings.Join(needs, ", "))
+		if len(j.needs) > 0 {
+			fmt.Fprintf(b, "    needs: [%s]\n", strings.Join(j.needs, ", "))
 		}
 
-		if i > 1 {
-			b.WriteString("    if: needs.intent.outputs.outcome == 'proceed'\n")
+		if j.gated {
+			fmt.Fprintf(b, "    if: needs.%s.outputs.outcome == 'proceed'\n", jobEvaluate)
 		}
 
-		if phase.name == "intent" {
+		if j.id == jobEvaluate {
 			b.WriteString("    outputs:\n      outcome: ${{ steps.phase.outputs.outcome }}\n")
 		}
 
@@ -248,30 +367,32 @@ func writePhasedJobs(b *strings.Builder, spec Spec, w WorkflowSpec) {
 		writeWorkspaceCheckout(b, spec, w.Secret)
 		writeToolchain(b, spec)
 
-		if phase.name == "release" {
-			fmt.Fprintf(b, "\n      - name: Bring back what the stages built\n        uses: actions/download-artifact@v4\n        with:\n          name: built-${{ github.run_id }}\n          path: %s\n", artifactDir)
+		if j.id == jobRelease {
+			fmt.Fprintf(b, "\n      - name: Bring back what the stages built\n        uses: actions/download-artifact@v4\n        with:\n          pattern: built-${{ github.run_id }}-*\n          merge-multiple: true\n          path: %s\n", artifactDir)
 		}
 
-		fmt.Fprintf(b, "\n      - name: %s\n        id: phase\n", phase.step)
+		fmt.Fprintf(b, "\n      - name: %s\n        id: phase\n", j.step)
 		writeCommandEnv(b, w)
 		b.WriteString("        run: |\n")
 
-		if phase.name == "intent" {
+		command := strings.TrimSpace(w.Command) + " " + j.flags
+
+		if j.id == jobEvaluate {
 			// The last line of the report is the word. It is captured
 			// rather than parsed from the middle: a report can say
 			// anything before it, and the last line is the contract.
-			writeIndented(b, "out=$("+strings.TrimSpace(w.Command)+" --phase intent)\n"+
+			writeIndented(b, "out=$("+command+")\n"+
 				"printf '%s\\n' \"$out\"\n"+
-				"echo \"outcome=$(printf '%s\\n' \"$out\" | sed -n 's/^intent: //p' | tail -n 1)\" >> \"$GITHUB_OUTPUT\"")
+				"echo \"outcome=$(printf '%s\\n' \"$out\" | sed -n 's/^"+jobEvaluate+": //p' | tail -n 1)\" >> \"$GITHUB_OUTPUT\"")
 		} else {
-			writeIndented(b, strings.TrimSpace(w.Command)+" --phase "+phase.name)
+			writeIndented(b, command)
 		}
 
-		if phase.name == "stages" {
-			fmt.Fprintf(b, "\n      - name: Keep what the stages built for the release job\n        uses: actions/upload-artifact@v4\n        with:\n          name: built-${{ github.run_id }}\n          path: %s\n          if-no-files-found: ignore\n          retention-days: 7\n", artifactDir)
+		if j.upload {
+			fmt.Fprintf(b, "\n      - name: Keep what this job built for the release job\n        uses: actions/upload-artifact@v4\n        with:\n          name: built-${{ github.run_id }}-%s\n          path: %s\n          if-no-files-found: ignore\n          retention-days: 7\n", j.id, artifactDir)
 		}
 
-		if phase.name == "stages" && w.Push {
+		if j.push {
 			fmt.Fprintf(b, "\n      - name: Push what the pipeline wrote\n        run: |\n          cd %s\n          git push origin HEAD:%s\n",
 				spec.Dir, spec.Ref)
 		}

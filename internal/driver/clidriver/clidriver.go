@@ -148,7 +148,13 @@ func (d *Driver) load(verb string, args []string) (config.Pipeline, string, reco
 	force := fs.Bool("force", false,
 		"rewrite a resource that exists and cannot be compared, which today means one thing: a secret")
 	phase := fs.String("phase", "",
-		"run one part of the apply: reconcile, intent, stages or release. Empty runs the whole loop")
+		"run one part of the apply: self-reconcile, evaluate, stages or release. Empty runs the whole loop")
+	stage := fs.String("stage", "",
+		"with --phase stages: run this one stage, after the stage before it has a green record")
+	substage := fs.String("substage", "",
+		"with --stage: run this one substage and its gates, and decide nothing for the stage")
+	promote := fs.Bool("promote", false,
+		"with --stage: ask the stage's promotion over every substage's record, and mint")
 
 	if err := fs.Parse(args); err != nil {
 		return config.Pipeline{}, "", reconcilecontroller.Options{}, fmt.Errorf("parsing flags: %w", err)
@@ -159,7 +165,28 @@ func (d *Driver) load(verb string, args []string) (config.Pipeline, string, reco
 			"%w: --phase %q is not one of %s", ErrUsage, *phase, strings.Join(reconcilecontroller.Phases, ", "))
 	}
 
-	opts := reconcilecontroller.Options{DryRun: *dryRun, Force: *force, Phase: *phase}
+	// A narrowed stage run is a stages phase and nothing else: the other
+	// phases have no stage to name, and a substage or a promotion without
+	// a stage names nothing.
+	if *stage != "" && *phase != reconcilecontroller.PhaseStages {
+		return config.Pipeline{}, "", reconcilecontroller.Options{}, fmt.Errorf(
+			"%w: --stage needs --phase %s", ErrUsage, reconcilecontroller.PhaseStages)
+	}
+
+	if (*substage != "" || *promote) && *stage == "" {
+		return config.Pipeline{}, "", reconcilecontroller.Options{}, fmt.Errorf(
+			"%w: --substage and --promote need --stage", ErrUsage)
+	}
+
+	if *substage != "" && *promote {
+		return config.Pipeline{}, "", reconcilecontroller.Options{}, fmt.Errorf(
+			"%w: --substage runs one substage and --promote decides the stage; pick one", ErrUsage)
+	}
+
+	opts := reconcilecontroller.Options{
+		DryRun: *dryRun, Force: *force, Phase: *phase,
+		Stage: *stage, Substage: *substage, Promote: *promote,
+	}
 
 	p, err := Load(*path)
 	if err != nil {
@@ -276,16 +303,16 @@ func render(report reconcilecontroller.Report) string {
 	if report.Skipped {
 		fmt.Fprintf(&b, "skipped: %s\n", report.Reason)
 		writeActions(&b, report.Actions)
-		fmt.Fprintf(&b, "intent: %s\n", report.Intent)
+		fmt.Fprintf(&b, "%s: %s\n", reconcilecontroller.PhaseEvaluate, report.Evaluation)
 
 		return b.String()
 	}
 
-	// An intent phase that found work says so as its last line, the same
+	// An evaluate phase that found work says so as its last line, the same
 	// word a skip prints, so a rendered workflow reads one line either way.
-	if report.Intent != "" {
+	if report.Evaluation != "" {
 		writeActions(&b, report.Actions)
-		fmt.Fprintf(&b, "intent: %s\n", report.Intent)
+		fmt.Fprintf(&b, "%s: %s\n", reconcilecontroller.PhaseEvaluate, report.Evaluation)
 
 		return b.String()
 	}

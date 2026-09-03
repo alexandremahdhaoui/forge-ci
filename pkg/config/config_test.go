@@ -160,6 +160,10 @@ func TestVersioningRejectsWhatItCannotActOn(t *testing.T) {
 			},
 			"must be major, minor, patch, ignore or error",
 		},
+		"a blank self reconcile prefix": {
+			func(p *config.Pipeline) { p.Versioning.SelfReconcileCommitPrefix = "   " },
+			"selfReconcileCommitPrefix must not be blank",
+		},
 		"a vocabulary nothing reads": {
 			func(p *config.Pipeline) {
 				p.Versioning.Strategy = config.StrategyPatch
@@ -192,6 +196,7 @@ func TestEveryStrategyAndCapShapeIsAccepted(t *testing.T) {
 		{Cap: "v0.50"},
 		{TagPrefix: "forge"},
 		{TagPrefix: "forge-self"},
+		{SelfReconcileCommitPrefix: "🤖"},
 	} {
 		p := base()
 		p.Versioning = v

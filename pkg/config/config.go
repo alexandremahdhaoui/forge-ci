@@ -81,7 +81,28 @@ type Versioning struct {
 	// what nothing embeds: a README a binary carries is a code change, and a
 	// pattern that hides it hides a release.
 	IgnorePaths []string `json:"ignorePaths,omitempty"`
+
+	// SelfReconcileCommitPrefix is what the commit forge-ci writes when it
+	// reconciles its own CI resources starts with. Empty means "forge-ci:",
+	// so the commit reads "forge-ci: self reconcile". The release decision
+	// scores that commit as a patch unless a semantic list names the same
+	// prefix, in which case that list wins.
+	SelfReconcileCommitPrefix string `json:"selfReconcileCommitPrefix,omitempty"`
 }
+
+// CommitPrefix is the self reconcile commit prefix in force: the declared
+// one, or the default.
+func (v Versioning) CommitPrefix() string {
+	if strings.TrimSpace(v.SelfReconcileCommitPrefix) == "" {
+		return DefaultCommitPrefix
+	}
+
+	return v.SelfReconcileCommitPrefix
+}
+
+// DefaultCommitPrefix is the self reconcile commit prefix when the pipeline
+// names none.
+const DefaultCommitPrefix = "forge-ci:"
 
 // Semantic is the vocabulary, not a standard. A team writes the prefixes it
 // actually uses, emoji included, and nothing here assumes conventional
@@ -527,6 +548,10 @@ func (v Versioning) problems() []string {
 
 	// A vocabulary nothing reads is a vocabulary somebody wrote expecting it
 	// to work. Say so rather than ignoring it.
+	if v.SelfReconcileCommitPrefix != "" && strings.TrimSpace(v.SelfReconcileCommitPrefix) == "" {
+		out = append(out, "selfReconcileCommitPrefix must not be blank: every commit would read as a self reconcile")
+	}
+
 	if v.Strategy != StrategySemantic && !v.Semantic.empty() {
 		out = append(out, "semantic is set but strategy is not "+StrategySemantic)
 	}

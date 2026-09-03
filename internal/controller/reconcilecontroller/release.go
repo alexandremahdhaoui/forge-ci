@@ -41,19 +41,19 @@ const (
 	// under: once by revision id and once by tag.
 	KindRelease = "release"
 
-	// intentKeyPrefix is where a phased apply keeps the decision the intent
-	// phase reached, so the stages and release phases in other processes
-	// carry the same number.
-	intentKeyPrefix = "intent-"
+	// evaluationKeyPrefix is where a phased apply keeps the decision the
+	// evaluate phase reached, so the stages and release phases in other
+	// processes carry the same number.
+	evaluationKeyPrefix = "evaluate-"
 )
 
 // ErrUnclaimedSubject is a commit subject no vocabulary list claims, under
-// unmatched: error.
-var ErrUnclaimedSubject = errors.New("a commit subject follows no convention the vocabulary names")
+// unmatched: error. The run cannot say what to release, so it says that.
+var ErrUnclaimedSubject = errors.New("cannot decide what to release")
 
-// ErrNoIntent means a stages or release phase ran before the intent phase
-// recorded a decision for this revision.
-var ErrNoIntent = errors.New("no intent recorded for this revision; run the intent phase first")
+// ErrNoEvaluation means a stages or release phase ran before the evaluate
+// phase recorded a decision for this revision.
+var ErrNoEvaluation = errors.New("no evaluation recorded for this revision; run the evaluate phase first")
 
 // releaseRecord is what a revision was released as. Repos are the shas of
 // the release set; Trees are their tree hashes minus the ignored paths;
@@ -70,9 +70,9 @@ type releaseRecord struct {
 	ReleasedAt time.Time         `json:"releasedAt"`
 }
 
-// releaseDecision is what the intent phase decided for one revision. Skip
+// releaseDecision is what the evaluate phase decided for one revision. Skip
 // says the run ends here, converged, for Reason. Otherwise Version is the
-// number every stage stamps and the release tags.
+// number every stage stamps and the release tags, and Reason says why.
 type releaseDecision struct {
 	Version  string            `json:"version,omitempty"`
 	Tag      string            `json:"tag,omitempty"`
@@ -109,7 +109,7 @@ func (c *Controller) decideRelease(
 	} else if rec != nil {
 		return releaseDecision{
 			Version: rec.Version, Tag: rec.Tag, Skip: true, URL: rec.URL,
-			Reason: fmt.Sprintf("revision %s is already released as %s", revision.ID, rec.Version),
+			Reason: fmt.Sprintf("This revision was released as %s. Nothing to do.", rec.Version),
 			Repos:  rec.Repos, Trees: rec.Trees,
 		}, nil
 	}
@@ -130,17 +130,16 @@ func (c *Controller) decideRelease(
 
 	// 2. The subjects since the last tag. A range nothing in claims a
 	// release for ends here; a subject outside the vocabulary fails here.
-	level, err := c.bumpLevel(ctx, p, root, previous, names)
+	scan, err := c.bumpLevel(ctx, p, root, previous, names)
 	if err != nil {
 		return releaseDecision{}, err
 	}
 
 	previousTag := artifactcontroller.TagName(p.Versioning.TagPrefix, previous)
 
-	if previous != "" && level == artifactcontroller.LevelNone {
+	if previous != "" && scan.Level == artifactcontroller.LevelNone {
 		return releaseDecision{
-			Skip: true, Previous: previous,
-			Reason: fmt.Sprintf("nothing releasable since %s: every commit subject in the release set is ignored by the vocabulary", previousTag),
+			Skip: true, Previous: previous, Reason: nothingReleasable(previousTag, scan),
 		}, nil
 	}
 
@@ -160,7 +159,7 @@ func (c *Controller) decideRelease(
 		if prev != nil && len(prev.Repos) > 0 && sameMap(prev.Repos, set) {
 			return releaseDecision{
 				Version: prev.Version, Tag: prev.Tag, Previous: previous, Skip: true, URL: prev.URL,
-				Reason: fmt.Sprintf("the release set is unchanged since %s; nothing to release", previousTag),
+				Reason: fmt.Sprintf("Nothing to release. The release set holds the same code as %s.", previousTag),
 				Repos:  set, Trees: trees,
 			}, nil
 		}
@@ -168,13 +167,13 @@ func (c *Controller) decideRelease(
 		if prev != nil && len(prev.Trees) > 0 && len(p.Versioning.IgnorePaths) > 0 && sameMap(prev.Trees, trees) {
 			return releaseDecision{
 				Version: prev.Version, Tag: prev.Tag, Previous: previous, Skip: true, URL: prev.URL,
-				Reason: fmt.Sprintf("only ignored paths changed since %s; nothing to release", previousTag),
+				Reason: fmt.Sprintf("Nothing to release. The release set holds the same code as %s. Only ignored paths changed.", previousTag),
 				Repos:  set, Trees: trees,
 			}, nil
 		}
 	}
 
-	next, err := artifactcontroller.Bump(previous, level, p.Versioning.Cap)
+	next, err := artifactcontroller.Bump(previous, scan.Level, p.Versioning.Cap)
 	if err != nil {
 		return releaseDecision{}, fmt.Errorf("deciding the next version: %w", err)
 	}
@@ -182,7 +181,39 @@ func (c *Controller) decideRelease(
 	return releaseDecision{
 		Version: next, Tag: artifactcontroller.TagName(p.Versioning.TagPrefix, next),
 		Previous: previous, Repos: set, Trees: trees,
+		Reason: releasing(next, previous, scan),
 	}, nil
+}
+
+// nothingReleasable says, in plain words, why a range since the last tag
+// releases nothing: no commit at all, or only commits of a kind that never
+// releases, with one of them named so the reader can see the kind.
+func nothingReleasable(previousTag string, scan commitScan) string {
+	if scan.Count == 0 {
+		return fmt.Sprintf("Nothing to release. No repo in the release set has a new commit since %s.", previousTag)
+	}
+
+	if scan.Count == 1 {
+		return fmt.Sprintf("Nothing to release. 1 commit since %s, and it is a kind that never releases: %s.",
+			previousTag, scan.Ignored)
+	}
+
+	return fmt.Sprintf("Nothing to release. %d commits since %s, and each one is a kind that never releases. Example: %s.",
+		scan.Count, previousTag, scan.Ignored)
+}
+
+// releasing says what the next release is and, when a commit decided the
+// level, which one.
+func releasing(next, previous string, scan commitScan) string {
+	if previous == "" {
+		return fmt.Sprintf("Release %s: the first release.", next)
+	}
+
+	if scan.Semantic && scan.Deciding != "" {
+		return fmt.Sprintf("Release %s (%s): %s.", next, scan.Level, scan.Deciding)
+	}
+
+	return fmt.Sprintf("Release %s (%s).", next, scan.Level)
 }
 
 // releaseSet is the repos a release tags, at the shas the revision pinned:
@@ -287,29 +318,29 @@ func (c *Controller) writeRelease(ctx context.Context, index engineIndex, rec re
 	return c.putJSON(ctx, index, KindRelease, "by-tag/"+rec.Tag, rec)
 }
 
-func (c *Controller) readIntent(ctx context.Context, index engineIndex, revision string) (releaseDecision, error) {
+func (c *Controller) readEvaluation(ctx context.Context, index engineIndex, revision string) (releaseDecision, error) {
 	var out citypes.StateGetOutput
 
 	if err := c.callState(ctx, index, ToolGet, citypes.StateGetInput{
-		Kind: KindOwned, Key: intentKeyPrefix + revision, Spec: index.stateSpec,
+		Kind: KindOwned, Key: evaluationKeyPrefix + revision, Spec: index.stateSpec,
 	}, &out); err != nil {
 		return releaseDecision{}, err
 	}
 
 	if !out.Found {
-		return releaseDecision{}, fmt.Errorf("%w: %s", ErrNoIntent, revision)
+		return releaseDecision{}, fmt.Errorf("%w: %s", ErrNoEvaluation, revision)
 	}
 
 	var d releaseDecision
 	if err := json.Unmarshal([]byte(out.Payload), &d); err != nil {
-		return releaseDecision{}, fmt.Errorf("reading the intent for %s: %w", revision, err)
+		return releaseDecision{}, fmt.Errorf("reading the evaluation for %s: %w", revision, err)
 	}
 
 	return d, nil
 }
 
-func (c *Controller) writeIntent(ctx context.Context, index engineIndex, revision string, d releaseDecision) error {
-	return c.putJSON(ctx, index, KindOwned, intentKeyPrefix+revision, d)
+func (c *Controller) writeEvaluation(ctx context.Context, index engineIndex, revision string, d releaseDecision) error {
+	return c.putJSON(ctx, index, KindOwned, evaluationKeyPrefix+revision, d)
 }
 
 // putArtifacts hands what a run built to the engine that built it, and

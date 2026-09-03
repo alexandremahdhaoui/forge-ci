@@ -51,6 +51,7 @@ engines:
       secrets: <list>
       workflows: <list>
       phases: <bool>
+      jobs: <string>
       runner: <object>
 ```
 
