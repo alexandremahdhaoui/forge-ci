@@ -91,6 +91,15 @@ func (c *Controller) applyNamedStage(
 		}
 	}
 
+	// A promotion reads records and runs nothing, so it needs no files. Every
+	// other shape runs targets, and those targets read what the stages before
+	// this one built.
+	if !opts.Promote && at > 0 {
+		if err := c.carryForward(ctx, index, revision, root, p.Stages[:at]); err != nil {
+			return Report{}, fmt.Errorf("carrying what the stages before %q built: %w", stage.Name, err)
+		}
+	}
+
 	var (
 		stageReport StageReport
 		err         error

@@ -39,6 +39,9 @@ type fakeEngines struct {
 	peak  int
 
 	published []citypes.ArtifactInput
+	// restored is every artifact the compute engine was asked to bring
+	// back, by location, in the order it was asked.
+	restored []string
 	// index is what the fake release engine answers as the staged index,
 	// so a test can seed what the last release shipped.
 	index      string
@@ -166,6 +169,12 @@ func (f *fakeEngines) dispatch(_ context.Context, uri, tool string, in, out any)
 	case uri == uriCompute && tool == "get":
 		var input citypes.ArtifactGetInput
 		require.NoError(f.t, remarshal(in, &input))
+
+		f.mu.Lock()
+		for _, a := range input.Artifacts {
+			f.restored = append(f.restored, a.Location)
+		}
+		f.mu.Unlock()
 
 		return assign(out, citypes.ArtifactGetOutput{Artifacts: input.Artifacts})
 	case uri == uriRelease && tool == "publish":

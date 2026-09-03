@@ -213,9 +213,10 @@ const (
 )
 
 // artifactDir is where a compute engine's put keeps what a run built, under
-// the workspace root. Every stage job uploads it under a name of its own
-// and the release job downloads them all merged, so a release reads files
-// on a runner that never built them.
+// the factory root. Every job that runs targets uploads it under a name of
+// its own and downloads every name this run has written so far, so a stage
+// reads what the stages before it built and the release reads all of it, on
+// runners that built none of it.
 const artifactDir = ".forge-ci/artifacts"
 
 // job is one rendered job of a phased workflow: its id, the step name a
@@ -227,11 +228,15 @@ type job struct {
 	// the platform would otherwise show the identifier. Derived from the
 	// stage and substage names unless the pipeline declares a display name,
 	// which is then used verbatim.
-	name   string
-	step   string
-	flags  string
-	needs  []string
-	upload bool
+	name  string
+	step  string
+	flags string
+	needs []string
+	// download says the job brings back what the jobs before it built. Every
+	// job that runs targets needs it, because a stage reads what the stage
+	// before it made, and so does the release.
+	download bool
+	upload   bool
 	// gated says the job runs only on proceed: everything after evaluate.
 	gated bool
 	// push says the workflow's push step follows the command, for a
@@ -264,7 +269,7 @@ func phasedJobs(spec Spec, w WorkflowSpec) ([]job, error) {
 		jobs = append(jobs, job{
 			id: jobStages, name: "Run the stages", step: "Run the stages",
 			flags: "--phase stages",
-			needs: []string{jobEvaluate}, gated: true, upload: true, push: w.Push,
+			needs: []string{jobEvaluate}, gated: true, download: true, upload: true, push: w.Push,
 		})
 		last = jobStages
 	}
@@ -280,7 +285,7 @@ func phasedJobs(spec Spec, w WorkflowSpec) ([]job, error) {
 				id: stage.Name, name: stageTitle(stage),
 				step:  "Run stage " + stage.Name,
 				flags: "--phase stages --stage " + stage.Name,
-				needs: []string{jobEvaluate, last}, gated: true, upload: true, push: w.Push,
+				needs: []string{jobEvaluate, last}, gated: true, download: true, upload: true, push: w.Push,
 			})
 			last = stage.Name
 
@@ -299,7 +304,7 @@ func phasedJobs(spec Spec, w WorkflowSpec) ([]job, error) {
 				id: id, name: substageTitle(stage, sub),
 				step:  "Run " + stage.Name + " " + sub.Name,
 				flags: "--phase stages --stage " + stage.Name + " --substage " + sub.Name,
-				needs: []string{jobEvaluate, last}, gated: true, upload: true, push: w.Push,
+				needs: []string{jobEvaluate, last}, gated: true, download: true, upload: true, push: w.Push,
 			})
 		}
 
@@ -314,7 +319,7 @@ func phasedJobs(spec Spec, w WorkflowSpec) ([]job, error) {
 
 	jobs = append(jobs, job{
 		id: jobRelease, name: "Release", step: "Release", flags: "--phase " + jobRelease,
-		needs: []string{jobEvaluate, last}, gated: true,
+		needs: []string{jobEvaluate, last}, gated: true, download: true,
 	})
 
 	seen := map[string]bool{}
@@ -410,8 +415,13 @@ func writePhasedJobs(b *strings.Builder, spec Spec, w WorkflowSpec, jobs []job) 
 		writeWorkspaceCheckout(b, spec, w.Secret)
 		writeToolchain(b, spec)
 
-		if j.id == jobRelease {
-			fmt.Fprintf(b, "\n      - name: Bring back what the stages built\n        uses: actions/download-artifact@v4\n        with:\n          pattern: built-${{ github.run_id }}-*\n          merge-multiple: true\n          path: %s\n", artifactDir)
+		if j.download {
+			// Every name this run has written so far, merged. A job early in
+			// the run matches none of them and the step is a no-op; one after
+			// a build gets what the build made. Nothing here knows which jobs
+			// wrote which files, and it does not need to: the record says
+			// where each artifact belongs and get puts it there.
+			fmt.Fprintf(b, "\n      - name: Bring back what the jobs before this one built\n        uses: actions/download-artifact@v4\n        with:\n          pattern: built-${{ github.run_id }}-*\n          merge-multiple: true\n          path: %s\n", artifactDir)
 		}
 
 		fmt.Fprintf(b, "\n      - name: %s\n        id: phase\n", j.step)

@@ -97,7 +97,9 @@ func TestPhasesRenderOneJobPerStageGatedOnTheEvaluation(t *testing.T) {
 	assert.Equal(t, 6, strings.Count(ci, "image: ghcr.io/o/toolchain:v1"))
 	assert.Equal(t, 6, strings.Count(ci, "forge clone git@github.com:o/r.git ."))
 	assert.Equal(t, 3, strings.Count(ci, "uses: actions/upload-artifact@v4"))
-	assert.Equal(t, 1, strings.Count(ci, "uses: actions/download-artifact@v4"))
+	// Three stage jobs and the release: a stage reads what the stage before
+	// it built, not only the release.
+	assert.Equal(t, 4, strings.Count(ci, "uses: actions/download-artifact@v4"))
 	assert.NotContains(t, ci, "Install the toolchain")
 	assert.Equal(t, 1, strings.Count(ci, "jobs:\n"))
 }
@@ -132,6 +134,11 @@ func TestJobsPerSubstageRenderAPromotionJobPerStage(t *testing.T) {
 
 	// Four substage jobs upload; the three promotion jobs build nothing.
 	assert.Equal(t, 4, strings.Count(ci, "uses: actions/upload-artifact@v4"))
+	// The same four download, and so does the release. A promotion gate
+	// reads records and runs no target, so it needs no files.
+	assert.Equal(t, 5, strings.Count(ci, "uses: actions/download-artifact@v4"))
+	gate := ci[strings.Index(ci, "  publish-promotion-gate:"):strings.Index(ci, "  release:")]
+	assert.NotContains(t, gate, "download-artifact")
 	assert.Equal(t, 10, strings.Count(ci, "forge clone git@github.com:o/r.git ."))
 }
 
