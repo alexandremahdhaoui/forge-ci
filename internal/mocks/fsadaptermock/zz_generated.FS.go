@@ -377,8 +377,8 @@ func (_c *MockFS_Mode_Call) Run(run func(path string)) *MockFS_Mode_Call {
 	return _c
 }
 
-func (_c *MockFS_Mode_Call) Return(v os.FileMode, err error) *MockFS_Mode_Call {
-	_c.Call.Return(v, err)
+func (_c *MockFS_Mode_Call) Return(fileMode os.FileMode, err error) *MockFS_Mode_Call {
+	_c.Call.Return(fileMode, err)
 	return _c
 }
 
