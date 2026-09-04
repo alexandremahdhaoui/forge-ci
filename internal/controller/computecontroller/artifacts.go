@@ -97,6 +97,19 @@ func (c *Controller) Put(fs fsadapter.FS, in citypes.ArtifactPutInput) (citypes.
 // Get copies every artifact a put answered back to its path under the root
 // and verifies the bytes against the copy put kept. A location this engine
 // never answered is refused rather than guessed at.
+//
+// An artifact whose bytes are not here is SKIPPED rather than refused, and
+// that is the difference between a carry-forward and a contract. A substage
+// that already passed for this revision is read from its run record instead
+// of run again, so a later run of the same revision inherits the record -
+// which names files - without inheriting the files: the transport that
+// carried them belongs to the run that built them. Several runs of one
+// revision is the ordinary case, not a strange one, because every watched
+// repo that moves sends its own trigger.
+//
+// Nothing is hidden by skipping. What needs a file fails on that file: a
+// release digests every asset it plans to upload before it writes anything,
+// and says which one is missing.
 func (c *Controller) Get(fs fsadapter.FS, in citypes.ArtifactGetInput) (citypes.ArtifactGetOutput, error) {
 	out := citypes.ArtifactGetOutput{Artifacts: make([]forge.Artifact, 0, len(in.Artifacts))}
 
@@ -117,6 +130,19 @@ func (c *Controller) Get(fs fsadapter.FS, in citypes.ArtifactGetInput) (citypes.
 
 		src := filepath.Join(in.Root, ArtifactDir, revision, filepath.FromSlash(rel))
 		dst := filepath.Join(in.Root, filepath.FromSlash(rel))
+
+		// Nothing to carry: this run never put these bytes, because the
+		// substage that made them was read from its run record instead of
+		// run again. Say nothing and move on; whoever needs the file fails
+		// on the file.
+		here, err := fs.Exists(src)
+		if err != nil {
+			return citypes.ArtifactGetOutput{}, fmt.Errorf("getting %s: %w", rel, err)
+		}
+
+		if !here {
+			continue
+		}
 
 		dir, err := fs.IsDir(src)
 		if err != nil {
