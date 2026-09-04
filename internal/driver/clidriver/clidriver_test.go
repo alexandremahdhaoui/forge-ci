@@ -547,14 +547,14 @@ func TestASkippedApplyReportsTheReasonAndTheWord(t *testing.T) {
 			Revision:   citypes.Revision{ID: "abc123def456"},
 			Version:    "v0.5.6",
 			Skipped:    true,
-			Reason:     "This revision was released as v0.5.6. Nothing to do.",
+			Reason:     "Nothing to release. No repo in the release set has a new commit since v0.5.6.",
 			Evaluation: reconcilecontroller.EvaluationSkip,
 		}, nil).Once()
 
 	err := clidriver.New(&out, r).Run(context.Background(),
 		[]string{"apply", "--config", write(t, minimal), "--phase", "evaluate"})
 	require.NoError(t, err)
-	require.Contains(t, out.String(), "skipped: This revision was released as v0.5.6. Nothing to do.")
+	require.Contains(t, out.String(), "skipped: Nothing to release. No repo in the release set has a new commit since v0.5.6.")
 	require.True(t, strings.HasSuffix(out.String(), "evaluate: skip\n"), out.String())
 
 	out.Reset()

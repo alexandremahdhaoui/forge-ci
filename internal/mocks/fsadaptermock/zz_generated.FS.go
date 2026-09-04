@@ -5,6 +5,8 @@
 package fsadaptermock
 
 import (
+	"os"
+
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -33,6 +35,63 @@ type MockFS_Expecter struct {
 
 func (_m *MockFS) EXPECT() *MockFS_Expecter {
 	return &MockFS_Expecter{mock: &_m.Mock}
+}
+
+// Chmod provides a mock function for the type MockFS
+func (_mock *MockFS) Chmod(path string, mode os.FileMode) error {
+	ret := _mock.Called(path, mode)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Chmod")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(string, os.FileMode) error); ok {
+		r0 = returnFunc(path, mode)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockFS_Chmod_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Chmod'
+type MockFS_Chmod_Call struct {
+	*mock.Call
+}
+
+// Chmod is a helper method to define mock.On call
+//   - path string
+//   - mode os.FileMode
+func (_e *MockFS_Expecter) Chmod(path any, mode any) *MockFS_Chmod_Call {
+	return &MockFS_Chmod_Call{Call: _e.mock.On("Chmod", path, mode)}
+}
+
+func (_c *MockFS_Chmod_Call) Run(run func(path string, mode os.FileMode)) *MockFS_Chmod_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 string
+		if args[0] != nil {
+			arg0 = args[0].(string)
+		}
+		var arg1 os.FileMode
+		if args[1] != nil {
+			arg1 = args[1].(os.FileMode)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockFS_Chmod_Call) Return(err error) *MockFS_Chmod_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockFS_Chmod_Call) RunAndReturn(run func(path string, mode os.FileMode) error) *MockFS_Chmod_Call {
+	_c.Call.Return(run)
+	return _c
 }
 
 // Exists provides a mock function for the type MockFS
@@ -264,6 +323,66 @@ func (_c *MockFS_MkdirAll_Call) Return(err error) *MockFS_MkdirAll_Call {
 }
 
 func (_c *MockFS_MkdirAll_Call) RunAndReturn(run func(path string) error) *MockFS_MkdirAll_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// Mode provides a mock function for the type MockFS
+func (_mock *MockFS) Mode(path string) (os.FileMode, error) {
+	ret := _mock.Called(path)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Mode")
+	}
+
+	var r0 os.FileMode
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(string) (os.FileMode, error)); ok {
+		return returnFunc(path)
+	}
+	if returnFunc, ok := ret.Get(0).(func(string) os.FileMode); ok {
+		r0 = returnFunc(path)
+	} else {
+		r0 = ret.Get(0).(os.FileMode)
+	}
+	if returnFunc, ok := ret.Get(1).(func(string) error); ok {
+		r1 = returnFunc(path)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockFS_Mode_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Mode'
+type MockFS_Mode_Call struct {
+	*mock.Call
+}
+
+// Mode is a helper method to define mock.On call
+//   - path string
+func (_e *MockFS_Expecter) Mode(path any) *MockFS_Mode_Call {
+	return &MockFS_Mode_Call{Call: _e.mock.On("Mode", path)}
+}
+
+func (_c *MockFS_Mode_Call) Run(run func(path string)) *MockFS_Mode_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 string
+		if args[0] != nil {
+			arg0 = args[0].(string)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockFS_Mode_Call) Return(v os.FileMode, err error) *MockFS_Mode_Call {
+	_c.Call.Return(v, err)
+	return _c
+}
+
+func (_c *MockFS_Mode_Call) RunAndReturn(run func(path string) (os.FileMode, error)) *MockFS_Mode_Call {
 	_c.Call.Return(run)
 	return _c
 }

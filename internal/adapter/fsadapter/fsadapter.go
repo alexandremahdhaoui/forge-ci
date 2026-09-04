@@ -13,6 +13,12 @@ type FS interface {
 	ReadFile(path string) ([]byte, error)
 	WriteFile(path string, data []byte) error
 	MkdirAll(path string) error
+	// Mode answers a file's permission bits, and Chmod sets them. A copy
+	// that does not carry them writes a file nothing can execute: a built
+	// binary arrives, and the run that needs it dies on "permission
+	// denied" rather than on anything about the binary.
+	Mode(path string) (os.FileMode, error)
+	Chmod(path string, mode os.FileMode) error
 	Exists(path string) (bool, error)
 	// IsDir answers whether path is a directory. A missing path is false
 	// and not an error, like Exists.
@@ -54,6 +60,23 @@ func (OS) WriteFile(path string, data []byte) error {
 func (OS) MkdirAll(path string) error {
 	if err := os.MkdirAll(path, 0o750); err != nil {
 		return fmt.Errorf("creating %s: %w", path, err)
+	}
+
+	return nil
+}
+
+func (OS) Mode(path string) (os.FileMode, error) {
+	info, err := os.Stat(filepath.Clean(path))
+	if err != nil {
+		return 0, fmt.Errorf("reading the mode of %s: %w", path, err)
+	}
+
+	return info.Mode().Perm(), nil
+}
+
+func (OS) Chmod(path string, mode os.FileMode) error {
+	if err := os.Chmod(filepath.Clean(path), mode); err != nil {
+		return fmt.Errorf("setting the mode of %s: %w", path, err)
 	}
 
 	return nil
