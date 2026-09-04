@@ -7,7 +7,7 @@ openapi:
 generate:
   packageName: main
   docsBaseURL: https://raw.githubusercontent.com/alexandremahdhaoui/forge-ci/refs/heads/main
-surface:
+layout:
   tools:
     - name: reconcile
       description: Report what would be made. Nothing is created.

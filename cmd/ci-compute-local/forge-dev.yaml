@@ -7,7 +7,7 @@ openapi:
 generate:
   packageName: main
   docsBaseURL: https://raw.githubusercontent.com/alexandremahdhaoui/forge-ci/refs/heads/main
-surface:
+layout:
   tools:
     - name: declare
       description: Report the resources this compute needs.

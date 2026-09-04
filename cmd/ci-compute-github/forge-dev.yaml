@@ -10,7 +10,7 @@ generate:
 runtime:
   env:
     - GITHUB_TOKEN
-surface:
+layout:
   tools:
     - name: declare
       description: Report every GitHub resource the spec implies.

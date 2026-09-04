@@ -7,7 +7,7 @@ openapi:
 generate:
   packageName: main
   docsBaseURL: https://raw.githubusercontent.com/alexandremahdhaoui/forge-ci/refs/heads/main
-surface:
+layout:
   tools:
     - name: reconcile
       description: Make the declared resources exist, and record what was made.

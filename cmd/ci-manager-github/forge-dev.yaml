@@ -10,7 +10,7 @@ generate:
 runtime:
   env:
     - GITHUB_TOKEN
-surface:
+layout:
   tools:
     - name: reconcile
       description: Make the declared GitHub resources exist, and record what was made.
