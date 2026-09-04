@@ -53,9 +53,15 @@ func releasingRepo(t *testing.T, fake *releaseFake, versioning string) (root, re
 
 // The rerun that killed golden run 19: a checkout WITH tags, so the tag
 // line answers v0.1.0 and a derivation would say v0.1.1. The release record
-// answers first, the run is skipped, and the remote still carries exactly
-// one tag.
-func TestARerunOfAReleasedRevisionReusesItsVersion(t *testing.T) {
+// answers first, so the rerun keeps v0.1.0.
+//
+// It PROCEEDS under that version rather than skipping, and converges: the
+// remote still carries exactly one tag, there is still one release, and
+// nothing was drafted. Skipping here used to make a partial release
+// permanent - a pipeline that published its tags and then failed its image
+// push could never finish, because every later run read the record and
+// stopped. Converging is what lets the second run complete the first.
+func TestARerunOfAReleasedRevisionReusesItsVersionAndConverges(t *testing.T) {
 	fake := newReleaseFake(t)
 	root, repo, origin := releasingRepo(t, fake, "")
 
@@ -65,12 +71,12 @@ func TestARerunOfAReleasedRevisionReusesItsVersion(t *testing.T) {
 	require.Contains(t, mustRun(t, repo, "git", "tag"), "v0.1.0", "this clone carries the tag, or the test proves nothing")
 
 	out := mustRun(t, root, "forge-ci", "apply", "--config", "forge-ci.yaml", "--root", ".")
-	require.Contains(t, out, "skipped: This revision was released as v0.1.0. Nothing to do.")
-	require.Contains(t, out, "evaluate: skip")
+	require.NotContains(t, out, "skipped:", "a rerun finishes what the last run started")
+	require.NotContains(t, out, "v0.1.1", "the version is read from the record, never derived again")
 
 	require.Equal(t, []string{"v0.1.0"}, strings.Fields(mustRun(t, origin, "git", "tag")))
 	require.Equal(t, "v0.1.0", fake.releases["owner/demo-repo"])
-	require.Empty(t, fake.drafts, "nothing was even drafted")
+	require.Empty(t, fake.drafts, "the existing release was adopted, not drafted again")
 }
 
 // A commit the vocabulary ignores is a new revision with nothing to

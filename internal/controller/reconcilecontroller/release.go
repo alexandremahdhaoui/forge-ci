@@ -109,14 +109,30 @@ func (c *Controller) decideRelease(
 		return releaseDecision{}, nil
 	}
 
-	// 1. This exact revision was released. Its number is its number.
+	// 1. This exact revision was released. Its number is its number, and the
+	// run proceeds under it rather than stopping.
+	//
+	// It used to skip, which quietly made a partial release permanent. A
+	// pipeline publishes in more than one place - tags and a release, an
+	// image, a catalog entry - and the record is written by the first
+	// publish that succeeds. When a later one failed, every following run
+	// read that record, said "nothing to do", and the image was never
+	// pushed. forge-self sat in exactly that state at v0.45.51.
+	//
+	// Proceeding is safe because every publish converges: a tag already at
+	// the intended sha is a no-op, an existing release is adopted rather
+	// than recreated, and a substage that passed for this revision is read
+	// from its run record instead of run again. So a rerun finishes what
+	// the last one started and does nothing twice.
 	if rec, err := c.readRelease(ctx, index, revision.ID); err != nil {
 		return releaseDecision{}, err
 	} else if rec != nil {
 		return releaseDecision{
-			Version: rec.Version, Tag: rec.Tag, Skip: true, URL: rec.URL,
-			Reason: fmt.Sprintf("This revision was released as %s. Nothing to do.", rec.Version),
-			Repos:  rec.Repos, Trees: rec.Trees,
+			Version: rec.Version, Tag: rec.Tag, URL: rec.URL,
+			Reason: fmt.Sprintf(
+				"Release %s. This revision was released under it already, so every publish converges.",
+				rec.Version),
+			Repos: rec.Repos, Trees: rec.Trees,
 		}, nil
 	}
 

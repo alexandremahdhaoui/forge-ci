@@ -17,12 +17,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// A released revision is released once. golden run 19 reran a revision
-// already out as v0.5.6, derived v0.5.7 from the tag line, and tagged six
-// members before meeting a file the fresh runner never built. The record
-// is what stops the second derivation: the same revision answers the same
-// number and nothing is published again.
-func TestARerunOfAReleasedRevisionReusesItsVersion(t *testing.T) {
+// A released revision is released under one number. golden run 19 reran a
+// revision already out as v0.5.6, derived v0.5.7 from the tag line, and
+// tagged six members before meeting a file the fresh runner never built.
+// The record is what stops the second derivation: the same revision answers
+// the same number.
+//
+// The rerun PROCEEDS under it. It must not skip: a pipeline publishes in
+// more than one place and the record is written by the first publish that
+// succeeds, so a run that tagged and then failed its image push would be
+// frozen half done, with every later run reading the record and stopping.
+// forge-self sat in exactly that state at v0.45.51. Proceeding is safe
+// because each publish converges.
+func TestARerunOfAReleasedRevisionReusesItsVersionAndProceeds(t *testing.T) {
 	f := newFakeEngines(t)
 	c := reconcilecontroller.New(f.caller(), gitAt(t, "abc123", "v0.1.9"), clock())
 	p := releasingPipeline()
@@ -37,12 +44,13 @@ func TestARerunOfAReleasedRevisionReusesItsVersion(t *testing.T) {
 	second, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc123", "v0.1.10"), clock()).
 		Apply(context.Background(), p, "/work", plain)
 	require.NoError(t, err)
-	require.True(t, second.Skipped)
-	require.Equal(t, reconcilecontroller.EvaluationSkip, second.Evaluation)
+	require.False(t, second.Skipped, "a rerun finishes what the last run started")
 	require.Equal(t, "v0.1.10", second.Version, "the recorded number, never a bump")
-	require.Contains(t, second.Reason, "was released as v0.1.10")
-	require.Empty(t, second.Stages, "nothing runs for a revision that was already released")
-	require.Len(t, f.published, 1, "the artifact engine is never called again")
+	// The publish that already passed is read from its run record rather
+	// than run again, so nothing is published twice. A publish that FAILED
+	// has no record, so the rerun is what finally runs it - which is the
+	// whole point of proceeding instead of skipping.
+	require.Len(t, f.published, 1, "a publish that passed for this revision is not repeated")
 }
 
 // A push to a repo outside the release set makes a new revision and
@@ -249,6 +257,6 @@ func TestIdenticalBytesConvergeOnThePreviousRelease(t *testing.T) {
 	third, err := reconcilecontroller.New(f.caller(), gitAt(t, "def456", "v0.1.10"), clock()).
 		Apply(context.Background(), p, root, plain)
 	require.NoError(t, err)
-	require.True(t, third.Skipped)
+	require.False(t, third.Skipped, "it proceeds under the recorded number and converges")
 	require.Equal(t, "v0.1.10", third.Version)
 }
