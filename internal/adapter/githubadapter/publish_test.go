@@ -28,7 +28,7 @@ func TestPublishReleasePatchesTheDraftById(t *testing.T) {
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&in))
 		assert.Equal(t, false, in["draft"])
 
-		fmt.Fprint(w, `{"id":42,"draft":false,"html_url":"http://releases/42"}`)
+		_, _ = fmt.Fprint(w, `{"id":42,"draft":false,"html_url":"http://releases/42"}`)
 	}))
 	defer srv.Close()
 

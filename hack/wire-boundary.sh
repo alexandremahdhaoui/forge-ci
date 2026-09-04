@@ -139,6 +139,22 @@ for dir in cmd/ci-compute-*; do
         echo "  A missing field here is not a compile error, it is one stages job at runtime." >&2
         fail=1
     fi
+
+    # A substage's needs ride the same declare call. Dropped, every
+    # substage job renders without the edges the pipeline declared and two
+    # writes that must not race run at the same time - which is the exact
+    # defect needs: exists to remove.
+    grep -q "citypes.DeclaredSubstage{" "$handlers" || continue
+
+    for field in Needs; do
+        grep -qE "	$field \[\]string" "$spec" || continue
+
+        if ! grep -qE "$field: *sub\.$field" "$handlers"; then
+            echo "$handlers drops DeclaredSubstage.$field: the wire carries it and the mapping does not copy it." >&2
+            echo "  A missing field here is not a compile error, it is a substage that runs before what it needs." >&2
+            fail=1
+        fi
+    done
 done
 
 # The artifact engines answer outward too. Index is the staged distribution

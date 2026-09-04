@@ -160,8 +160,6 @@ func (d *Driver) load(verb string, args []string) (config.Pipeline, string, reco
 		"with --phase stages: run this one stage, after the stage before it has a green record")
 	substage := fs.String("substage", "",
 		"with --stage: run this one substage and its gates, and decide nothing for the stage")
-	promote := fs.Bool("promote", false,
-		"with --stage: ask the stage's promotion over every substage's record")
 	revision := fs.String("revision", "",
 		"the revision this run is bound to, as the evaluate phase reported it")
 
@@ -184,21 +182,16 @@ func (d *Driver) load(verb string, args []string) (config.Pipeline, string, reco
 	}
 
 	// A narrowed stage run is a stages phase and nothing else: the other
-	// phases have no stage to name, and a substage or a promotion without
-	// a stage names nothing.
+	// phases have no stage to name, and a substage without a stage names
+	// nothing.
 	if *stage != "" && *phase != reconcilecontroller.PhaseStages {
 		return config.Pipeline{}, "", reconcilecontroller.Options{}, fmt.Errorf(
 			"%w: --stage needs --phase %s", ErrUsage, reconcilecontroller.PhaseStages)
 	}
 
-	if (*substage != "" || *promote) && *stage == "" {
+	if *substage != "" && *stage == "" {
 		return config.Pipeline{}, "", reconcilecontroller.Options{}, fmt.Errorf(
-			"%w: --substage and --promote need --stage", ErrUsage)
-	}
-
-	if *substage != "" && *promote {
-		return config.Pipeline{}, "", reconcilecontroller.Options{}, fmt.Errorf(
-			"%w: --substage runs one substage and --promote decides the stage; pick one", ErrUsage)
+			"%w: --substage needs --stage", ErrUsage)
 	}
 
 	// A run proves one set of commits, and only the phases after the
@@ -212,7 +205,7 @@ func (d *Driver) load(verb string, args []string) (config.Pipeline, string, reco
 
 	opts := reconcilecontroller.Options{
 		DryRun: *dryRun, Force: *force, Phase: *phase,
-		Stage: *stage, Substage: *substage, Promote: *promote,
+		Stage: *stage, Substage: *substage,
 		Revision: *revision,
 	}
 

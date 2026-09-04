@@ -55,9 +55,16 @@ lets a compute engine render one job per stage, or one per substage.
 Whether the stage in front advanced is the promotion's answer, and every
 stage job asks it: a state read of that stage's substage records and one
 engine call. Nothing between two stages has to run for the second to know
-where it stands. `--stage <name> --promote` asks the same question and
-records what it answered, for a compute engine that wants an explicit
-gate; nothing reads that record back to decide anything.
+where it stands, and nothing is recorded for a stage as a whole.
+
+Substages of one stage run at the same time unless one says otherwise.
+`needs:` names the substages of the same stage that must advance before
+this one runs; the stage runs its substages in the waves that graph gives
+(`citypes.Waves`, the same walk that orders repos), a substage whose need
+did not advance is not run, and the stage does not advance. That is the one
+ordering a stage carries. Before it, two writes that must not race had to
+live in stages of their own and the stage list stopped describing the
+pipeline.
 
 A run proves one set of commits, and only its first phase resolves them.
 The `evaluate` phase records the revision beside its release decision and

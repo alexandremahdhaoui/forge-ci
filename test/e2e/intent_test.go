@@ -174,9 +174,9 @@ func TestThePhasesReachTheSameReleaseAsOneApply(t *testing.T) {
 }
 
 // The stages phase cut as a compute engine renders it with one job per
-// substage: the substage runs alone, the promotion reads its record, and the
-// stage that publishes reads the file the substage job kept. Run out of
-// order, a job refuses by name.
+// substage: the substage runs alone, the next stage's job reads its record
+// to learn the stage advanced, and the stage that publishes reads the file
+// the substage job kept. Run out of order, a job refuses by name.
 func TestTheStageJobsReachTheSameReleaseAsOneApply(t *testing.T) {
 	fake := newReleaseFake(t)
 	root, repo, origin := releasingRepo(t, fake, "")
@@ -194,17 +194,14 @@ func TestTheStageJobsReachTheSameReleaseAsOneApply(t *testing.T) {
 	_, err = apply("--phase", "evaluate")
 	require.NoError(t, err)
 
-	out, err := apply("--phase", "stages", "--stage", "build", "--promote")
-	require.Error(t, err, "the promotion over a stage nothing ran is refused")
+	out, err := apply("--phase", "stages", "--stage", "release", "--substage", "publish")
+	require.Error(t, err, "a job of the stage after one nothing ran is refused")
 	require.Contains(t, out, `substage "default"`)
+	require.Equal(t, "v0.1.0", fake.releases["owner/demo-repo"], "a refused job releases nothing")
 
 	out, err = apply("--phase", "stages", "--stage", "build", "--substage", "default")
 	require.NoError(t, err, out)
 	require.Contains(t, out, "stage build")
-
-	out, err = apply("--phase", "stages", "--stage", "build", "--promote")
-	require.NoError(t, err, out)
-	require.Equal(t, "v0.1.0", fake.releases["owner/demo-repo"], "the promotion releases nothing")
 
 	require.NoError(t, os.Remove(filepath.Join(repo, "build", "dist", "demo-tool_linux_amd64")))
 

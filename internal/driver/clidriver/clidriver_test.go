@@ -597,15 +597,13 @@ func TestARetiredPhaseNameStillReachesItsPhase(t *testing.T) {
 }
 
 // A stage job is a stages phase narrowed by name, and the flags that narrow
-// it need each other in one order: --stage needs the stages phase, the two
-// after it need --stage, and a substage and a promotion are two jobs.
+// it need each other in one order: --stage needs the stages phase, and
+// --substage needs --stage.
 func TestTheStageFlagsNeedEachOther(t *testing.T) {
 	for name, args := range map[string][]string{
-		"stage without the phase":      {"--stage", "build"},
-		"stage on another phase":       {"--phase", "release", "--stage", "build"},
-		"substage without a stage":     {"--phase", "stages", "--substage", "default"},
-		"promote without a stage":      {"--phase", "stages", "--promote"},
-		"substage and promote at once": {"--phase", "stages", "--stage", "build", "--substage", "default", "--promote"},
+		"stage without the phase":  {"--stage", "build"},
+		"stage on another phase":   {"--phase", "release", "--stage", "build"},
+		"substage without a stage": {"--phase", "stages", "--substage", "default"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			var out bytes.Buffer
@@ -625,14 +623,6 @@ func TestTheStageFlagsNeedEachOther(t *testing.T) {
 
 	err := clidriver.New(&out, r).Run(context.Background(),
 		[]string{"apply", "--config", write(t, minimal), "--phase", "stages", "--stage", "build", "--substage", "default"})
-	require.NoError(t, err)
-
-	r.EXPECT().Apply(mock.Anything, mock.Anything, mock.Anything, reconcilecontroller.Options{
-		Phase: "stages", Stage: "build", Promote: true,
-	}).Return(reconcilecontroller.Report{Revision: citypes.Revision{ID: "abc"}}, nil).Once()
-
-	err = clidriver.New(&out, r).Run(context.Background(),
-		[]string{"apply", "--config", write(t, minimal), "--phase", "stages", "--stage", "build", "--promote"})
 	require.NoError(t, err)
 }
 

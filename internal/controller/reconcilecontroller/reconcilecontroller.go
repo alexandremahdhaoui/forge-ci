@@ -154,12 +154,11 @@ type Options struct {
 
 	// Stage narrows the stages phase to one stage by name, so a compute
 	// engine can render one job per stage. It refuses to run before the
-	// stage in front of it has a green record. Substage narrows it further
-	// to one substage and its gates, for one job per substage; Promote then
-	// asks the stage's promotion over every substage's record.
+	// stage in front of it advanced, which it asks that stage's promotion
+	// over the run records its substages left. Substage narrows it further
+	// to one substage and its gates, for one job per substage.
 	Stage    string
 	Substage string
-	Promote  bool
 
 	// Revision is the revision this phase is bound to: the one the evaluate
 	// phase decided for, handed on by whatever rendered the jobs. A run has
@@ -775,27 +774,68 @@ func (c *Controller) applyStage(
 ) (StageReport, error) {
 	report := StageReport{Name: stage.Name, Runs: make([]citypes.Run, len(stage.Substages))}
 
+	at := make(map[string]int, len(stage.Substages))
+	for i, sub := range stage.Substages {
+		at[sub.Name] = i
+	}
+
+	waves, err := substageWaves(stage)
+	if err != nil {
+		return StageReport{}, err
+	}
+
 	failures := make([]error, len(stage.Substages))
 	reused := make([]bool, len(stage.Substages))
 	published := make([]citypes.ArtifactOutput, len(stage.Substages))
+	advanced := make(map[string]bool, len(stage.Substages))
 
-	var wg sync.WaitGroup
+	// Everything in a wave runs at once; a wave starts once the one before
+	// it is done. A substage whose need did not advance is not run, and a
+	// failed record stands in its place, because a promotion that never
+	// saw it would advance a stage half of which never happened.
+	for _, wave := range waves {
+		var wg sync.WaitGroup
 
-	for i, sub := range stage.Substages {
-		wg.Add(1)
+		for _, name := range wave {
+			i := at[name]
+			sub := stage.Substages[i]
 
-		go func() {
-			defer wg.Done()
+			if held := heldBy(sub, advanced); held != "" {
+				report.Runs[i] = citypes.Run{
+					Revision: revision.ID, Stage: stage.Name, Substage: sub.Name, Engine: sub.Engine,
+					Status: citypes.StatusFailed, StartedAt: c.now(),
+					Message: fmt.Sprintf("not run: needs %q, which did not pass", held),
+				}
 
-			run, wasReused, out, err := c.applySubstage(ctx, p, index, stage, sub, revision, decision, root, carried)
-			report.Runs[i] = run
-			reused[i] = wasReused
-			published[i] = out
-			failures[i] = err
-		}()
+				continue
+			}
+
+			wg.Add(1)
+
+			go func() {
+				defer wg.Done()
+
+				run, wasReused, out, err := c.applySubstage(ctx, p, index, stage, sub, revision, decision, root, carried)
+				report.Runs[i] = run
+				reused[i] = wasReused
+				published[i] = out
+				failures[i] = err
+			}()
+		}
+
+		wg.Wait()
+
+		for _, err := range failures {
+			if err != nil {
+				return StageReport{}, err
+			}
+		}
+
+		for _, name := range wave {
+			run := report.Runs[at[name]]
+			advanced[name] = run.Status == citypes.StatusPassed && allGatesPassed(run)
+		}
 	}
-
-	wg.Wait()
 
 	for _, r := range reused {
 		if r {
@@ -809,12 +849,6 @@ func (c *Controller) applyStage(
 		}
 	}
 
-	for _, err := range failures {
-		if err != nil {
-			return StageReport{}, err
-		}
-	}
-
 	advance, reason, err := c.promote(ctx, index, stage, report.Runs)
 	if err != nil {
 		return StageReport{}, err
@@ -824,6 +858,39 @@ func (c *Controller) applyStage(
 	report.Reason = reason
 
 	return report, nil
+}
+
+// substageWaves orders a stage's substages by their needs. With no need
+// declared anywhere it is one wave of everything, which is what a stage
+// always was: citypes.Waves answers one wave PER name for an edgeless
+// graph, because a repo list ran one at a time before dependencies
+// existed, and a stage never did.
+func substageWaves(stage config.Stage) ([][]string, error) {
+	names := stage.SubstageNames()
+	needs := stage.SubstageNeeds()
+
+	if len(needs) == 0 {
+		return [][]string{names}, nil
+	}
+
+	waves, err := citypes.Waves(names, needs)
+	if err != nil {
+		return nil, fmt.Errorf("stage %q: %w", stage.Name, err)
+	}
+
+	return waves, nil
+}
+
+// heldBy names the first need of this substage that did not advance, or
+// nothing when every need did.
+func heldBy(sub config.Substage, advanced map[string]bool) string {
+	for _, n := range sub.Needs {
+		if !advanced[n] {
+			return n
+		}
+	}
+
+	return ""
 }
 
 func (c *Controller) applySubstage(
@@ -845,7 +912,19 @@ func (c *Controller) applySubstage(
 	}
 
 	if existing != nil && existing.Status == citypes.StatusPassed && allGatesPassed(*existing) {
-		return *existing, true, citypes.ArtifactOutput{}, nil
+		// A passed record is reused only when what it built is at hand.
+		// On the machine that ran it, it is. On a fresh runner it never is:
+		// a run of the same revision inherits the record without the files,
+		// and the stage after it fails on a file nothing carried. Golden run
+		// 50 died there, on a 0-second build and an empty tarball.
+		atHand, err := c.artifactsAtHand(ctx, index, sub, revision.ID, root, existing)
+		if err != nil {
+			return citypes.Run{}, false, citypes.ArtifactOutput{}, err
+		}
+
+		if atHand {
+			return *existing, true, citypes.ArtifactOutput{}, nil
+		}
 	}
 
 	// A substage either runs targets or publishes what the stages before it

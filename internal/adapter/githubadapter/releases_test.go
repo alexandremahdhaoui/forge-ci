@@ -48,7 +48,7 @@ func TestItUploadsToTheHostTheReleaseNames(t *testing.T) {
 		assert.Equal(t, true, in["generate_release_notes"])
 		assert.Equal(t, true, in["draft"], "the first write of a release is a draft nobody can consume")
 
-		fmt.Fprintf(w, `{"html_url":"http://releases/1","upload_url":"%s/assets{?name,label}"}`, uploads.URL)
+		_, _ = fmt.Fprintf(w, `{"html_url":"http://releases/1","upload_url":"%s/assets{?name,label}"}`, uploads.URL)
 	}))
 	defer api.Close()
 

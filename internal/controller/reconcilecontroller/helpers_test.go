@@ -11,6 +11,7 @@ import (
 	"github.com/alexandremahdhaoui/forge-ci/internal/mocks/engineadaptermock"
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 	"github.com/alexandremahdhaoui/forge-ci/pkg/config"
+	"github.com/alexandremahdhaoui/forge/pkg/forge"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
@@ -45,6 +46,9 @@ type fakeEngines struct {
 	// restored is every artifact the compute engine was asked to bring
 	// back, by location, in the order it was asked.
 	restored []string
+	// missing is what the compute engine cannot bring back, by location -
+	// a fresh runner that never put them, seen from the core's side.
+	missing map[string]bool
 	// index is what the fake release engine answers as the staged index,
 	// so a test can seed what the last release shipped.
 	index      string
@@ -174,13 +178,21 @@ func (f *fakeEngines) dispatch(_ context.Context, uri, tool string, in, out any)
 		var input citypes.ArtifactGetInput
 		require.NoError(f.t, remarshal(in, &input))
 
+		// What the engine cannot bring back is left out of the answer, the
+		// way the real engine skips what this run never put.
+		found := make([]forge.Artifact, 0, len(input.Artifacts))
+
 		f.mu.Lock()
 		for _, a := range input.Artifacts {
 			f.restored = append(f.restored, a.Location)
+
+			if !f.missing[a.Location] {
+				found = append(found, a)
+			}
 		}
 		f.mu.Unlock()
 
-		return assign(out, citypes.ArtifactGetOutput{Artifacts: input.Artifacts})
+		return assign(out, citypes.ArtifactGetOutput{Artifacts: found})
 	case uri == uriRelease && tool == "publish":
 		var input citypes.ArtifactInput
 		require.NoError(f.t, remarshal(in, &input))

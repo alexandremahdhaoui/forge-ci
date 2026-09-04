@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 	"github.com/alexandremahdhaoui/forge-ci/pkg/config"
@@ -14,17 +13,12 @@ import (
 // One stage as a job of its own.
 //
 // A compute engine may render the stages phase as one job per stage, or one
-// per substage with one promotion job per stage. Each of those jobs is an
-// apply narrowed by --stage, --substage and --promote, and each carries on
-// from the records the jobs before it wrote: a substage job reads nothing
-// but the evaluation, a promotion job reads every substage's run record, and
-// any stage job reads the record the stage before it left. A job asked to
-// run before the record it needs exists refuses, by name, rather than
-// running out of order.
-
-// stageKeyPrefix is where a stage job keeps what its promotion decided, so
-// the stage after it in another process can ask.
-const stageKeyPrefix = "stage-"
+// per substage. Each of those jobs is an apply narrowed by --stage and
+// --substage, and each carries on from the run records the jobs before it
+// wrote: a substage job reads nothing but the evaluation, and any stage job
+// asks the promotion of the stage in front over the records that stage's
+// substages left. A job asked to run before those records exist refuses, by
+// name, rather than running out of order.
 
 var (
 	// ErrUnknownStage is a stage or substage name the pipeline does not
@@ -40,18 +34,8 @@ var (
 	ErrStageIncomplete = errors.New("a substage of this stage has no run record; run it first")
 )
 
-// stageRecord is what a stage job decided: whether the stage advanced, and
-// why, in the words the promotion used.
-type stageRecord struct {
-	Revision   string    `json:"revision"`
-	Stage      string    `json:"stage"`
-	Advance    bool      `json:"advance"`
-	Reason     string    `json:"reason"`
-	PromotedAt time.Time `json:"promotedAt"`
-}
-
-// applyNamedStage runs the one stage, substage or promotion the options
-// name, under the decision the evaluate phase recorded.
+// applyNamedStage runs the one stage or substage the options name, under
+// the decision the evaluate phase recorded.
 func (c *Controller) applyNamedStage(
 	ctx context.Context,
 	p config.Pipeline,
@@ -83,9 +67,7 @@ func (c *Controller) applyNamedStage(
 	//
 	// Looking it up needed a whole job of its own to write it - a checkout,
 	// a container, a toolchain, minutes of it - to decide something the job
-	// that needs the answer can decide for itself in seconds. The explicit
-	// gate is still there for a compute engine that wants one: --promote
-	// asks the same question and records what it answered.
+	// that needs the answer can decide for itself in seconds.
 	if at > 0 {
 		before := p.Stages[at-1]
 
@@ -109,15 +91,14 @@ func (c *Controller) applyNamedStage(
 		}
 	}
 
-	// A promotion reads records and runs nothing, so it needs no files. Every
-	// other shape runs targets or publishes, and both read what the stages
+	// A stage job runs targets or publishes, and both read what the stages
 	// before this one built.
 	var (
 		carried []forge.Artifact
 		err     error
 	)
 
-	if !opts.Promote && at > 0 {
+	if at > 0 {
 		carried, err = c.carryForward(ctx, index, revision, root, p.Stages[:at])
 		if err != nil {
 			return Report{}, fmt.Errorf("carrying what the stages before %q built: %w", stage.Name, err)
@@ -127,8 +108,6 @@ func (c *Controller) applyNamedStage(
 	var stageReport StageReport
 
 	switch {
-	case opts.Promote:
-		stageReport, err = c.promoteRecorded(ctx, index, stage, revision)
 	case opts.Substage != "":
 		stageReport, err = c.applyOneSubstage(ctx, p, index, stage, opts.Substage, revision, decision, root, carried)
 	default:
@@ -142,19 +121,9 @@ func (c *Controller) applyNamedStage(
 	report.Stages = []StageReport{stageReport}
 	report.Released = append(report.Released, stageReport.Released...)
 
-	// A substage job decides nothing for the stage; the promotion job, or
-	// the whole-stage job, does, and records it for the stage after it.
-	if opts.Substage != "" {
-		return report, nil
-	}
-
-	if err := c.writeStage(ctx, index, stageRecord{
-		Revision: revision.ID, Stage: stage.Name,
-		Advance: stageReport.Advance, Reason: stageReport.Reason, PromotedAt: c.now(),
-	}); err != nil {
-		return Report{}, err
-	}
-
+	// Nothing is recorded for the stage as a whole. The run records its
+	// substages left are the memory, and the stage after this one asks the
+	// promotion over them itself.
 	return report, nil
 }
 
@@ -239,12 +208,4 @@ func (c *Controller) promoteRecorded(
 	report.Reason = reason
 
 	return report, nil
-}
-
-// writeStage records what a stage's promotion decided. Nothing reads it back
-// to decide anything - a job that needs the answer asks the promotion itself,
-// over the same run records - so this is the trace, in the state repo, of a
-// verdict that was reached, and not an authority a later job consults.
-func (c *Controller) writeStage(ctx context.Context, index engineIndex, rec stageRecord) error {
-	return c.putJSON(ctx, index, KindOwned, stageKeyPrefix+rec.Revision+"-"+rec.Stage, rec)
 }

@@ -60,6 +60,10 @@ type DeclaredStage struct {
 type DeclaredSubstage struct {
 	Name        string `json:"name"`
 	DisplayName string `json:"displayName,omitempty"`
+	// Needs names the substages of the same stage this one waits on, for
+	// an engine that renders one job per substage and has to wire the
+	// order between them.
+	Needs []string `json:"needs,omitempty"`
 }
 
 type DeclareOutput struct {

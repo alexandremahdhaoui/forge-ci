@@ -336,3 +336,54 @@ func TestNoNeedsAtAllIsValid(t *testing.T) {
 	).Validate()
 	require.NoError(t, err)
 }
+
+// substageNeedsPipeline is one stage of three substages, the third waiting
+// on the second: the shape a release stage takes once its publishes stop
+// needing stages of their own.
+func substageNeedsPipeline(needs ...string) config.Pipeline {
+	p := needsPipeline(config.Repo{Name: "one", URL: "u"})
+	p.Stages[0].Substages = []config.Substage{
+		{Name: "artifacts", Engine: "here", Manager: "local", Targets: []string{"t"}},
+		{Name: "container", Engine: "here", Manager: "local", Targets: []string{"t"}, Needs: []string{"artifacts"}},
+		{Name: "revision", Engine: "here", Manager: "local", Targets: []string{"t"}, Needs: needs},
+	}
+
+	return p
+}
+
+// A substage names the substages of its own stage it waits on, and the
+// stage list can then say what it means without faking order with stage
+// boundaries.
+func TestASubstageMayNeedAnotherOfItsStage(t *testing.T) {
+	t.Parallel()
+
+	require.NoError(t, substageNeedsPipeline("container").Validate())
+}
+
+// A need on a name the stage does not declare would wait forever, and a
+// substage that waits forever reads like one nobody asked for.
+func TestNeedingAnUndeclaredSubstageIsRejected(t *testing.T) {
+	t.Parallel()
+
+	err := substageNeedsPipeline("nope").Validate()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), `needs names "nope"`)
+	require.Contains(t, err.Error(), `not a substage of stage "build"`)
+}
+
+// A substage that needs itself is the smallest cycle, and two that need
+// each other the next. Both are refused by name rather than hung.
+func TestASubstageCycleIsRejected(t *testing.T) {
+	t.Parallel()
+
+	self := substageNeedsPipeline("revision")
+	err := self.Validate()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "needs names itself")
+
+	loop := substageNeedsPipeline("container")
+	loop.Stages[0].Substages[0].Needs = []string{"revision"}
+	err = loop.Validate()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "cycle")
+}

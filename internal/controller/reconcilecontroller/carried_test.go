@@ -49,10 +49,8 @@ func TestAStageJobReadsWhatTheStageBeforeItBuilt(t *testing.T) {
 		"the package stage reads what the build stage made")
 }
 
-// A promotion job reads run records and runs no target, so it needs no
-// files and asks for none: the download would cost a stage's output in
-// bandwidth for a job that opens none of it.
-func TestAPromotionJobCarriesNothing(t *testing.T) {
+// A substage job runs targets, so it reads what the stages before it built.
+func TestASubstageJobCarriesWhatTheStagesBeforeItBuilt(t *testing.T) {
 	f := newFakeEngines(t)
 	f.runOutputs["build/default"] = citypes.RunOutput{
 		Status: citypes.StatusPassed,
@@ -82,12 +80,4 @@ func TestAPromotionJobCarriesNothing(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.NotEmpty(t, f.restored, "a substage job runs targets, so it reads")
-
-	f.restored = nil
-
-	_, err = apply(reconcilecontroller.Options{
-		Phase: reconcilecontroller.PhaseStages, Stage: "package", Promote: true,
-	})
-	require.NoError(t, err)
-	require.Empty(t, f.restored)
 }

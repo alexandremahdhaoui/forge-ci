@@ -424,6 +424,41 @@ func (c *Controller) restoreArtifacts(
 	return out, nil
 }
 
+// artifactsAtHand answers whether everything a passed record built can be
+// brought back on this machine. It asks the substage's own engine to get
+// them: an engine answers only what it could restore, and passes through
+// what was never a file, so a shorter answer means a file this run does not
+// have. A record that built nothing is at hand by definition.
+func (c *Controller) artifactsAtHand(
+	ctx context.Context,
+	index engineIndex,
+	sub config.Substage,
+	revision string,
+	root string,
+	run *citypes.Run,
+) (bool, error) {
+	if run.Forge == nil || len(run.Forge.Artifacts) == 0 {
+		return true, nil
+	}
+
+	engine, err := index.require(sub.Engine, config.PortCompute)
+	if err != nil {
+		// A publishing substage has no compute engine and nothing to carry.
+		return true, nil
+	}
+
+	var got citypes.ArtifactGetOutput
+
+	err = c.caller.Call(ctx, engine.Engine, ToolGet, citypes.ArtifactGetInput{
+		Revision: revision, Artifacts: run.Forge.Artifacts, Root: root, Spec: orEmpty(engine.Spec),
+	}, &got)
+	if err != nil {
+		return false, fmt.Errorf("asking whether what %s/%s built is at hand: %w", run.Stage, run.Substage, err)
+	}
+
+	return len(got.Artifacts) == len(run.Forge.Artifacts), nil
+}
+
 // sameBytes answers whether what this run built is byte for byte what the
 // previous release shipped: every asset the plan would upload, by name and
 // digest, and no asset more or fewer. It speaks only when there is at least

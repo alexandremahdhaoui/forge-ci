@@ -34,9 +34,9 @@ notes: 'A dirty revision is refused. It was never proven, so releasing it publis
   else''s to serve.
 
 
-  The release itself is ONE aggregated release per revision, tagged dist-<revision>
+  The release itself is ONE aggregated release per revision, tagged with the version
 
-  in the repo spec.repo names, carrying every upload plus index.json - the distribution
+  the core decided, in the repo spec.repo names, carrying every upload plus index.json - the distribution
 
   index mapping the revision to the sha256 of each binary per platform, measured on
 

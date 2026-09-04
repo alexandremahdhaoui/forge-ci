@@ -323,12 +323,22 @@ func phasedJobs(spec Spec, w WorkflowSpec) ([]job, error) {
 		for _, sub := range stage.Substages {
 			id := stage.Name + "-" + sub.Name
 			subs = append(subs, id)
+
+			// What the substage declared it needs, within its own stage,
+			// becomes an edge between the two jobs - and a job that waits
+			// on a sibling downloads too, because the sibling may have
+			// built what it is about to read.
+			needs := append([]string{jobEvaluate}, prev...)
+			for _, n := range sub.Needs {
+				needs = append(needs, stage.Name+"-"+n)
+			}
+
 			jobs = append(jobs, job{
 				id: id, name: substageTitle(stage, sub),
 				step:  "Run " + stage.Name + " " + sub.Name,
 				flags: "--phase stages --stage " + stage.Name + " --substage " + sub.Name,
-				needs: append([]string{jobEvaluate}, prev...), gated: true,
-				download: len(prev) > 0, upload: true, push: w.Push,
+				needs: needs, gated: true,
+				download: len(prev) > 0 || len(sub.Needs) > 0, upload: true, push: w.Push,
 			})
 		}
 
@@ -838,10 +848,11 @@ func writeStoreSave(b *strings.Builder) {
         id: tool-store-key
         if: always()
         run: |
-          echo "key=$(find ~/.cache/forge -mindepth 1 -maxdepth 3 2>/dev/null | sort | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+          echo "key=$(find ~/.cache/forge -mindepth 1 -maxdepth 4 2>/dev/null | sort | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+          echo "present=$([ -d ~/.cache/forge ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
       - name: Save the tool store
-        if: always() && steps.tool-store.outputs.cache-matched-key != format('tool-store-{0}-{1}', runner.os, steps.tool-store-key.outputs.key)
+        if: always() && steps.tool-store-key.outputs.present == 'true' && steps.tool-store.outputs.cache-matched-key != format('tool-store-{0}-{1}', runner.os, steps.tool-store-key.outputs.key)
         uses: actions/cache/save@v6
         with:
           path: ~/.cache/forge

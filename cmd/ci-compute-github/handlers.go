@@ -185,7 +185,7 @@ func toStages(in []DeclaredStage) []citypes.DeclaredStage {
 	for _, s := range in {
 		subs := make([]citypes.DeclaredSubstage, 0, len(s.Substages))
 		for _, sub := range s.Substages {
-			subs = append(subs, citypes.DeclaredSubstage{Name: sub.Name, DisplayName: sub.DisplayName})
+			subs = append(subs, citypes.DeclaredSubstage{Name: sub.Name, DisplayName: sub.DisplayName, Needs: sub.Needs})
 		}
 
 		out = append(out, citypes.DeclaredStage{

@@ -191,6 +191,48 @@ type Substage struct {
 	// multi-repo workspace builds against generated manifests, so at least
 	// one substage must set it; Validate enforces that.
 	Sync bool `json:"sync,omitempty"`
+	// Needs names substages of THIS stage that must advance before this
+	// one runs. Empty means it runs beside everything else the stage
+	// declares: substages are concurrent unless one says otherwise. This
+	// is the one ordering a stage carries. Without it, two writes that
+	// must not race had to live in stages of their own, and the stage list
+	// stopped describing the pipeline.
+	Needs []string `json:"needs,omitempty"`
+}
+
+// HasSubstage answers whether the stage declares a substage of this name.
+func (s Stage) HasSubstage(name string) bool {
+	for _, sub := range s.Substages {
+		if sub.Name == name {
+			return true
+		}
+	}
+
+	return false
+}
+
+// SubstageNames answers the substage names in declared order.
+func (s Stage) SubstageNames() []string {
+	names := make([]string, 0, len(s.Substages))
+	for _, sub := range s.Substages {
+		names = append(names, sub.Name)
+	}
+
+	return names
+}
+
+// SubstageNeeds answers the needs graph among this stage's substages, in
+// the shape citypes.Waves orders: only substages that declare a need have
+// an entry.
+func (s Stage) SubstageNeeds() map[string][]string {
+	needs := map[string][]string{}
+	for _, sub := range s.Substages {
+		if len(sub.Needs) > 0 {
+			needs[sub.Name] = sub.Needs
+		}
+	}
+
+	return needs
 }
 
 func Parse(data []byte) (Pipeline, error) {
@@ -462,6 +504,24 @@ func (p Pipeline) Validate() error {
 			for _, g := range sub.Gates {
 				requirePort(subWhere+": gates", g, PortGate)
 			}
+
+			// A need names a substage of THIS stage. A name nothing declares
+			// would wait forever, and a build that never starts reads like
+			// one that was never asked for; a substage that needs itself is
+			// the smallest cycle.
+			for _, n := range sub.Needs {
+				if n == sub.Name {
+					add("%s: needs names itself", subWhere)
+				} else if !s.HasSubstage(n) {
+					add("%s: needs names %q, which is not a substage of stage %q", subWhere, n, s.Name)
+				}
+			}
+		}
+
+		// Two substages that each need the other never start. Refused by
+		// name rather than hung; the same walk the run uses answers it.
+		if _, err := citypes.Waves(s.SubstageNames(), s.SubstageNeeds()); err != nil {
+			add("%s: substages: %v", where, err)
 		}
 	}
 

@@ -155,6 +155,45 @@ func TestJobsPerSubstageWaitOnEverySubstageOfTheStageBefore(t *testing.T) {
 	assert.Equal(t, 6, strings.Count(ci, "forge clone git@github.com:o/r.git ."))
 }
 
+// What a substage declares it needs becomes an edge between the two jobs,
+// and a job that waits on a sibling brings back what the sibling built. At
+// stage granularity nothing is rendered for it: the waves run inside the
+// one job.
+func TestASubstageNeedRendersAsAnEdgeBetweenItsJobs(t *testing.T) {
+	t.Parallel()
+
+	spec := phasedSpec()
+	spec.Stages = []citypes.DeclaredStage{{
+		Name: "release",
+		Substages: []citypes.DeclaredSubstage{
+			{Name: "artifacts"},
+			{Name: "container", Needs: []string{"artifacts"}},
+			{Name: "revision", Needs: []string{"container"}},
+		},
+	}}
+
+	stageJobs := renderCI(t, spec)
+	assert.Contains(t, stageJobs, "  release:\n    name: release\n    needs: [evaluate]\n")
+	assert.NotContains(t, stageJobs, "release-container")
+
+	spec.Jobs = workflowcontroller.JobsPerSubstage
+	ci := renderCI(t, spec)
+
+	for _, want := range []string{
+		"  release-artifacts:\n    name: release › artifacts\n    needs: [evaluate]\n",
+		"  release-container:\n    name: release › container\n    needs: [evaluate, release-artifacts]\n",
+		"  release-revision:\n    name: release › revision\n    needs: [evaluate, release-container]\n",
+	} {
+		assert.Contains(t, ci, want)
+	}
+
+	// The first substage has nothing to bring back; the two that wait on a
+	// sibling do, even though no stage runs before this one.
+	first := ci[strings.Index(ci, "  release-artifacts:"):strings.Index(ci, "  release-container:")]
+	assert.NotContains(t, first, "download-artifact")
+	assert.Equal(t, 2, strings.Count(ci, "uses: actions/download-artifact@v8"))
+}
+
 // With no stage names handed in - an older core - the stages are one job,
 // which is the shape every phased workflow had before the names crossed
 // the wire.

@@ -62,9 +62,9 @@ func TestOneJobPerStageReachesTheRelease(t *testing.T) {
 }
 
 // One job per substage: each substage runs alone and decides nothing for
-// the stage; the promotion job reads every substage's record, asks the
-// promotion, and mints. Asked before a substage ran, it refuses.
-func TestOneJobPerSubstageWithAPromotionJob(t *testing.T) {
+// the stage. The stage after asks the promotion over every substage's
+// record itself, and asked before one of them ran, it refuses by name.
+func TestOneJobPerSubstageAndTheNextStageAsksThePromotion(t *testing.T) {
 	f := newFakeEngines(t)
 	p := pipeline(
 		stage("build", substage("default", []string{"build"}), substage("dist", []string{"build"})),
@@ -86,20 +86,22 @@ func TestOneJobPerSubstageWithAPromotionJob(t *testing.T) {
 	require.True(t, one.Advanced(), "a passed substage is a green job")
 	require.False(t, one.Minted, "a substage job never mints")
 
-	_, err = apply(reconcilecontroller.Options{Phase: reconcilecontroller.PhaseStages, Stage: "build", Promote: true})
+	// Half the stage in front has run: the stage after arrives early and
+	// says which substage it is waiting on.
+	_, err = apply(reconcilecontroller.Options{Phase: reconcilecontroller.PhaseStages, Stage: "release"})
+	require.ErrorIs(t, err, reconcilecontroller.ErrStageOutOfOrder)
 	require.ErrorIs(t, err, reconcilecontroller.ErrStageIncomplete)
 	require.Contains(t, err.Error(), `substage "dist"`)
 
 	_, err = apply(reconcilecontroller.Options{Phase: reconcilecontroller.PhaseStages, Stage: "build", Substage: "dist"})
 	require.NoError(t, err)
 
-	promoted, err := apply(reconcilecontroller.Options{Phase: reconcilecontroller.PhaseStages, Stage: "build", Promote: true})
+	// Both records exist: the stage after asks the promotion over them and
+	// runs. No job in between wrote anything down.
+	release, err := apply(reconcilecontroller.Options{Phase: reconcilecontroller.PhaseStages, Stage: "release"})
 	require.NoError(t, err)
-	require.Len(t, promoted.Stages[0].Runs, 2, "the promotion reads both records")
-	require.Equal(t, 2, promoted.Stages[0].Reused)
-	require.True(t, promoted.Stages[0].Advance)
-	require.False(t, promoted.Minted, "a promotion job decides; it does not name the run")
-	require.Equal(t, 2, f.counted(call{uriCompute, "run"}), "the promotion job runs nothing")
+	require.Len(t, release.Released, 1)
+	require.Equal(t, 2, f.counted(call{uriCompute, "run"}), "asking the promotion runs nothing")
 
 	_, err = apply(reconcilecontroller.Options{Phase: reconcilecontroller.PhaseStages, Stage: "build", Substage: "nope"})
 	require.ErrorIs(t, err, reconcilecontroller.ErrUnknownStage)
@@ -129,16 +131,10 @@ func TestAFailedSubstageJobBlocksTheStageAfterIt(t *testing.T) {
 	require.False(t, red.Advanced())
 	require.Contains(t, red.Stages[0].Reason, "did not pass")
 
-	// No promotion has run and none needs to: the stage after asks the
-	// promotion itself, over the record the red substage left. Nothing
-	// between the two stages had to spend a runner to say no.
+	// The stage after asks the promotion itself, over the record the red
+	// substage left. Nothing between the two stages had to spend a runner
+	// to say no.
 	_, err = apply(reconcilecontroller.Options{Phase: reconcilecontroller.PhaseStages, Stage: "publish"})
 	require.ErrorIs(t, err, reconcilecontroller.ErrStageOutOfOrder)
 	require.Contains(t, err.Error(), `stage "build" before "publish"`)
-
-	// The explicit gate is still there for a compute engine that wants one,
-	// and it reaches the same verdict.
-	promoted, err := apply(reconcilecontroller.Options{Phase: reconcilecontroller.PhaseStages, Stage: "build", Promote: true})
-	require.NoError(t, err)
-	require.False(t, promoted.Stages[0].Advance)
 }
