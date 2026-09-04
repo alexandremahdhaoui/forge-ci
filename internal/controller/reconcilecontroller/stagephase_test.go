@@ -129,10 +129,16 @@ func TestAFailedSubstageJobBlocksTheStageAfterIt(t *testing.T) {
 	require.False(t, red.Advanced())
 	require.Contains(t, red.Stages[0].Reason, "did not pass")
 
+	// No promotion has run and none needs to: the stage after asks the
+	// promotion itself, over the record the red substage left. Nothing
+	// between the two stages had to spend a runner to say no.
+	_, err = apply(reconcilecontroller.Options{Phase: reconcilecontroller.PhaseStages, Stage: "publish"})
+	require.ErrorIs(t, err, reconcilecontroller.ErrStageOutOfOrder)
+	require.Contains(t, err.Error(), `stage "build" before "publish"`)
+
+	// The explicit gate is still there for a compute engine that wants one,
+	// and it reaches the same verdict.
 	promoted, err := apply(reconcilecontroller.Options{Phase: reconcilecontroller.PhaseStages, Stage: "build", Promote: true})
 	require.NoError(t, err)
 	require.False(t, promoted.Stages[0].Advance)
-
-	_, err = apply(reconcilecontroller.Options{Phase: reconcilecontroller.PhaseStages, Stage: "publish"})
-	require.ErrorIs(t, err, reconcilecontroller.ErrStageOutOfOrder)
 }

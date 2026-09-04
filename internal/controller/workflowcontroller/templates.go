@@ -277,8 +277,10 @@ func phasedJobs(spec Spec, w WorkflowSpec) ([]job, error) {
 		},
 	}
 
-	// The job the release needs: the last thing that decided a stage.
-	last := jobEvaluate
+	// What a stage waits on: every job of the stage in front of it. Empty
+	// while nothing has run, which is what tells the first stage's jobs
+	// they have nothing to bring back.
+	var prev []string
 
 	if len(spec.Stages) == 0 {
 		jobs = append(jobs, job{
@@ -286,7 +288,7 @@ func phasedJobs(spec Spec, w WorkflowSpec) ([]job, error) {
 			flags: "--phase stages",
 			needs: []string{jobEvaluate}, gated: true, download: true, upload: true, push: w.Push,
 		})
-		last = jobStages
+		prev = []string{jobStages}
 	}
 
 	for _, stage := range spec.Stages {
@@ -300,18 +302,23 @@ func phasedJobs(spec Spec, w WorkflowSpec) ([]job, error) {
 				id: stage.Name, name: stageTitle(stage),
 				step:  "Run stage " + stage.Name,
 				flags: "--phase stages --stage " + stage.Name,
-				needs: []string{jobEvaluate, last}, gated: true,
-				download: last != jobEvaluate, upload: true, push: w.Push,
+				needs: append([]string{jobEvaluate}, prev...), gated: true,
+				download: len(prev) > 0, upload: true, push: w.Push,
 			})
-			last = stage.Name
+			prev = []string{stage.Name}
 
 			continue
 		}
 
-		// One job per substage, running beside each other, and one
-		// promotion after them all - the shape the stage has in the core.
-		promote := stage.Name + "-promotion-gate"
-		subs := []string{jobEvaluate}
+		// One job per substage, running beside each other, and the stage
+		// after them waiting on all of them.
+		//
+		// There is no job between the two. A stage's promotion used to have
+		// one, and it spent a checkout, a container and a toolchain to write
+		// down an answer the next stage's jobs work out for themselves from
+		// the same run records in seconds. On a pipeline of four stages that
+		// is four whole jobs deciding nothing.
+		subs := make([]string, 0, len(stage.Substages))
 
 		for _, sub := range stage.Substages {
 			id := stage.Name + "-" + sub.Name
@@ -320,18 +327,12 @@ func phasedJobs(spec Spec, w WorkflowSpec) ([]job, error) {
 				id: id, name: substageTitle(stage, sub),
 				step:  "Run " + stage.Name + " " + sub.Name,
 				flags: "--phase stages --stage " + stage.Name + " --substage " + sub.Name,
-				needs: []string{jobEvaluate, last}, gated: true,
-				download: last != jobEvaluate, upload: true, push: w.Push,
+				needs: append([]string{jobEvaluate}, prev...), gated: true,
+				download: len(prev) > 0, upload: true, push: w.Push,
 			})
 		}
 
-		jobs = append(jobs, job{
-			id: promote, name: stageTitle(stage) + " › promotion gate",
-			step:  "Promotion gate for stage " + stage.Name,
-			flags: "--phase stages --stage " + stage.Name + " --promote",
-			needs: subs, gated: true,
-		})
-		last = promote
+		prev = subs
 	}
 
 	seen := map[string]bool{}

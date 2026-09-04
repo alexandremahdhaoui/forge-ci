@@ -118,7 +118,7 @@ func TestPhasesRenderOneJobPerStageGatedOnTheEvaluation(t *testing.T) {
 // jobs: substage cuts each stage into one job per substage, running beside
 // each other, and one promotion job that needs them all. The next stage needs
 // the promotion.
-func TestJobsPerSubstageRenderAPromotionJobPerStage(t *testing.T) {
+func TestJobsPerSubstageWaitOnEverySubstageOfTheStageBefore(t *testing.T) {
 	t.Parallel()
 
 	spec := phasedSpec()
@@ -128,31 +128,31 @@ func TestJobsPerSubstageRenderAPromotionJobPerStage(t *testing.T) {
 
 	for _, want := range []string{
 		"  check-default:\n    name: check › default\n    needs: [evaluate]\n    if: needs.evaluate.outputs.outcome == 'proceed'\n",
-		"  check-promotion-gate:\n    name: check › promotion gate\n    needs: [evaluate, check-default]\n    if: needs.evaluate.outputs.outcome == 'proceed'\n",
-		"  build-default:\n    name: build › default\n    needs: [evaluate, check-promotion-gate]\n",
-		"  publish-default:\n    name: publish › default\n    needs: [evaluate, build-promotion-gate]\n",
-		"  publish-dist:\n    name: publish › dist\n    needs: [evaluate, build-promotion-gate]\n",
-		"  publish-promotion-gate:\n    name: publish › promotion gate\n    needs: [evaluate, publish-default, publish-dist]\n",
+		"  build-default:\n    name: build › default\n    needs: [evaluate, check-default]\n",
+		"  publish-default:\n    name: publish › default\n    needs: [evaluate, build-default]\n",
+		"  publish-dist:\n    name: publish › dist\n    needs: [evaluate, build-default]\n",
 		"- name: Run publish dist\n",
-		"- name: Promotion gate for stage publish\n",
 		"--phase stages --stage publish --substage dist --revision ${{ needs.evaluate.outputs.revision }}\n",
-		"--phase stages --stage publish --promote --revision ${{ needs.evaluate.outputs.revision }}\n",
 		"name: built-${{ github.run_id }}-publish-dist\n",
 	} {
 		assert.Contains(t, ci, want)
 	}
 
-	// Four substage jobs upload; the three promotion jobs build nothing.
+	// A stage's promotion has no job. The jobs of the stage after it wait on
+	// every substage of this one, and each works the promotion out from the
+	// same run records - which costs a state read, not a whole runner.
+	assert.NotContains(t, ci, "promotion-gate")
+	assert.NotContains(t, ci, "--promote")
+	// Two fixed jobs and one per substage. Nothing else.
+	assert.Equal(t, 6, strings.Count(ci, "runs-on: ubuntu-latest"))
+
+	// All four substage jobs upload; the three in stages after the first
+	// download, and the first has nothing in front of it to bring back.
 	assert.Equal(t, 4, strings.Count(ci, "uses: actions/upload-artifact@v7"))
-	// Three of them download. A promotion gate reads records and runs no
-	// target, so it needs no files, and the first stage has nothing in
-	// front of it to bring back.
 	assert.Equal(t, 3, strings.Count(ci, "uses: actions/download-artifact@v8"))
-	firstStage := ci[strings.Index(ci, "  check-default:"):strings.Index(ci, "  check-promotion-gate:")]
+	firstStage := ci[strings.Index(ci, "  check-default:"):strings.Index(ci, "  build-default:")]
 	assert.NotContains(t, firstStage, "download-artifact")
-	gate := ci[strings.Index(ci, "  publish-promotion-gate:"):]
-	assert.NotContains(t, gate, "download-artifact")
-	assert.Equal(t, 9, strings.Count(ci, "forge clone git@github.com:o/r.git ."))
+	assert.Equal(t, 6, strings.Count(ci, "forge clone git@github.com:o/r.git ."))
 }
 
 // With no stage names handed in - an older core - the stages are one job,
@@ -184,13 +184,13 @@ func TestAStageNamedLikeAFixedJobIsRefused(t *testing.T) {
 
 	spec.Jobs = workflowcontroller.JobsPerSubstage
 	spec.Stages = []citypes.DeclaredStage{
-		{Name: "build", Substages: []citypes.DeclaredSubstage{{Name: "promotion-gate"}}},
-		{Name: "build-promotion-gate", Substages: []citypes.DeclaredSubstage{{Name: "x"}}},
+		{Name: "build", Substages: []citypes.DeclaredSubstage{{Name: "unit-tests"}}},
+		{Name: "build-unit", Substages: []citypes.DeclaredSubstage{{Name: "tests"}}},
 	}
 
 	_, err = workflowcontroller.RenderAll(spec)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), `two jobs would be named "build-promotion-gate"`)
+	require.Contains(t, err.Error(), `two jobs would be named "build-unit-tests"`)
 }
 
 // jobs is a knob on a phased workflow and nothing else; a value nobody
@@ -273,10 +273,8 @@ func TestAJobIsTitledByTheFactoryWhenTheFactorySaysSo(t *testing.T) {
 	for _, want := range []string{
 		// Derived, both halves, because this stage declares nothing.
 		"  check-configs:\n    name: check › configs\n",
-		"  check-promotion-gate:\n    name: check › promotion gate\n",
-		// The stage's own name reaches its substages and its gate.
+		// The stage's own name reaches its substages.
 		"  publish-members:\n    name: Ship it › members\n",
-		"  publish-promotion-gate:\n    name: Ship it › promotion gate\n",
 		// A substage that says what it does says it verbatim.
 		"  publish-dist:\n    name: Cross-build every executable\n",
 	} {

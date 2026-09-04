@@ -48,11 +48,16 @@ behind a green build, and the loop stops at the first stage that does not
 advance.
 
 The `stages` phase cuts further. `--stage <name>` runs one stage, and
-refuses until the stage before it has a green record. `--stage <name>
---substage <name>` runs one substage and its gates and decides nothing;
-`--stage <name> --promote` asks the stage's promotion over every
-substage's record. That is what lets a compute engine render one job per
-stage, or one per substage with a promotion job per stage.
+refuses until the stage before it has advanced. `--stage <name> --substage
+<name>` runs one substage and its gates and decides nothing. That is what
+lets a compute engine render one job per stage, or one per substage.
+
+Whether the stage in front advanced is the promotion's answer, and every
+stage job asks it: a state read of that stage's substage records and one
+engine call. Nothing between two stages has to run for the second to know
+where it stands. `--stage <name> --promote` asks the same question and
+records what it answered, for a compute engine that wants an explicit
+gate; nothing reads that record back to decide anything.
 
 A run proves one set of commits, and only its first phase resolves them.
 The `evaluate` phase records the revision beside its release decision and
@@ -68,7 +73,7 @@ in flight over an upgrade finishes the way it started.
 
 Every rendered job carries a title: derived from the stage and substage
 names, unless the stage or substage declares a `displayName`, which is used
-verbatim. A stage's promotion job is `<stage>-promotion-gate`.
+verbatim.
 
 Under `unmatched: error` only the newest commit of each release repo has
 to match a list. An older commit that matches none scores patch. History

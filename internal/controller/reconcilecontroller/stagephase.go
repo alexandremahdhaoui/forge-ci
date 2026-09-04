@@ -2,7 +2,6 @@ package reconcilecontroller
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -77,18 +76,36 @@ func (c *Controller) applyNamedStage(
 
 	stage := p.Stages[at]
 
-	// The stage in front of this one must have advanced, in this process's
-	// past or in another's: the record is the only thing both share.
+	// The stage in front of this one must have advanced. The answer is the
+	// promotion's, and it is asked here rather than looked up, because the
+	// run records it reads are already the shared memory between processes
+	// and asking is a state read and one engine call.
+	//
+	// Looking it up needed a whole job of its own to write it - a checkout,
+	// a container, a toolchain, minutes of it - to decide something the job
+	// that needs the answer can decide for itself in seconds. The explicit
+	// gate is still there for a compute engine that wants one: --promote
+	// asks the same question and records what it answered.
 	if at > 0 {
 		before := p.Stages[at-1]
 
-		rec, err := c.readStage(ctx, index, revision.ID, before.Name)
-		if err != nil {
-			return Report{}, err
+		rec, err := c.promoteRecorded(ctx, index, before, revision)
+
+		// A substage of the stage in front with no record has not run, which
+		// is this job arriving early rather than the stage having failed.
+		// Both are true and the caller wants the first one.
+		if errors.Is(err, ErrStageIncomplete) {
+			return Report{}, fmt.Errorf("%w: stage %q before %q: %w",
+				ErrStageOutOfOrder, before.Name, stage.Name, err)
 		}
 
-		if rec == nil || !rec.Advance {
-			return Report{}, fmt.Errorf("%w: stage %q before %q", ErrStageOutOfOrder, before.Name, stage.Name)
+		if err != nil {
+			return Report{}, fmt.Errorf("asking whether stage %q advanced: %w", before.Name, err)
+		}
+
+		if !rec.Advance {
+			return Report{}, fmt.Errorf("%w: stage %q before %q: %s",
+				ErrStageOutOfOrder, before.Name, stage.Name, rec.Reason)
 		}
 	}
 
@@ -224,27 +241,10 @@ func (c *Controller) promoteRecorded(
 	return report, nil
 }
 
-func (c *Controller) readStage(ctx context.Context, index engineIndex, revision, stage string) (*stageRecord, error) {
-	var out citypes.StateGetOutput
-
-	if err := c.callState(ctx, index, ToolGet, citypes.StateGetInput{
-		Kind: KindOwned, Key: stageKeyPrefix + revision + "-" + stage, Spec: index.stateSpec,
-	}, &out); err != nil {
-		return nil, err
-	}
-
-	if !out.Found {
-		return nil, nil
-	}
-
-	var rec stageRecord
-	if err := json.Unmarshal([]byte(out.Payload), &rec); err != nil {
-		return nil, fmt.Errorf("reading the record of stage %q: %w", stage, err)
-	}
-
-	return &rec, nil
-}
-
+// writeStage records what a stage's promotion decided. Nothing reads it back
+// to decide anything - a job that needs the answer asks the promotion itself,
+// over the same run records - so this is the trace, in the state repo, of a
+// verdict that was reached, and not an authority a later job consults.
 func (c *Controller) writeStage(ctx context.Context, index engineIndex, rec stageRecord) error {
 	return c.putJSON(ctx, index, KindOwned, stageKeyPrefix+rec.Revision+"-"+rec.Stage, rec)
 }
