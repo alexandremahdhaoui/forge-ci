@@ -265,5 +265,18 @@ func copyFile(fs fsadapter.FS, src, dst string) error {
 		return err
 	}
 
-	return fs.WriteFile(dst, data)
+	if err := fs.WriteFile(dst, data); err != nil {
+		return err
+	}
+
+	// The mode travels with the bytes. Without this a put wrote every file
+	// 0o600, so a binary that a later stage has to RUN arrived unexecutable
+	// and the stage died on "permission denied" - about the file, never
+	// about the build that made it.
+	mode, err := fs.Mode(src)
+	if err != nil {
+		return err
+	}
+
+	return fs.Chmod(dst, mode)
 }

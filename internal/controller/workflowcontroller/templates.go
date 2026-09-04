@@ -220,6 +220,10 @@ const (
 // on a runner that built none of it.
 const artifactDir = ".forge-ci/artifacts"
 
+// carriedDir holds the tarballs that cross between jobs, kept apart from
+// the artifacts themselves so that unpacking one never packs it again.
+const carriedDir = ".forge-ci/carried"
+
 // job is one rendered job of a phased workflow: its id, the step name a
 // human reads, the flags after `--phase`, what it needs, and whether it
 // carries built files out.
@@ -417,7 +421,15 @@ func writePhasedJobs(b *strings.Builder, spec Spec, w WorkflowSpec, jobs []job) 
 			// a build gets what the build made. Nothing here knows which jobs
 			// wrote which files, and it does not need to: the record says
 			// where each artifact belongs and get puts it there.
-			fmt.Fprintf(b, "\n      - name: Bring back what the jobs before this one built\n        uses: actions/download-artifact@v4\n        with:\n          pattern: built-${{ github.run_id }}-*\n          merge-multiple: true\n          path: %s\n", artifactDir)
+			//
+			// Each name holds one tarball, and unpacking is what restores
+			// the modes. The platform's own artifact format is a zip, which
+			// does not carry a unix mode, so a binary uploaded as loose
+			// files comes back unexecutable however carefully it was
+			// written. tar carries the bits, so a carried binary is still a
+			// binary a later stage can run.
+			fmt.Fprintf(b, "\n      - name: Bring back what the jobs before this one built\n        uses: actions/download-artifact@v4\n        with:\n          pattern: built-${{ github.run_id }}-*\n          merge-multiple: true\n          path: %s\n", carriedDir)
+			fmt.Fprintf(b, "\n      - name: Unpack it\n        run: |\n          mkdir -p %s\n          for f in %s/*.tar.gz; do\n            [ -e \"$f\" ] || continue\n            tar -xzf \"$f\" -C %s\n          done\n", artifactDir, carriedDir, artifactDir)
 		}
 
 		fmt.Fprintf(b, "\n      - name: %s\n        id: phase\n", j.step)
@@ -446,7 +458,15 @@ func writePhasedJobs(b *strings.Builder, spec Spec, w WorkflowSpec, jobs []job) 
 		}
 
 		if j.upload {
-			fmt.Fprintf(b, "\n      - name: Keep what this job built for the jobs after it\n        uses: actions/upload-artifact@v4\n        with:\n          name: built-${{ github.run_id }}-%s\n          path: %s\n          if-no-files-found: ignore\n          retention-days: 7\n", j.id, artifactDir)
+			// One tarball per job, because the platform's artifact format is
+			// a zip and a zip does not carry a unix mode. A built binary
+			// uploaded as loose files comes back without its executable bit,
+			// and the stage that has to run it dies on "permission denied".
+			// tar keeps the mode, so what a job kept is what a later job
+			// gets. It is gzipped: these are binaries, and the upload is
+			// billed by the byte on a private repo.
+			fmt.Fprintf(b, "\n      - name: Pack what this job built\n        run: |\n          if [ -d %s ]; then\n            mkdir -p %s\n            tar -czf %s/built-%s.tar.gz -C %s .\n          fi\n", artifactDir, carriedDir, carriedDir, j.id, artifactDir)
+			fmt.Fprintf(b, "\n      - name: Keep what this job built for the jobs after it\n        uses: actions/upload-artifact@v4\n        with:\n          name: built-${{ github.run_id }}-%s\n          path: %s/built-%s.tar.gz\n          if-no-files-found: ignore\n          retention-days: 7\n", j.id, carriedDir, j.id)
 		}
 
 		if j.push {

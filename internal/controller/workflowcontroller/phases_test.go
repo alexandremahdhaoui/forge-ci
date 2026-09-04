@@ -81,7 +81,11 @@ func TestPhasesRenderOneJobPerStageGatedOnTheEvaluation(t *testing.T) {
 		"name: built-${{ github.run_id }}-check\n",
 		"name: built-${{ github.run_id }}-publish\n",
 		"pattern: built-${{ github.run_id }}-*\n          merge-multiple: true\n",
-		"path: .forge-ci/artifacts",
+		// The transport is a tarball per job: a zip carries no unix mode,
+		// so a binary a later stage has to RUN would arrive unexecutable.
+		"path: .forge-ci/carried\n",
+		"tar -czf .forge-ci/carried/built-build.tar.gz -C .forge-ci/artifacts .",
+		"tar -xzf \"$f\" -C .forge-ci/artifacts",
 		"    paths-ignore: [\"*.md\", \"docs/**\"]\n",
 	} {
 		assert.Contains(t, ci, want)
