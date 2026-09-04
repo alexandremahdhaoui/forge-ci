@@ -6,6 +6,7 @@ go 1.26.5
 
 require (
 	github.com/alexandremahdhaoui/forge v0.45.49
+	github.com/alexandremahdhaoui/forge-revision-spec v0.45.56
 	github.com/google/go-containerregistry v0.22.0
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/stretchr/testify v1.12.1
@@ -31,4 +32,5 @@ require (
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
+	gotest.tools/v3 v3.5.2 // indirect
 )
