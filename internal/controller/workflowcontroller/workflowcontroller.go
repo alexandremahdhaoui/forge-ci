@@ -107,6 +107,12 @@ type Workspace struct {
 	// ToolchainScript is the verbatim run block installing whatever the
 	// targets need.
 	ToolchainScript string `json:"toolchainScript"`
+	// ToolchainCachePaths names what the script installs, so a run of
+	// several jobs installs it once: the paths are restored before the
+	// script and saved after it, keyed on every member's HEAD, because a
+	// toolchain built from the checkout is a function of the checkout and
+	// nothing else. Empty means no cache; meaningless without a script.
+	ToolchainCachePaths []string `json:"toolchainCachePaths,omitempty"`
 }
 
 // SetupStep is one `uses:` action at the top of a generated workflow.
@@ -311,6 +317,11 @@ func ParseSpec(raw map[string]any) (Spec, error) {
 				"workspace.toolchainScript is required unless spec.container or spec.containerFile names " +
 					"an image the jobs run in, which is what supplies the toolchain instead")
 		}
+	}
+
+	if len(s.Workspace.ToolchainCachePaths) > 0 && s.Workspace.ToolchainScript == "" {
+		return Spec{}, errors.New(
+			"workspace.toolchainCachePaths names what toolchainScript installs, and there is no script")
 	}
 
 	switch s.Jobs {

@@ -78,7 +78,7 @@ spec:
 - key: workspace
   type: object
   required: false
-  means: 'The checkout preamble every command workflow and the runner share: bootstrapCommand (one verbatim command that stands the whole workspace up in the working directory, naming its own factory), toolchainScript (verbatim install block). Required once any command workflow or the runner exists. bootstrapCommand is always required; toolchainScript only when spec.container and spec.containerFile are both unset, because an image supplies the toolchain instead.'
+  means: 'The checkout preamble every command workflow and the runner share: bootstrapCommand (one verbatim command that stands the whole workspace up in the working directory, naming its own factory), toolchainScript (verbatim install block), toolchainCachePaths (what the script installs; restored before it and saved after it under a key hashing every member''s HEAD, exact match only, so a run of several jobs installs once and a different checkout never inherits another''s toolchain). Required once any command workflow or the runner exists. bootstrapCommand is always required; toolchainScript only when spec.container and spec.containerFile are both unset, because an image supplies the toolchain instead; toolchainCachePaths is refused without a script.'
 - key: container
   type: string
   required: false

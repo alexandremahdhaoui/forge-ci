@@ -903,11 +903,68 @@ func writeToolchain(b *strings.Builder, spec Spec) {
 		return
 	}
 
+	cached := len(spec.Workspace.ToolchainCachePaths) > 0
+
+	if cached {
+		writeToolchainRestore(b, spec.Workspace.ToolchainCachePaths)
+	}
+
 	b.WriteString(`
       - name: Install the toolchain from the workspace
         run: |
 `)
 	writeIndented(b, spec.Workspace.ToolchainScript)
+
+	if cached {
+		writeToolchainSave(b, spec.Workspace.ToolchainCachePaths)
+	}
+}
+
+// writeToolchainRestore brings back what the toolchain script installed on
+// an earlier job of the same checkout. The key is every member's HEAD,
+// hashed after the checkout, and it is exact: a toolchain built from the
+// members is a function of their shas, so a different set rebuilds and a
+// prefix match would hand a job the toolchain of some other commit. The
+// script still runs on a hit - it is the instance's own words and this
+// engine cannot split it - and finds its work already done.
+func writeToolchainRestore(b *strings.Builder, paths []string) {
+	b.WriteString(`
+      - name: Name the toolchain by the members it is built from
+        id: toolchain-key
+        run: |
+          echo "key=$(for d in */.git; do git -C "${d%/.git}" rev-parse HEAD; done | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the toolchain
+        id: toolchain-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+`)
+
+	for _, p := range paths {
+		b.WriteString("            " + p + "\n")
+	}
+
+	b.WriteString("          key: toolchain-${{ runner.os }}-${{ steps.toolchain-key.outputs.key }}\n")
+}
+
+// writeToolchainSave keeps what the script installed, only on a miss: a
+// hit already holds these bytes under this key, and archiving them again
+// costs the tar for nothing.
+func writeToolchainSave(b *strings.Builder, paths []string) {
+	b.WriteString(`
+      - name: Save the toolchain
+        if: steps.toolchain-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+`)
+
+	for _, p := range paths {
+		b.WriteString("            " + p + "\n")
+	}
+
+	b.WriteString("          key: toolchain-${{ runner.os }}-${{ steps.toolchain-key.outputs.key }}\n")
 }
 
 // writeIndented writes a command block at run-block indentation, one
