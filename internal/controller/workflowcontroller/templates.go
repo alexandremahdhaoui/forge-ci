@@ -428,7 +428,7 @@ func writePhasedJobs(b *strings.Builder, spec Spec, w WorkflowSpec, jobs []job) 
 			// files comes back unexecutable however carefully it was
 			// written. tar carries the bits, so a carried binary is still a
 			// binary a later stage can run.
-			fmt.Fprintf(b, "\n      - name: Bring back what the jobs before this one built\n        uses: actions/download-artifact@v4\n        with:\n          pattern: built-${{ github.run_id }}-*\n          merge-multiple: true\n          path: %s\n", carriedDir)
+			fmt.Fprintf(b, "\n      - name: Bring back what the jobs before this one built\n        uses: actions/download-artifact@v8\n        with:\n          pattern: built-${{ github.run_id }}-*\n          merge-multiple: true\n          path: %s\n", carriedDir)
 			fmt.Fprintf(b, "\n      - name: Unpack it\n        run: |\n          mkdir -p %s\n          for f in %s/*.tar.gz; do\n            [ -e \"$f\" ] || continue\n            tar -xzf \"$f\" -C %s\n          done\n", artifactDir, carriedDir, artifactDir)
 		}
 
@@ -466,7 +466,7 @@ func writePhasedJobs(b *strings.Builder, spec Spec, w WorkflowSpec, jobs []job) 
 			// gets. It is gzipped: these are binaries, and the upload is
 			// billed by the byte on a private repo.
 			fmt.Fprintf(b, "\n      - name: Pack what this job built\n        run: |\n          if [ -d %s ]; then\n            mkdir -p %s\n            tar -czf %s/built-%s.tar.gz -C %s .\n          fi\n", artifactDir, carriedDir, carriedDir, j.id, artifactDir)
-			fmt.Fprintf(b, "\n      - name: Keep what this job built for the jobs after it\n        uses: actions/upload-artifact@v4\n        with:\n          name: built-${{ github.run_id }}-%s\n          path: %s/built-%s.tar.gz\n          if-no-files-found: ignore\n          retention-days: 7\n", j.id, carriedDir, j.id)
+			fmt.Fprintf(b, "\n      - name: Keep what this job built for the jobs after it\n        uses: actions/upload-artifact@v7\n        with:\n          name: built-${{ github.run_id }}-%s\n          path: %s/built-%s.tar.gz\n          if-no-files-found: ignore\n          retention-days: 7\n", j.id, carriedDir, j.id)
 		}
 
 		if j.push {
@@ -777,7 +777,7 @@ func writeStoreRestore(b *strings.Builder) {
 	b.WriteString(`
       - name: Restore the tool store
         id: tool-store
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ~/.cache/forge
           key: tool-store-${{ runner.os }}-${{ github.run_id }}
@@ -808,7 +808,7 @@ func writeStoreSave(b *strings.Builder) {
 
       - name: Save the tool store
         if: always() && steps.tool-store.outputs.cache-matched-key != format('tool-store-{0}-{1}', runner.os, steps.tool-store-key.outputs.key)
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: ~/.cache/forge
           key: tool-store-${{ runner.os }}-${{ steps.tool-store-key.outputs.key }}
