@@ -224,6 +224,14 @@ const artifactDir = ".forge-ci/artifacts"
 // the artifacts themselves so that unpacking one never packs it again.
 const carriedDir = ".forge-ci/carried"
 
+// packMark is the file whose modification time separates what a job
+// inherited from what it built, and packList is where the second of those
+// is written for tar to read.
+const (
+	packMark = ".forge-ci/pack-mark"
+	packList = ".forge-ci/pack-list"
+)
+
 // job is one rendered job of a phased workflow: its id, the step name a
 // human reads, the flags after `--phase`, what it needs, and whether it
 // carries built files out.
@@ -237,9 +245,11 @@ type job struct {
 	step  string
 	flags string
 	needs []string
-	// download says the job brings back what the jobs before it built. Every
-	// job that does work needs it: a stage reads what the stage before it
-	// made, and the substage that publishes reads all of it.
+	// download says the job brings back what the jobs before it built. A job
+	// that does work in any stage after the first needs it: a stage reads
+	// what the stage before it made, and the substage that publishes reads
+	// all of it. Nothing has been built yet in front of the first stage, so
+	// its jobs skip a step that could only match nothing.
 	download bool
 	upload   bool
 	// gated says the job runs only on proceed: everything after evaluate.
@@ -290,7 +300,8 @@ func phasedJobs(spec Spec, w WorkflowSpec) ([]job, error) {
 				id: stage.Name, name: stageTitle(stage),
 				step:  "Run stage " + stage.Name,
 				flags: "--phase stages --stage " + stage.Name,
-				needs: []string{jobEvaluate, last}, gated: true, download: true, upload: true, push: w.Push,
+				needs: []string{jobEvaluate, last}, gated: true,
+				download: last != jobEvaluate, upload: true, push: w.Push,
 			})
 			last = stage.Name
 
@@ -309,7 +320,8 @@ func phasedJobs(spec Spec, w WorkflowSpec) ([]job, error) {
 				id: id, name: substageTitle(stage, sub),
 				step:  "Run " + stage.Name + " " + sub.Name,
 				flags: "--phase stages --stage " + stage.Name + " --substage " + sub.Name,
-				needs: []string{jobEvaluate, last}, gated: true, download: true, upload: true, push: w.Push,
+				needs: []string{jobEvaluate, last}, gated: true,
+				download: last != jobEvaluate, upload: true, push: w.Push,
 			})
 		}
 
@@ -432,6 +444,12 @@ func writePhasedJobs(b *strings.Builder, spec Spec, w WorkflowSpec, jobs []job) 
 			fmt.Fprintf(b, "\n      - name: Unpack it\n        run: |\n          mkdir -p %s\n          for f in %s/*.tar.gz; do\n            [ -e \"$f\" ] || continue\n            tar -xzf \"$f\" -C %s\n          done\n", artifactDir, carriedDir, artifactDir)
 		}
 
+		if j.upload {
+			// Everything already on disk is somebody else's. Written after
+			// the unpack and before the run, so the line it draws is exact.
+			fmt.Fprintf(b, "\n      - name: Mark what was here before this job ran\n        run: |\n          mkdir -p %s\n          touch %s\n", artifactDir, packMark)
+		}
+
 		fmt.Fprintf(b, "\n      - name: %s\n        id: phase\n", j.step)
 		writeCommandEnv(b, w)
 		b.WriteString("        run: |\n")
@@ -458,15 +476,30 @@ func writePhasedJobs(b *strings.Builder, spec Spec, w WorkflowSpec, jobs []job) 
 		}
 
 		if j.upload {
-			// One tarball per job, because the platform's artifact format is
-			// a zip and a zip does not carry a unix mode. A built binary
-			// uploaded as loose files comes back without its executable bit,
-			// and the stage that has to run it dies on "permission denied".
-			// tar keeps the mode, so what a job kept is what a later job
-			// gets. It is gzipped: these are binaries, and the upload is
-			// billed by the byte on a private repo.
-			fmt.Fprintf(b, "\n      - name: Pack what this job built\n        run: |\n          if [ -d %s ]; then\n            mkdir -p %s\n            tar -czf %s/built-%s.tar.gz -C %s .\n          fi\n", artifactDir, carriedDir, carriedDir, j.id, artifactDir)
-			fmt.Fprintf(b, "\n      - name: Keep what this job built for the jobs after it\n        uses: actions/upload-artifact@v7\n        with:\n          name: built-${{ github.run_id }}-%s\n          path: %s/built-%s.tar.gz\n          if-no-files-found: ignore\n          retention-days: 7\n", j.id, carriedDir, j.id)
+			// One tarball per job, holding what THIS job made and nothing
+			// else. The mark is what draws that line: a carried file keeps
+			// the modification time it was built with, because tar restores
+			// it, so anything newer than the mark was written here.
+			//
+			// Packing the whole directory instead is the trap. Every job
+			// unpacks what every job before it kept, so a job that repacked
+			// the lot published its inheritance again under its own name,
+			// and the job after that inherited every copy. The traffic grows
+			// with the square of the jobs, and on a run of thirteen the
+			// packing and shipping came to more than the work.
+			//
+			// It is a tarball rather than loose files because the platform's
+			// artifact format is a zip, and a zip does not carry a unix
+			// mode: a binary uploaded loose comes back unexecutable and the
+			// stage that has to run it dies on "permission denied". It is
+			// gzipped because these are binaries and the upload is billed by
+			// the byte on a private repo.
+			fmt.Fprintf(b, "\n      - name: Pack what this job built\n        id: pack\n        run: |\n          if [ -d %s ]; then\n            find %s -type f -newer %s -printf '%%P\\n' > %s\n          else\n            : > %s\n          fi\n          if [ -s %s ]; then\n            mkdir -p %s\n            tar -czf %s/built-%s.tar.gz -C %s -T %s\n            echo packed=true >> \"$GITHUB_OUTPUT\"\n          else\n            echo packed=false >> \"$GITHUB_OUTPUT\"\n          fi\n",
+				artifactDir, artifactDir, packMark, packList, packList, packList, carriedDir, carriedDir, j.id, artifactDir, packList)
+			// A job that built nothing skips the upload outright. Most jobs
+			// build nothing - a gate, a publish, a lint - and the step costs
+			// the same whether or not it finds a file.
+			fmt.Fprintf(b, "\n      - name: Keep what this job built for the jobs after it\n        if: steps.pack.outputs.packed == 'true'\n        uses: actions/upload-artifact@v7\n        with:\n          name: built-${{ github.run_id }}-%s\n          path: %s/built-%s.tar.gz\n          retention-days: 7\n", j.id, carriedDir, j.id)
 		}
 
 		if j.push {

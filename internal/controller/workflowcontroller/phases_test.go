@@ -84,7 +84,11 @@ func TestPhasesRenderOneJobPerStageGatedOnTheEvaluation(t *testing.T) {
 		// The transport is a tarball per job: a zip carries no unix mode,
 		// so a binary a later stage has to RUN would arrive unexecutable.
 		"path: .forge-ci/carried\n",
-		"tar -czf .forge-ci/carried/built-build.tar.gz -C .forge-ci/artifacts .",
+		// Only what THIS job wrote goes in the tarball: anything older than
+		// the mark came out of a tarball a job before it kept.
+		"find .forge-ci/artifacts -type f -newer .forge-ci/pack-mark -printf '%P\\n' > .forge-ci/pack-list",
+		"tar -czf .forge-ci/carried/built-build.tar.gz -C .forge-ci/artifacts -T .forge-ci/pack-list",
+		"if: steps.pack.outputs.packed == 'true'\n        uses: actions/upload-artifact@v7",
 		"tar -xzf \"$f\" -C .forge-ci/artifacts",
 		"    paths-ignore: [\"*.md\", \"docs/**\"]\n",
 	} {
@@ -99,9 +103,13 @@ func TestPhasesRenderOneJobPerStageGatedOnTheEvaluation(t *testing.T) {
 	assert.Equal(t, 5, strings.Count(ci, "image: ghcr.io/o/toolchain:v1"))
 	assert.Equal(t, 5, strings.Count(ci, "forge clone git@github.com:o/r.git ."))
 	assert.Equal(t, 3, strings.Count(ci, "uses: actions/upload-artifact@v7"))
-	// Every stage job downloads: a stage reads what the stage before it
-	// built, and the stage that publishes reads all of it.
-	assert.Equal(t, 3, strings.Count(ci, "uses: actions/download-artifact@v8"))
+	// Every stage job after the first downloads: a stage reads what the
+	// stage before it built, and the stage that publishes reads all of it.
+	// The first stage has nothing in front of it, so it skips a step that
+	// could only ever match nothing.
+	assert.Equal(t, 2, strings.Count(ci, "uses: actions/download-artifact@v8"))
+	first := ci[strings.Index(ci, "  check:\n"):strings.Index(ci, "  build:\n")]
+	assert.NotContains(t, first, "download-artifact")
 	assert.NotContains(t, ci, "--phase release")
 	assert.NotContains(t, ci, "Install the toolchain")
 	assert.Equal(t, 1, strings.Count(ci, "jobs:\n"))
@@ -136,9 +144,12 @@ func TestJobsPerSubstageRenderAPromotionJobPerStage(t *testing.T) {
 
 	// Four substage jobs upload; the three promotion jobs build nothing.
 	assert.Equal(t, 4, strings.Count(ci, "uses: actions/upload-artifact@v7"))
-	// The same four download. A promotion gate reads records and runs no
-	// target, so it needs no files.
-	assert.Equal(t, 4, strings.Count(ci, "uses: actions/download-artifact@v8"))
+	// Three of them download. A promotion gate reads records and runs no
+	// target, so it needs no files, and the first stage has nothing in
+	// front of it to bring back.
+	assert.Equal(t, 3, strings.Count(ci, "uses: actions/download-artifact@v8"))
+	firstStage := ci[strings.Index(ci, "  check-default:"):strings.Index(ci, "  check-promotion-gate:")]
+	assert.NotContains(t, firstStage, "download-artifact")
 	gate := ci[strings.Index(ci, "  publish-promotion-gate:"):]
 	assert.NotContains(t, gate, "download-artifact")
 	assert.Equal(t, 9, strings.Count(ci, "forge clone git@github.com:o/r.git ."))
