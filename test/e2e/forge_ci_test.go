@@ -65,6 +65,13 @@ func run(t *testing.T, dir, name string, args ...string) (string, error) {
 		"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
 		"GIT_AUTHOR_NAME=e2e", "GIT_AUTHOR_EMAIL=e2e@example.com",
 		"GIT_COMMITTER_NAME=e2e", "GIT_COMMITTER_EMAIL=e2e@example.com",
+		// This suite is itself a stage of forge-self's pipeline, so the
+		// marker apply sets for its stages is in the environment, and every
+		// apply the suite spawns would be refused as the loop calling itself
+		// (forge-self run 88: 25 of 27 red). The suite's applies are on
+		// scratch repos of their own and are not that loop; the marker is
+		// cleared for them, and only for them.
+		"FORGE_CI_IN_APPLY=",
 	)
 
 	out, err := cmd.CombinedOutput()
