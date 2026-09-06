@@ -573,6 +573,14 @@ var folds = map[string]string{
 func foldHint(err error) error {
 	msg := err.Error()
 
+	// A bare on: is the boolean true to a YAML 1.1 parser, which is what
+	// forge's own reads, so the key arrives spelled "true". The fix is one
+	// pair of quotes, and the refusal says so rather than naming a key
+	// nobody wrote.
+	if strings.Contains(msg, `unknown field "true"`) {
+		return errors.New(`a bare on: key is read as the boolean true; write it quoted, "on":`)
+	}
+
 	for old, now := range folds {
 		if strings.Contains(msg, `unknown field "`+old+`"`) {
 			return fmt.Errorf("%s is no longer a key; write %s", old, now)

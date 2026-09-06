@@ -462,6 +462,15 @@ func TestAnUnknownOrRetiredKeyIsRefusedByName(t *testing.T) {
 		require.ErrorContains(t, err, old+" is no longer a key; write "+now)
 	}
 
+	// YAML 1.1 reads a bare on: as the boolean true, so the key arrives as
+	// "true" from an unquoted file; the refusal names the quotes.
+	spec = base()
+	w := spec["workflows"].([]any)[0].(map[string]any)
+	w["true"] = w["on"]
+	delete(w, "on")
+	_, err = workflowcontroller.ParseSpec(spec)
+	require.ErrorContains(t, err, `write it quoted, "on":`)
+
 	// on.push needs branches: a push block with nothing to match starts
 	// nothing, silently.
 	spec = base()
