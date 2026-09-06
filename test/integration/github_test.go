@@ -368,7 +368,7 @@ func TestTheGitHubComputeReportsARedRunAsFailedOverMCP(t *testing.T) {
 			Revision: "0123456789abcdef",
 			Stage:    "process",
 			Substage: "default",
-			Targets:  []citypes.Target{{Alias: "process", Forge: "test run process", In: []string{"r"}}},
+			Targets:  []citypes.Target{{Alias: "process", Binary: "forge", Args: []string{"test", "run", "process"}, In: []string{"r"}}},
 			Spec: map[string]any{
 				"repo":       "o/r",
 				"apiBaseURL": srv.URL,

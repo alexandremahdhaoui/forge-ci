@@ -14,11 +14,6 @@ import (
 	"github.com/alexandremahdhaoui/forge/pkg/forge"
 )
 
-// TypeContainer is the artifact type a container build records. Filtering on
-// it is what keeps a container off the binary upload path and a binary out of
-// the registry.
-const TypeContainer = "container"
-
 var (
 	ErrVersion = errors.New("the version is not a semver tag")
 	// ErrRevision means a release was asked for with no revision, so nothing
@@ -184,7 +179,9 @@ func layoutsOf(artifacts []forge.Artifact) ([]string, error) {
 	seen := map[string]bool{}
 
 	for _, a := range artifacts {
-		if a.Type != TypeContainer {
+		// forge's own word for an image layout. Filtering on it is what
+		// keeps a binary out of the registry.
+		if a.Type != forge.TypeContainer {
 			continue
 		}
 

@@ -201,7 +201,7 @@ func TestAContainerFileResolvesThePinFromTheWorkspace(t *testing.T) {
 	spec["containerFile"] = ".forge/toolchain-image"
 	spec["workspace"] = map[string]any{"bootstrapCommand": "true"}
 
-	out, err := c.Declare(spec, root, nil)
+	out, err := c.Declare(spec, root, nil, nil)
 	require.NoError(t, err)
 
 	rendered := false
@@ -224,7 +224,7 @@ func TestAMissingContainerFileNamesTheSyncThatWritesIt(t *testing.T) {
 	spec := specMap(t)
 	spec["containerFile"] = ".forge/toolchain-image"
 
-	_, err := c.Declare(spec, t.TempDir(), nil)
+	_, err := c.Declare(spec, t.TempDir(), nil, nil)
 	require.ErrorContains(t, err, "sync first")
 }
 
@@ -241,7 +241,7 @@ func TestAnEmptyContainerFileIsRefused(t *testing.T) {
 	spec := specMap(t)
 	spec["containerFile"] = ".forge/toolchain-image"
 
-	_, err := c.Declare(spec, root, nil)
+	_, err := c.Declare(spec, root, nil, nil)
 	require.ErrorContains(t, err, "is empty")
 }
 
@@ -359,7 +359,7 @@ func TestDeclareEmitsEveryGitHubResource(t *testing.T) {
 		map[string]any{"name": "release", "kind": "release", "secret": "FORGE_CI_GITHUB_TOKEN"},
 	}
 
-	out, err := c.Declare(spec, "", nil)
+	out, err := c.Declare(spec, "", nil, nil)
 	require.NoError(t, err)
 
 	ids := make([]string, 0, len(out.Resources))
@@ -406,7 +406,7 @@ func runInput(spec map[string]any) citypes.RunInput {
 		Revision: "0123456789abcdef",
 		Stage:    "process",
 		Substage: "default",
-		Targets:  []citypes.Target{{Alias: "process", Forge: "test run process", In: []string{"r"}}},
+		Targets:  []citypes.Target{{Alias: "process", Binary: "forge", Args: []string{"test", "run", "process"}, In: []string{"r"}}},
 		Spec:     spec,
 	}
 }
@@ -571,7 +571,7 @@ func TestDeclareRefusesANamelessSecret(t *testing.T) {
 	spec := specMap(t)
 	spec["secrets"] = []any{map[string]any{"fromEnv": "X"}}
 
-	_, err := c.Declare(spec, "", nil)
+	_, err := c.Declare(spec, "", nil, nil)
 	require.ErrorContains(t, err, "secrets entry has no name")
 }
 
@@ -581,9 +581,9 @@ func TestRunRefusesABrokenTarget(t *testing.T) {
 	c := workflowcontroller.New(nil, nil, nil)
 
 	in := runInput(specMap(t))
-	in.Targets = []citypes.Target{{Alias: "both", Forge: "x", ForgeCI: "y"}}
+	in.Targets = []citypes.Target{{Alias: "none", Args: []string{"x"}}}
 	_, err := c.Run(t.Context(), in)
-	require.ErrorContains(t, err, "exactly one of forge or forgeCI")
+	require.ErrorContains(t, err, "needs a binary")
 }
 
 func TestRunSurfacesAPollError(t *testing.T) {

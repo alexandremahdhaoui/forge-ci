@@ -25,13 +25,19 @@ notes: 'A dirty revision is refused. It was never proven, so releasing it publis
   what a consumer already pinned.
 
 
-  What uploads: every binary artifact the runs built, plus anything whose file name
+  What uploads: every binary the runs built for a platform, read from the fields
 
-  carries the name_os_arch platform suffix - a cross-built binary travels under that
+  its record carries - the engine that built it said which OS and architecture,
 
-  convention whatever engine produced it. A container image or a URL is somebody
+  and the asset is named <name>_<os>_<arch> from those fields, never parsed from
 
-  else''s to serve.
+  a file name. A record with no platform says nothing about where it runs and
+
+  stays home; a container image or a URL is somebody else''s to serve. spec.assets
+
+  globs add plain assets no record carries, which ride the release and stay out
+
+  of the index.
 
 
   The release itself is ONE aggregated release per revision, tagged with the version

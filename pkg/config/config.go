@@ -155,11 +155,14 @@ type Engine struct {
 	Spec    map[string]any `json:"spec,omitempty"`
 }
 
+// Target is one thing to run: an executable found on PATH and its
+// arguments, one per element, in each repo named by In. The pipeline names
+// the binary; forge-ci names none.
 type Target struct {
-	Alias   string   `json:"alias"`
-	Forge   string   `json:"forge,omitempty"`
-	ForgeCI string   `json:"forgeCI,omitempty"`
-	In      []string `json:"in,omitempty"`
+	Alias  string   `json:"alias"`
+	Binary string   `json:"binary"`
+	Args   []string `json:"args,omitempty"`
+	In     []string `json:"in,omitempty"`
 }
 
 type Stage struct {
@@ -198,6 +201,12 @@ type Substage struct {
 	// must not race had to live in stages of their own, and the stage list
 	// stopped describing the pipeline.
 	Needs []string `json:"needs,omitempty"`
+	// Uses names substages of EARLIER stages, as <stage>/<substage>, whose
+	// built artifacts this one reads. Absent means everything every earlier
+	// stage built, which is what every substage read before this existed.
+	// Declared, a stage job brings back only what it named, and a stage
+	// that reads nothing carries nothing.
+	Uses []string `json:"uses,omitempty"`
 }
 
 // HasSubstage answers whether the stage declares a substage of this name.
@@ -417,8 +426,8 @@ func (p Pipeline) Validate() error {
 			add("%s: alias must be lowercase kebab-case", where)
 		}
 
-		if (t.Forge == "") == (t.ForgeCI == "") {
-			add("%s: target needs exactly one of forge or forgeCI", where)
+		if strings.TrimSpace(t.Binary) == "" {
+			add("%s: binary must name the executable to run", where)
 		}
 
 		for _, r := range t.In {
@@ -514,6 +523,30 @@ func (p Pipeline) Validate() error {
 					add("%s: needs names itself", subWhere)
 				} else if !s.HasSubstage(n) {
 					add("%s: needs names %q, which is not a substage of stage %q", subWhere, n, s.Name)
+				}
+			}
+		}
+
+		// A use names a substage of an EARLIER stage. This stage's own
+		// substages have not built anything a sibling can read, and a
+		// later stage has not run; both are refused by name rather than
+		// carried as an empty download.
+		for j, sub := range s.Substages {
+			subWhere := fmt.Sprintf("%s: substages[%d] (%s)", where, j, sub.Name)
+
+			for _, u := range sub.Uses {
+				stageName, subName, ok := strings.Cut(u, "/")
+				if !ok {
+					add("%s: uses %q is not <stage>/<substage>", subWhere, u)
+
+					continue
+				}
+
+				before, found := p.stageBefore(i, stageName)
+				if !found {
+					add("%s: uses names %q, which is not a stage before %q", subWhere, stageName, s.Name)
+				} else if !before.HasSubstage(subName) {
+					add("%s: uses names %q, which is not a substage of stage %q", subWhere, u, stageName)
 				}
 			}
 		}
@@ -662,4 +695,19 @@ func IgnoreRepos(spec map[string]any) []string {
 	}
 
 	return out
+}
+
+// stageBefore answers the stage named, when it comes before position at.
+func (p Pipeline) stageBefore(at int, name string) (Stage, bool) {
+	for i, s := range p.Stages {
+		if i >= at {
+			return Stage{}, false
+		}
+
+		if s.Name == name {
+			return s, true
+		}
+	}
+
+	return Stage{}, false
 }

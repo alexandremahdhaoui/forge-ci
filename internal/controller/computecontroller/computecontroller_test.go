@@ -42,7 +42,7 @@ func TestForgeTargetRunsInTheNamedRepo(t *testing.T) {
 
 	out, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
 		Root:    "/work",
-		Targets: []citypes.Target{{Alias: "build", Forge: "test-all", In: []string{"golden-rust"}}},
+		Targets: []citypes.Target{{Alias: "build", Binary: "forge", Args: []string{"test-all"}, In: []string{"golden-rust"}}},
 	})
 	require.NoError(t, err)
 	require.Equal(t, citypes.StatusPassed, out.Status)
@@ -75,7 +75,7 @@ func TestSyncConvergesTheWorkspaceBeforeAnyTarget(t *testing.T) {
 	out, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
 		Root:    "/work",
 		Sync:    true,
-		Targets: []citypes.Target{{Alias: "build", Forge: "test-all", In: []string{"golden-rust"}}},
+		Targets: []citypes.Target{{Alias: "build", Binary: "forge", Args: []string{"test-all"}, In: []string{"golden-rust"}}},
 	})
 	require.NoError(t, err)
 	require.Equal(t, citypes.StatusPassed, out.Status)
@@ -93,7 +93,7 @@ func TestAFailingConvergenceFailsTheRunAndStopsIt(t *testing.T) {
 	out, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
 		Root:    "/work",
 		Sync:    true,
-		Targets: []citypes.Target{{Alias: "build", Forge: "test-all", In: []string{"golden-rust"}}},
+		Targets: []citypes.Target{{Alias: "build", Binary: "forge", Args: []string{"test-all"}, In: []string{"golden-rust"}}},
 	})
 	require.NoError(t, err, "a red convergence is a failed run, never an error")
 	require.Equal(t, citypes.StatusFailed, out.Status)
@@ -109,7 +109,7 @@ func TestNoSyncMeansNoConvergence(t *testing.T) {
 
 	out, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
 		Root:    "/work",
-		Targets: []citypes.Target{{Alias: "build", Forge: "test-all", In: []string{"golden-rust"}}},
+		Targets: []citypes.Target{{Alias: "build", Binary: "forge", Args: []string{"test-all"}, In: []string{"golden-rust"}}},
 	})
 	require.NoError(t, err)
 	require.Equal(t, citypes.StatusPassed, out.Status)
@@ -122,7 +122,7 @@ func TestNoRepoMeansTheRoot(t *testing.T) {
 
 	out, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
 		Root:    "/work",
-		Targets: []citypes.Target{{Alias: "self", ForgeCI: "apply"}},
+		Targets: []citypes.Target{{Alias: "self", Binary: "forge-ci", Args: []string{"apply"}}},
 	})
 	require.NoError(t, err)
 	require.Equal(t, citypes.StatusPassed, out.Status)
@@ -136,7 +136,7 @@ func TestACheckoutPathWins(t *testing.T) {
 	_, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
 		Root:    "/work",
 		Repos:   []citypes.RepoCheckout{{Name: "golden-rust", Path: "/checkouts/abc/golden-rust"}},
-		Targets: []citypes.Target{{Alias: "build", Forge: "test-all", In: []string{"golden-rust"}}},
+		Targets: []citypes.Target{{Alias: "build", Binary: "forge", Args: []string{"test-all"}, In: []string{"golden-rust"}}},
 	})
 	require.NoError(t, err)
 }
@@ -148,7 +148,7 @@ func TestAFailingTestIsNotAnError(t *testing.T) {
 
 	out, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
 		Root:    "/work",
-		Targets: []citypes.Target{{Alias: "build", Forge: "test-all"}},
+		Targets: []citypes.Target{{Alias: "build", Binary: "forge", Args: []string{"test-all"}}},
 	})
 	require.NoError(t, err)
 	require.Equal(t, citypes.StatusFailed, out.Status)
@@ -163,7 +163,7 @@ func TestABrokenRunnerIsAnError(t *testing.T) {
 
 	_, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
 		Root:    "/work",
-		Targets: []citypes.Target{{Alias: "build", Forge: "test-all"}},
+		Targets: []citypes.Target{{Alias: "build", Binary: "forge", Args: []string{"test-all"}}},
 	})
 	require.ErrorIs(t, err, errBoom)
 	require.Contains(t, err.Error(), `running target "build"`)
@@ -177,8 +177,8 @@ func TestAFailedTargetStopsTheRest(t *testing.T) {
 	out, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
 		Root: "/work",
 		Targets: []citypes.Target{
-			{Alias: "first", Forge: "one"},
-			{Alias: "second", Forge: "two"},
+			{Alias: "first", Binary: "forge", Args: []string{"one"}},
+			{Alias: "second", Binary: "forge", Args: []string{"two"}},
 		},
 	})
 	require.NoError(t, err)
@@ -194,7 +194,7 @@ func TestParamsAreTemplatedIntoTheTarget(t *testing.T) {
 	_, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
 		Root:    "/work",
 		Params:  map[string]string{"region": "eu-west-1", "cell": "a"},
-		Targets: []citypes.Target{{Alias: "deploy", Forge: "run deploy --region {{.Params.region}} --cell {{.Params.cell}}"}},
+		Targets: []citypes.Target{{Alias: "deploy", Binary: "forge", Args: []string{"run", "deploy", "--region", "{{.Params.region}}", "--cell", "{{.Params.cell}}"}}},
 	})
 	require.NoError(t, err)
 }
@@ -204,7 +204,7 @@ func TestAMissingParamIsAnError(t *testing.T) {
 
 	_, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
 		Root:    "/work",
-		Targets: []citypes.Target{{Alias: "deploy", Forge: "run deploy --cell {{.Params.cell}}"}},
+		Targets: []citypes.Target{{Alias: "deploy", Binary: "forge", Args: []string{"run", "deploy", "--cell", "{{.Params.cell}}"}}},
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), `expanding target "deploy"`)
@@ -215,18 +215,18 @@ func TestABrokenTemplateIsAnError(t *testing.T) {
 
 	_, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
 		Root:    "/work",
-		Targets: []citypes.Target{{Alias: "deploy", Forge: "run {{.Params."}},
+		Targets: []citypes.Target{{Alias: "deploy", Binary: "forge", Args: []string{"run", "{{.Params."}}},
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), `expanding target "deploy"`)
 }
 
-func TestATargetNeedsExactlyOneKindOfWork(t *testing.T) {
+func TestATargetNeedsABinary(t *testing.T) {
 	runner := execadaptermock.NewMockRunner(t)
 
 	for _, target := range []citypes.Target{
 		{Alias: "neither"},
-		{Alias: "both", Forge: "a", ForgeCI: "b"},
+		{Alias: "blank", Binary: "  ", Args: []string{"a"}},
 	} {
 		_, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
 			Root: "/work", Targets: []citypes.Target{target},
@@ -254,7 +254,7 @@ func TestForgeResultsAreHarvestedAndMerged(t *testing.T) {
 
 	out, err := computecontroller.New(runner, h, nil).Run(context.Background(), citypes.RunInput{
 		Root:    "/work",
-		Targets: []citypes.Target{{Alias: "build", Forge: "test-all", In: []string{"a", "b"}}},
+		Targets: []citypes.Target{{Alias: "build", Binary: "forge", Args: []string{"test-all"}, In: []string{"a", "b"}}},
 	})
 	require.NoError(t, err)
 	require.NotNil(t, out.Forge)
@@ -275,7 +275,7 @@ func TestTheRevisionReachesTheTargetEnvironment(t *testing.T) {
 	_, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
 		Root:     "/work",
 		Revision: "abc123def456",
-		Targets:  []citypes.Target{{Alias: "build", Forge: "test-all"}},
+		Targets:  []citypes.Target{{Alias: "build", Binary: "forge", Args: []string{"test-all"}}},
 	})
 	require.NoError(t, err)
 }
@@ -297,7 +297,7 @@ func TestHarvestedArtifactLocationsAreRebasedOntoTheRoot(t *testing.T) {
 
 	out, err := computecontroller.New(runner, h, nil).Run(context.Background(), citypes.RunInput{
 		Root:    "/work",
-		Targets: []citypes.Target{{Alias: "build", Forge: "test-all", In: []string{"member"}}},
+		Targets: []citypes.Target{{Alias: "build", Binary: "forge", Args: []string{"test-all"}, In: []string{"member"}}},
 	})
 	require.NoError(t, err)
 	require.Equal(t, "member/build/dist/bin_linux_amd64", out.Forge.Artifacts[0].Location)
@@ -310,7 +310,7 @@ func TestNothingToHarvestIsFine(t *testing.T) {
 	runner.EXPECT().RunEnv(mock.Anything, mock.Anything, mock.Anything, "forge", "test-all").Return(passing(), nil).Once()
 
 	out, err := computecontroller.New(runner, &stubHarvester{}, nil).Run(context.Background(), citypes.RunInput{
-		Root: "/work", Targets: []citypes.Target{{Alias: "build", Forge: "test-all"}},
+		Root: "/work", Targets: []citypes.Target{{Alias: "build", Binary: "forge", Args: []string{"test-all"}}},
 	})
 	require.NoError(t, err)
 	require.Nil(t, out.Forge)
@@ -322,23 +322,26 @@ func TestAHarvestFailureIsAnError(t *testing.T) {
 
 	_, err := computecontroller.New(runner, &stubHarvester{err: errBoom}, nil).
 		Run(context.Background(), citypes.RunInput{
-			Root: "/work", Targets: []citypes.Target{{Alias: "build", Forge: "test-all"}},
+			Root: "/work", Targets: []citypes.Target{{Alias: "build", Binary: "forge", Args: []string{"test-all"}}},
 		})
 	require.ErrorIs(t, err, errBoom)
 }
 
-func TestAForgeCITargetIsNotHarvested(t *testing.T) {
+// Whatever binary a target names, the store its dir may hold is read: the
+// engine names no binary to decide whether to look, and a dir without a
+// store harvests nothing on its own.
+func TestEveryTargetIsHarvested(t *testing.T) {
 	runner := execadaptermock.NewMockRunner(t)
 	runner.EXPECT().RunEnv(mock.Anything, mock.Anything, mock.Anything, "forge-ci", "apply").Return(passing(), nil).Once()
 
 	h := &stubHarvester{result: &citypes.ForgeResult{Artifacts: []forge.Artifact{{Name: "x"}}}}
 
 	out, err := computecontroller.New(runner, h, nil).Run(context.Background(), citypes.RunInput{
-		Root: "/work", Targets: []citypes.Target{{Alias: "self", ForgeCI: "apply"}},
+		Root: "/work", Targets: []citypes.Target{{Alias: "self", Binary: "forge-ci", Args: []string{"apply"}}},
 	})
 	require.NoError(t, err)
-	require.Nil(t, out.Forge)
-	require.Empty(t, h.dirs)
+	require.NotNil(t, out.Forge)
+	require.Equal(t, []string{"/work"}, h.dirs)
 }
 
 func TestComputeDeclaresNoResources(t *testing.T) {
@@ -357,7 +360,7 @@ func TestTheHarvesterIsToldWhenTheRunStarted(t *testing.T) {
 
 	_, err := computecontroller.New(runner, h, func() time.Time { return started }).
 		Run(context.Background(), citypes.RunInput{
-			Root: "/work", Targets: []citypes.Target{{Alias: "build", Forge: "test-all"}},
+			Root: "/work", Targets: []citypes.Target{{Alias: "build", Binary: "forge", Args: []string{"test-all"}}},
 		})
 	require.NoError(t, err)
 	require.Equal(t, started, h.since)
@@ -383,7 +386,7 @@ func TestWithNoNeedsTheDirsRunOneAtATimeInOrder(t *testing.T) {
 		Repos: []citypes.RepoCheckout{
 			{Name: "c"}, {Name: "a"}, {Name: "b"},
 		},
-		Targets: []citypes.Target{{Alias: "build", Forge: "test-all", In: []string{"c", "a", "b"}}},
+		Targets: []citypes.Target{{Alias: "build", Binary: "forge", Args: []string{"test-all"}, In: []string{"c", "a", "b"}}},
 	})
 	require.NoError(t, err)
 	require.Equal(t, citypes.StatusPassed, out.Status)
@@ -430,7 +433,7 @@ func TestAWaveRunsItsMembersAtOnce(t *testing.T) {
 				{Name: "last", Needs: []string{"one", "two", "three"}},
 			},
 			Targets: []citypes.Target{{
-				Alias: "build", Forge: "test-all",
+				Alias: "build", Binary: "forge", Args: []string{"test-all"},
 				In: []string{"one", "two", "three", "last"},
 			}},
 		})
@@ -479,7 +482,7 @@ func TestAFailedWaveFinishesAndStopsTheNext(t *testing.T) {
 			{Name: "last", Needs: []string{"one", "two"}},
 		},
 		Targets: []citypes.Target{{
-			Alias: "build", Forge: "test-all", In: []string{"one", "two", "last"},
+			Alias: "build", Binary: "forge", Args: []string{"test-all"}, In: []string{"one", "two", "last"},
 		}},
 	})
 	require.NoError(t, err, "a failing build is a failed run and never an error")
@@ -498,8 +501,24 @@ func TestACycleIsAnError(t *testing.T) {
 				{Name: "one", Needs: []string{"two"}},
 				{Name: "two", Needs: []string{"one"}},
 			},
-			Targets: []citypes.Target{{Alias: "build", Forge: "test-all", In: []string{"one", "two"}}},
+			Targets: []citypes.Target{{Alias: "build", Binary: "forge", Args: []string{"test-all"}, In: []string{"one", "two"}}},
 		})
 	require.ErrorIs(t, err, citypes.ErrCycle)
 	require.Empty(t, out.Status)
+}
+
+// Arguments reach the binary one per element and are never split: an
+// argument holding a space is one argument, which is what a shell-quoted
+// argument in a target used to lose.
+func TestAnArgumentHoldingASpaceStaysOneArgument(t *testing.T) {
+	runner := execadaptermock.NewMockRunner(t)
+	runner.EXPECT().
+		RunEnv(mock.Anything, "/work", mock.Anything, "sh", "-c", "echo one two").
+		Return(passing(), nil).Once()
+
+	_, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
+		Root:    "/work",
+		Targets: []citypes.Target{{Alias: "say", Binary: "sh", Args: []string{"-c", "echo one two"}}},
+	})
+	require.NoError(t, err)
 }

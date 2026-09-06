@@ -99,7 +99,7 @@ func (c *Controller) applyNamedStage(
 	)
 
 	if at > 0 {
-		carried, err = c.carryForward(ctx, index, revision, root, p.Stages[:at])
+		carried, err = c.carryForward(ctx, index, revision, root, p.Stages[:at], usesOf(stage))
 		if err != nil {
 			return Report{}, fmt.Errorf("carrying what the stages before %q built: %w", stage.Name, err)
 		}

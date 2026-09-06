@@ -19,7 +19,7 @@ func base() config.Pipeline {
 		},
 		State:    "st",
 		Triggers: []string{"watch"},
-		Targets:  []config.Target{{Alias: "build", Forge: "test-all", In: []string{"a"}}},
+		Targets:  []config.Target{{Alias: "build", Binary: "forge", Args: []string{"test-all"}, In: []string{"a"}}},
 		Stages: []config.Stage{{
 			Name: "build",
 			Substages: []config.Substage{{
@@ -71,7 +71,7 @@ func TestDuplicateAliasesAreRejectedEverywhere(t *testing.T) {
 	requireInvalid(t, p, "duplicate manager alias")
 
 	p = base()
-	p.Targets = append(p.Targets, config.Target{Alias: "build", Forge: "x"})
+	p.Targets = append(p.Targets, config.Target{Alias: "build", Binary: "forge", Args: []string{"x"}})
 	requireInvalid(t, p, "duplicate target alias")
 
 	p = base()
@@ -181,4 +181,44 @@ func TestEveryErrorIsReportedNotJustTheFirst(t *testing.T) {
 	require.Contains(t, err.Error(), "name is required")
 	require.Contains(t, err.Error(), "state is required")
 	require.Contains(t, err.Error(), "unknown target")
+}
+
+// A substage declares what it reads as <stage>/<substage> pairs of EARLIER
+// stages. Its own stage has built nothing a sibling can read, a later stage
+// has not run, and a name nothing declares is a download of nothing; each is
+// refused by name.
+func TestUsesNamesASubstageOfAnEarlierStage(t *testing.T) {
+	p := base()
+	p.Stages = append(p.Stages, config.Stage{
+		Name: "package",
+		Substages: []config.Substage{{
+			Name: "default", Engine: "here", Manager: "local", Targets: []string{"build"},
+			Uses: []string{"build/default"},
+		}},
+	})
+	require.NoError(t, p.Validate())
+
+	p.Stages[1].Substages[0].Uses = []string{"package/default"}
+	requireInvalid(t, p, `uses names "package", which is not a stage before "package"`)
+
+	p.Stages[1].Substages[0].Uses = []string{"build/other"}
+	requireInvalid(t, p, `uses names "build/other", which is not a substage of stage "build"`)
+
+	p.Stages[1].Substages[0].Uses = []string{"build"}
+	requireInvalid(t, p, `uses "build" is not <stage>/<substage>`)
+
+	p.Stages[1].Substages[0].Uses = nil
+	p.Stages[0].Substages[0].Uses = []string{"package/default"}
+	requireInvalid(t, p, `uses names "package", which is not a stage before "build"`)
+}
+
+// The pipeline names the executable; forge-ci names none. A target with no
+// binary is refused, and a blank one is no binary.
+func TestATargetNamesItsBinary(t *testing.T) {
+	p := base()
+	p.Targets = []config.Target{{Alias: "build", Args: []string{"test-all"}}}
+	requireInvalid(t, p, "binary must name the executable to run")
+
+	p.Targets = []config.Target{{Alias: "build", Binary: " "}}
+	requireInvalid(t, p, "binary must name the executable to run")
 }

@@ -16,12 +16,10 @@ import (
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 )
 
-var ErrTarget = errors.New("a target needs exactly one of forge or forgeCI")
-
-const (
-	forgeBinary   = "forge"
-	forgeCIBinary = "forge-ci"
-)
+// ErrTarget means a target names no executable. The pipeline schema refuses
+// that first; this is the last line, for an input that reached the engine
+// without the schema.
+var ErrTarget = errors.New("a target needs a binary")
 
 type Controller struct {
 	runner    execadapter.Runner
@@ -93,10 +91,12 @@ func (c *Controller) Run(ctx context.Context, in citypes.RunInput) (citypes.RunO
 	var mu sync.Mutex
 
 	for _, target := range in.Targets {
-		binary, expanded, err := CommandFor(target, in.Params)
+		binary, args, err := CommandFor(target, in.Params)
 		if err != nil {
 			return citypes.RunOutput{}, err
 		}
+
+		shown := strings.Join(append([]string{binary}, args...), " ")
 
 		waves, err := citypes.WavesFor(target, in)
 		if err != nil {
@@ -122,7 +122,7 @@ func (c *Controller) Run(ctx context.Context, in citypes.RunInput) (citypes.RunO
 				go func(dir string) {
 					defer wg.Done()
 
-					res, err := c.runner.RunEnv(ctx, dir, env, binary, strings.Fields(expanded)...)
+					res, err := c.runner.RunEnv(ctx, dir, env, binary, args...)
 
 					mu.Lock()
 					defer mu.Unlock()
@@ -137,14 +137,17 @@ func (c *Controller) Run(ctx context.Context, in citypes.RunInput) (citypes.RunO
 
 					// One Fprintf per dir, under the lock, so two members of
 					// a wave cannot interleave halfway through a line.
-					fmt.Fprintf(&log, "$ %s %s (in %s)\n%s%s", binary, expanded, dir, res.Stdout, res.Stderr)
+					fmt.Fprintf(&log, "$ %s (in %s)\n%s%s", shown, dir, res.Stdout, res.Stderr)
 
 					if res.ExitCode != 0 && out.Status != citypes.StatusFailed {
 						out.Status = citypes.StatusFailed
 						out.Message = fmt.Sprintf("target %q exited %d in %s", target.Alias, res.ExitCode, dir)
 					}
 
-					if binary != forgeBinary || c.harvester == nil {
+					// Whatever the target was, the store it may have written is
+					// read. A dir with no store harvests nothing, so the engine
+					// names no binary to decide whether to look.
+					if c.harvester == nil {
 						return
 					}
 
@@ -184,31 +187,26 @@ func (c *Controller) Run(ctx context.Context, in citypes.RunInput) (citypes.RunO
 }
 
 // CommandFor answers the binary and the expanded arguments one target
-// runs. It is shared with the remote compute engines, so a target means
-// the same thing wherever it executes.
-func CommandFor(t citypes.Target, params map[string]string) (string, string, error) {
-	binary, raw, err := binaryFor(t)
-	if err != nil {
-		return "", "", err
+// runs, one argument per element and never split on whitespace, so an
+// argument holding a space stays one argument. It is shared with the remote
+// compute engines, so a target means the same thing wherever it executes.
+func CommandFor(t citypes.Target, params map[string]string) (string, []string, error) {
+	if strings.TrimSpace(t.Binary) == "" {
+		return "", nil, fmt.Errorf("target %q: %w", t.Alias, ErrTarget)
 	}
 
-	expanded, err := expand(raw, params)
-	if err != nil {
-		return "", "", fmt.Errorf("expanding target %q: %w", t.Alias, err)
+	args := make([]string, 0, len(t.Args))
+
+	for _, raw := range t.Args {
+		expanded, err := expand(raw, params)
+		if err != nil {
+			return "", nil, fmt.Errorf("expanding target %q: %w", t.Alias, err)
+		}
+
+		args = append(args, expanded)
 	}
 
-	return binary, expanded, nil
-}
-
-func binaryFor(t citypes.Target) (string, string, error) {
-	switch {
-	case t.Forge != "" && t.ForgeCI == "":
-		return forgeBinary, t.Forge, nil
-	case t.ForgeCI != "" && t.Forge == "":
-		return forgeCIBinary, t.ForgeCI, nil
-	default:
-		return "", "", fmt.Errorf("target %q: %w", t.Alias, ErrTarget)
-	}
+	return t.Binary, args, nil
 }
 
 // pathsFor puts one wave's repo names on disk. The empty name is the

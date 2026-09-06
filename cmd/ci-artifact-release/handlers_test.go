@@ -31,7 +31,10 @@ func TestAssetsResolveAbsolutelyWhateverTheRootLooksLike(t *testing.T) {
 	// that makes a relative join resolve into the wrong tree.
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "forge-self-factory"), 0o750))
 
-	upload := filepath.Join("forge-ci", "build", "bin", "ci-artifact-release_linux_amd64")
+	upload := artifactcontroller.Upload{
+		Path:  filepath.Join("forge-ci", "build", "bin", "ci-artifact-release_linux_amd64"),
+		Asset: "ci-artifact-release_linux_amd64", Name: "ci-artifact-release", OS: "linux", Arch: "amd64",
+	}
 	plan := artifactcontroller.Plan{Version: "v0.1.1", TagName: "v0.1.1"}
 
 	cwd, err := os.Getwd()
@@ -46,15 +49,18 @@ func TestAssetsResolveAbsolutelyWhateverTheRootLooksLike(t *testing.T) {
 		"a trailing slash": root + "/",
 	} {
 		t.Run(name, func(t *testing.T) {
-			assets, _, err := stageAssets(given, plan, []string{upload}, "abc")
+			assets, _, err := stageAssets(given, plan, []artifactcontroller.Upload{upload}, "abc")
 			require.NoError(t, err)
 			require.NotEmpty(t, assets)
 
 			for _, a := range assets {
-				require.True(t, filepath.IsAbs(a),
-					"the working directory is nobody's to promise, so %q resolves against the wrong tree", a)
-				require.FileExists(t, a)
+				require.True(t, filepath.IsAbs(a.Path),
+					"the working directory is nobody's to promise, so %q resolves against the wrong tree", a.Path)
+				require.FileExists(t, a.Path)
 			}
+
+			require.Equal(t, "ci-artifact-release_linux_amd64", assets[0].Name,
+				"the asset travels under the name the plan composed")
 		})
 	}
 }

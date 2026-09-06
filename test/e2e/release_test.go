@@ -119,22 +119,27 @@ func newReleaseFake(t *testing.T) *releaseFake {
 	return f
 }
 
-// The build produces a platform-suffixed binary the way an instance would
-// (generic-builder, cross-building convention), the release stage tags the
-// member and publishes ONE aggregated release per revision: the binary plus
-// the index that pins its digest.
+// The build declares one tool over two platforms the way an instance would,
+// and generic-builder runs it once per platform: the host build lands at
+// dest/<name>, the cross build at dest/<name>_<os>_<arch>, each recorded
+// with the platform it was built for. The release stage reads those fields,
+// tags the member and publishes ONE aggregated release per revision: both
+// binaries plus the index that pins their digests. The bytes carry the
+// commit they were built from, as a real build's version stamp would, so a
+// new commit is a new binary and not a byte-identical rerun.
 const releaseForgeYAML = `name: demo-repo
 
 artifactStorePath: .forge/artifact-store.yaml
 
 build:
-  - name: demo-tool_linux_amd64
+  - name: demo-tool
     src: .
     dest: build/dist
     engine: forge://generic-builder
+    platforms: [linux/amd64, linux/arm64]
     spec:
       command: sh
-      args: ["-c", "mkdir -p build/dist && printf '#!/bin/sh\necho demo-tool works\n' > build/dist/demo-tool_linux_amd64 && chmod +x build/dist/demo-tool_linux_amd64 && printf '#!/bin/sh\necho extra\n' > build/dist/extra-tool_linux_arm64"]
+      args: ["-c", "mkdir -p build/dist && for f in build/dist/demo-tool build/dist/demo-tool_${FORGE_OS}_${FORGE_ARCH}; do printf '#!/bin/sh\necho demo-tool works %s\n' \"$(git rev-parse --short HEAD)\" > $f && chmod +x $f; done && printf '#!/bin/sh\necho extra\n' > build/dist/extra-tool_linux_arm64"]
 
 test:
   - name: unit
@@ -187,7 +192,8 @@ state: ci-state
 triggers: [on-change]
 targets:
   - alias: build-all
-    forge: test-all
+    binary: forge
+    args: [test-all]
     in: [demo-repo]
 stages:
   - name: build
@@ -267,12 +273,18 @@ func TestAGreenBuildReleasesTheAggregatedDistribution(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rawIndex, &index))
 	require.Equal(t, revision, index.Revision)
 	require.Equal(t, "v0.1.0", index.Release.Tag)
-	require.Len(t, index.Tools, 2)
+	// One tool, both platforms, from the fields the two records carry.
+	require.Len(t, index.Tools, 1)
 	require.Equal(t, "demo-tool", index.Tools[0].Name)
+	require.Len(t, index.Tools[0].Platforms, 2)
+	require.Contains(t, index.Tools[0].Platforms, "linux/arm64")
+	_, ok = fake.assets["demo-tool_linux_arm64"]
+	require.True(t, ok, "the cross build rides the release under its composed name")
 
 	// spec.assets is the door for files no artifact record carries: the
-	// glob-matched extra binary rides the same release and index.
-	require.Equal(t, "extra-tool", index.Tools[1].Name)
+	// glob-matched extra binary rides the same release as a plain asset.
+	// No record says which tool or platform it is, so the index - which
+	// never claims what nobody measured - leaves it out.
 	_, ok = fake.assets["extra-tool_linux_arm64"]
 	require.True(t, ok, "a spec.assets glob match must ride the release")
 

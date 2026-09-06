@@ -98,7 +98,7 @@ func toRunInput(in RunInput) citypes.RunInput {
 	targets := make([]citypes.Target, 0, len(in.Targets))
 	for _, t := range in.Targets {
 		targets = append(targets, citypes.Target{
-			Alias: t.Alias, Forge: t.Forge, ForgeCI: t.ForgeCI, In: t.In,
+			Alias: t.Alias, Binary: t.Binary, Args: t.Args, In: t.In,
 		})
 	}
 

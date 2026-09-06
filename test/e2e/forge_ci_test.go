@@ -142,7 +142,8 @@ state: ci-state
 triggers: [on-change]
 targets:
   - alias: build-all
-    forge: test-all
+    binary: forge
+    args: [test-all]
     in: [demo-repo]
 stages:
   - name: build
@@ -396,7 +397,8 @@ func TestApplyInsideApplyIsRefused(t *testing.T) {
   - alias: build-all`,
 		`targets:
   - alias: self-apply
-    forgeCI: apply
+    binary: forge-ci
+    args: [apply]
   - alias: build-all`, 1)
 	withSelf += `  - name: self
     promotion: all-pass
@@ -427,7 +429,8 @@ func TestASelfStageUsingBootstrapReconcilesWithoutRecursing(t *testing.T) {
   - alias: build-all`,
 		`targets:
   - alias: self-apply
-    forgeCI: bootstrap
+    binary: forge-ci
+    args: [bootstrap]
   - alias: build-all`, 1)
 	withSelf += `  - name: self
     promotion: all-pass

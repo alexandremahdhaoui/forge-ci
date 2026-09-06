@@ -226,14 +226,17 @@ func TestIdenticalBytesConvergeOnThePreviousRelease(t *testing.T) {
 	require.NoError(t, err)
 
 	index, err := artifactcontroller.BuildIndex("prev", "", artifactcontroller.Release{Tag: "v0.1.10"},
-		[]artifactcontroller.UploadDigest{{Path: rel, Digest: digest, Size: 10}})
+		[]artifactcontroller.UploadDigest{{
+			Upload: artifactcontroller.Upload{Path: rel, Asset: "tool_linux_amd64", Name: "tool", OS: "linux", Arch: "amd64"},
+			Digest: digest, Size: 10,
+		}})
 	require.NoError(t, err)
 
 	f := newFakeEngines(t)
 	f.index = string(index)
 	f.runOutputs["build/default"] = citypes.RunOutput{
 		Status: citypes.StatusPassed,
-		Forge:  &citypes.ForgeResult{Artifacts: []forge.Artifact{{Name: "tool", Type: "binary", Location: rel}}},
+		Forge:  &citypes.ForgeResult{Artifacts: []forge.Artifact{{Name: "tool", Type: "binary", OS: "linux", Arch: "amd64", Location: rel}}},
 	}
 
 	p := releasingPipeline()

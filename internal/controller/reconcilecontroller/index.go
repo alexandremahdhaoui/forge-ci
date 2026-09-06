@@ -103,10 +103,10 @@ func (i engineIndex) targets(_ config.Pipeline, aliases []string) []citypes.Targ
 		}
 
 		out = append(out, citypes.Target{
-			Alias:   t.Alias,
-			Forge:   t.Forge,
-			ForgeCI: t.ForgeCI,
-			In:      t.In,
+			Alias:  t.Alias,
+			Binary: t.Binary,
+			Args:   t.Args,
+			In:     t.In,
 		})
 	}
 

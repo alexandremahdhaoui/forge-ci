@@ -109,7 +109,7 @@ func TestAReleasingStageNeedsNoVersionOnThePipeline(t *testing.T) {
 			{Alias: "gh", Type: config.PortArtifact, Engine: "forge://x", Manager: "local"},
 			{Alias: "here", Type: config.PortCompute, Engine: "forge://x", Manager: "local"},
 		},
-		Targets: []config.Target{{Alias: "t", Forge: "test-all"}},
+		Targets: []config.Target{{Alias: "t", Binary: "forge", Args: []string{"test-all"}}},
 		Stages: []config.Stage{{
 			Name: "prod",
 			Substages: []config.Substage{
@@ -217,7 +217,7 @@ managers: [{alias: local, engine: "forge://m"}]
 engines:
   - {alias: st, type: state, engine: "forge://x", manager: local}
   - {alias: here, type: compute, engine: "forge://x", manager: local}
-targets: [{alias: t, forge: test-all}]
+targets: [{alias: t, binary: forge, args: [test-all]}]
 stages:
   - name: prod
     substages: [{name: default, engine: here, manager: local, targets: [t]}]
@@ -239,7 +239,7 @@ func needsPipeline(repos ...config.Repo) config.Pipeline {
 			{Alias: "st", Type: config.PortState, Engine: "forge://x", Manager: "local"},
 			{Alias: "here", Type: config.PortCompute, Engine: "forge://x", Manager: "local"},
 		},
-		Targets: []config.Target{{Alias: "t", Forge: "test-all"}},
+		Targets: []config.Target{{Alias: "t", Binary: "forge", Args: []string{"test-all"}}},
 		Stages: []config.Stage{{
 			Name: "build",
 			Substages: []config.Substage{
@@ -386,4 +386,27 @@ func TestASubstageCycleIsRejected(t *testing.T) {
 	err = loop.Validate()
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "cycle")
+}
+
+// The old shape named the binary by the KEY: forge: and forgeCI: were two
+// fields whose names were the executables. A pipeline that still writes
+// them fails the strict parse by key, which is a loud migration rather than
+// a target that silently runs nothing.
+func TestTheOldTargetKeysAreRefused(t *testing.T) {
+	t.Parallel()
+
+	_, err := config.Parse([]byte(`
+name: demo
+state: st
+managers: [{alias: local, engine: "forge://m"}]
+engines:
+  - {alias: st, type: state, engine: "forge://x", manager: local}
+  - {alias: here, type: compute, engine: "forge://x", manager: local}
+targets: [{alias: t, forge: test-all}]
+stages:
+  - name: prod
+    substages: [{name: default, engine: here, manager: local, targets: [t]}]
+`))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "forge")
 }

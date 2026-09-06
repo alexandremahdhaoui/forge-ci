@@ -15,14 +15,14 @@ The question an engine answers. The list is closed.
 | Term | Means |
 |---|---|
 | `alias` | Lowercase kebab-case identifier. |
+| `args` | Its arguments, one per element, passed verbatim - an argument holding a space stays one argument. {{.Params.x}} is templated from the substage's params. For example ["test-all"] or ["build", "--frozen"]. |
 | `artifactStorePath` | Where forge-ci records its own artifacts. |
+| `binary` | The executable to run, found on PATH. For example "forge" or "forge-ci". |
 | `cap` | The ceiling the bump may not cross, inclusive. "v0" holds the major at 0; "v0.50" holds major and minor. A bump that would cross it drops one level and retries, so a factory that is not ready for v1 keeps releasing rather than stopping. A full semver is refused: a cap on the patch would stop the only bump that always works. |
 | `displayName` | What to call this stage where a person reads it - a job title in a rendered pipeline, a heading in a report. Absent means a title is derived from the name, so a pipeline that says nothing still reads as words. |
 | `engine` | Alias of an engine whose type is compute or artifact. A compute substage runs targets; an artifact substage publishes what the stages before it built, under the version this run decided. Which of the two decides whether targets is required, so both rules are semantic. |
 | `engineURI` | Only forge:// and alias:// resolve. Anything else is a hard error, matching forge. |
 | `engines` | Named engine instances. An engine implements one port. It declares the resources it needs and never names a manager kind. |
-| `forge` | Arguments passed to forge. For example "test-all". |
-| `forgeCI` | A forge-ci verb. For example "apply". |
 | `gates` | Aliases of engines whose type is gate. Every gate runs after the substage finishes. A gate never runs before. |
 | `ignorePaths` | Paths whose changes never release, as glob patterns against each member's root. A revision whose release set differs from the last release only under these paths converges without a release. List only what nothing embeds: a README a binary carries is a code change, and a pattern that hides it hides a release. |
 | `in` | Repo names the target runs in. Empty means the pipeline root. |
@@ -44,9 +44,10 @@ The question an engine answers. The list is closed.
 | `substages` | Independent units inside a stage. They run at the same time. |
 | `sync` | Converge the workspace before this substage's targets run - manifests first, then the dependency closure. A multi-repo pipeline must set it on at least one substage; that rule is semantic and checked in a second pass. |
 | `tagPrefix` | Goes in front of the semver, joined with a dash. Absent means no prefix, which is what every factory does: v0.50.0. Set it only when one repo is released by more than one factory, so the two lines do not read each other's tags. |
-| `targets` | Named units of work. A target names a forge target or a forge-ci verb. This is the only place a forge target appears. |
+| `targets` | Named units of work. A target is a binary and its arguments, run in each repository it names. forge-ci names no binary of its own: what runs is whatever the pipeline writes here, so a factory with its own tools declares them the same way it declares forge. |
 | `triggers` | Aliases of engines whose type is trigger. |
 | `unmatched` | What a subject no list claims scores. Absent means patch. Set it to ignore to make the vocabulary exhaustive, or to error to enforce it: the newest commit of each release repo must then match a list, or the run fails before anything builds, naming the subject. Older unmatched commits score patch, because the fix is a good commit on top and never a rewritten history. |
+| `uses` | Substages of EARLIER stages, as <stage>/<substage>, whose built artifacts this one reads. Absent means everything every earlier stage built, which is what every substage read before this key existed. Each entry must name a substage of a stage before this one; that rule is semantic. A compute engine that carries files between jobs carries only these. |
 | `versioning` | How the one number this factory releases under is derived. Every member is tagged with it, so a workspace has one version line rather than one per repo. There is no field to type a version into: a version is derived or it is nothing, so it can never be re-pointed at a release that already exists. |
 
 See [architecture.md](architecture.md) for how they fit together, and

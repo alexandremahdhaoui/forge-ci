@@ -464,7 +464,7 @@ func (c *Controller) artifactsAtHand(
 // digest, and no asset more or fewer. It speaks only when there is at least
 // one asset; a pipeline that tags libraries and ships no file decides by
 // the set and the subjects alone.
-func sameBytes(root string, uploads []string, previous *releaseRecord) (bool, error) {
+func sameBytes(root string, uploads []artifactcontroller.Upload, previous *releaseRecord) (bool, error) {
 	if previous == nil || previous.Index == "" || len(uploads) == 0 {
 		return false, nil
 	}
@@ -487,7 +487,7 @@ func sameBytes(root string, uploads []string, previous *releaseRecord) (bool, er
 	}
 
 	for _, upload := range uploads {
-		path := upload
+		path := upload.Path
 		if !filepath.IsAbs(path) {
 			path = filepath.Join(root, path)
 		}
@@ -497,7 +497,7 @@ func sameBytes(root string, uploads []string, previous *releaseRecord) (bool, er
 			return false, err
 		}
 
-		if shipped[filepath.Base(path)] != digest {
+		if shipped[upload.Asset] != digest {
 			return false, nil
 		}
 	}

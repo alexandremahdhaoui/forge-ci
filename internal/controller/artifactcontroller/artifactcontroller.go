@@ -3,12 +3,12 @@ package artifactcontroller
 import (
 	"errors"
 	"fmt"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
+	"github.com/alexandremahdhaoui/forge/pkg/forge"
 )
 
 var (
@@ -37,7 +37,25 @@ type Plan struct {
 	TagName string
 
 	Tags    []Tag
-	Uploads []string
+	Uploads []Upload
+}
+
+// Upload is one built file the release carries, with the fields the
+// artifact record says about it. The asset name is composed here, from the
+// fields, and this is the one place forge-ci spells `name_os_arch`: nothing
+// parses it back out of a file name.
+type Upload struct {
+	Path  string
+	Asset string
+	Name  string
+	OS    string
+	Arch  string
+}
+
+// AssetName composes the file name a binary travels under: the artifact's
+// name, its OS and its architecture, so a consumer can pick its own.
+func AssetName(name, os, arch string) string {
+	return name + "_" + os + "_" + arch
 }
 
 // Tag is one repo to tag at one commit.
@@ -77,7 +95,7 @@ func (c *Controller) Plan(in citypes.ArtifactInput) (Plan, error) {
 		Version: in.Version,
 		TagName: TagName(in.TagPrefix, in.Version),
 		Tags:    []Tag{},
-		Uploads: []string{},
+		Uploads: []Upload{},
 	}
 
 	names := make([]string, 0, len(in.Repos))
@@ -91,15 +109,18 @@ func (c *Controller) Plan(in citypes.ArtifactInput) (Plan, error) {
 		plan.Tags = append(plan.Tags, Tag{Repo: name, SHA: in.Repos[name]})
 	}
 
-	// What uploads: exactly what travels, and a thing travels only under the
-	// `name_os_arch` convention - the name says which machine it runs on, so
-	// a consumer can pick its own. A host build carries no platform in its
-	// name and stays home; a container image or a URL is somebody else's to
-	// serve, and a local path never carries a colon.
+	// What uploads: every binary the records say was built for a platform,
+	// read from the fields the engine that built it recorded. A container
+	// image is somebody else's to serve, a generated file stays home, and a
+	// URL is not a file. The asset name is composed from the same fields.
 	seen := map[string]bool{}
-	byName := map[string]string{}
+	byAsset := map[string]string{}
 
 	for _, artifact := range in.Artifacts {
+		if artifact.Type != forge.TypeBinary || artifact.OS == "" || artifact.Arch == "" {
+			continue
+		}
+
 		path := artifact.Location
 		if trimmed, ok := strings.CutPrefix(path, "file://"); ok {
 			path = trimmed
@@ -111,27 +132,25 @@ func (c *Controller) Plan(in citypes.ArtifactInput) (Plan, error) {
 			continue
 		}
 
-		if !platformSuffix.MatchString(filepath.Base(path)) {
-			continue
-		}
-
 		seen[path] = true
 
 		// One release, one asset per name: two artifacts that travel under
 		// the same file name would overwrite each other in the release, so
 		// the collision is refused and both sources are named. This is a
 		// declaration mistake in the repos, not a machine failure.
-		base := filepath.Base(path)
-		if first, clash := byName[base]; clash {
-			return Plan{}, fmt.Errorf("%w: %q is built by both %s and %s", ErrCollision, base, first, path)
+		asset := AssetName(artifact.Name, artifact.OS, artifact.Arch)
+		if first, clash := byAsset[asset]; clash {
+			return Plan{}, fmt.Errorf("%w: %q is built by both %s and %s", ErrCollision, asset, first, path)
 		}
 
-		byName[base] = path
+		byAsset[asset] = path
 
-		plan.Uploads = append(plan.Uploads, path)
+		plan.Uploads = append(plan.Uploads, Upload{
+			Path: path, Asset: asset, Name: artifact.Name, OS: artifact.OS, Arch: artifact.Arch,
+		})
 	}
 
-	sort.Strings(plan.Uploads)
+	sort.Slice(plan.Uploads, func(i, j int) bool { return plan.Uploads[i].Asset < plan.Uploads[j].Asset })
 
 	return plan, nil
 }

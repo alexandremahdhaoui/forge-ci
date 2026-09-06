@@ -67,10 +67,12 @@ func TestPlanAcceptsAPrerelease(t *testing.T) {
 	assert.Equal(t, "v1.0.0-rc.1", plan.Version)
 }
 
-// Only what travels is published, and a thing travels only under the
-// name_os_arch convention: the name says which machine it runs on. A host
-// build carries no platform and stays home - publishing it would hand a
-// consumer a binary with no way to know whether it runs.
+// Only what travels is published, and what travels is read from the
+// record's fields: a binary built for a platform. The asset name is composed
+// from those fields, never parsed from the file name, so a binary whose file
+// carries no suffix still travels under one. A record with no platform is
+// one an older forge wrote and says nothing about where it runs, so it stays
+// home; so does an image, a generated file and a URL.
 func TestPlanUploadsOnlyWhatTravels(t *testing.T) {
 	t.Parallel()
 
@@ -78,18 +80,23 @@ func TestPlanUploadsOnlyWhatTravels(t *testing.T) {
 		Revision: "abc123",
 		Version:  "v0.2.0",
 		Artifacts: []forge.Artifact{
-			{Name: "cli", Type: "binary", Location: "file:///out/cli"},
-			{Name: "rel", Type: "binary", Location: "member/build/dist/rel_linux_amd64"},
-			{Name: "img", Type: "binary", Location: "ghcr.io/x/img:v1"},
-			{Name: "empty", Type: "binary", Location: ""},
+			{Name: "cli", Type: "binary", OS: "linux", Arch: "arm64", Location: "file:///out/cli"},
+			{Name: "rel", Type: "binary", OS: "linux", Arch: "amd64", Location: "member/build/dist/rel_linux_amd64"},
+			{Name: "old", Type: "binary", Location: "member/build/bin/old"},
+			{Name: "img", Type: "container", Location: "member/build/images/img"},
+			{Name: "url", Type: "binary", OS: "linux", Arch: "amd64", Location: "https://x/url"},
+			{Name: "empty", Type: "binary", OS: "linux", Arch: "amd64", Location: ""},
 			{Name: "gen", Type: "generated", Location: "member/zz_generated.go"},
-			{Name: "dup", Type: "binary", Location: "member/build/dist/rel_linux_amd64"},
+			{Name: "rel", Type: "binary", OS: "linux", Arch: "amd64", Location: "member/build/dist/rel_linux_amd64"},
 		},
 	})
 	require.NoError(t, err)
 
-	assert.Equal(t, []string{"member/build/dist/rel_linux_amd64"}, plan.Uploads,
-		"a platform-named binary uploads once; a host build, an image and a generated file never travel")
+	assert.Equal(t, []artifactcontroller.Upload{
+		{Path: "/out/cli", Asset: "cli_linux_arm64", Name: "cli", OS: "linux", Arch: "arm64"},
+		{Path: "member/build/dist/rel_linux_amd64", Asset: "rel_linux_amd64", Name: "rel", OS: "linux", Arch: "amd64"},
+	}, plan.Uploads,
+		"a binary with a platform uploads once under a composed name; nothing else travels")
 }
 
 // The aggregated release carries the version, not the revision. Everything
@@ -142,8 +149,8 @@ func TestTwoArtifactsClaimingOneAssetNameAreRefused(t *testing.T) {
 	_, err := artifactcontroller.New().Plan(citypes.ArtifactInput{
 		Revision: "abc123", Version: "v0.2.0",
 		Artifacts: []forge.Artifact{
-			{Name: "docgen_linux_amd64", Type: "binary", Location: "forge-ci/build/dist/docgen_linux_amd64"},
-			{Name: "docgen_linux_amd64", Type: "binary", Location: "forge-factory/build/dist/docgen_linux_amd64"},
+			{Name: "docgen", Type: "binary", OS: "linux", Arch: "amd64", Location: "forge-ci/build/dist/docgen_linux_amd64"},
+			{Name: "docgen", Type: "binary", OS: "linux", Arch: "amd64", Location: "forge-factory/build/dist/docgen_linux_amd64"},
 		},
 	})
 	require.ErrorIs(t, err, artifactcontroller.ErrCollision)
@@ -160,8 +167,8 @@ func TestOneArtifactRecordedTwiceIsNotACollision(t *testing.T) {
 	plan, err := artifactcontroller.New().Plan(citypes.ArtifactInput{
 		Revision: "abc123", Version: "v0.2.0",
 		Artifacts: []forge.Artifact{
-			{Name: "forge_linux_amd64", Type: "binary", Location: "forge/build/dist/forge_linux_amd64"},
-			{Name: "forge_linux_amd64", Type: "binary", Location: "forge/build/dist/forge_linux_amd64"},
+			{Name: "forge", Type: "binary", OS: "linux", Arch: "amd64", Location: "forge/build/dist/forge_linux_amd64"},
+			{Name: "forge", Type: "binary", OS: "linux", Arch: "amd64", Location: "forge/build/dist/forge_linux_amd64"},
 		},
 	})
 	require.NoError(t, err)

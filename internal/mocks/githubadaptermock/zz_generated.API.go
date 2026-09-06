@@ -771,16 +771,16 @@ func (_c *MockAPI_SecretExists_Call) RunAndReturn(run func(ctx context.Context, 
 }
 
 // UploadAsset provides a mock function for the type MockAPI
-func (_mock *MockAPI) UploadAsset(ctx context.Context, uploadURL string, file string) error {
-	ret := _mock.Called(ctx, uploadURL, file)
+func (_mock *MockAPI) UploadAsset(ctx context.Context, uploadURL string, file string, name string) error {
+	ret := _mock.Called(ctx, uploadURL, file, name)
 
 	if len(ret) == 0 {
 		panic("no return value specified for UploadAsset")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) error); ok {
-		r0 = returnFunc(ctx, uploadURL, file)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, string) error); ok {
+		r0 = returnFunc(ctx, uploadURL, file, name)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -796,11 +796,12 @@ type MockAPI_UploadAsset_Call struct {
 //   - ctx context.Context
 //   - uploadURL string
 //   - file string
-func (_e *MockAPI_Expecter) UploadAsset(ctx any, uploadURL any, file any) *MockAPI_UploadAsset_Call {
-	return &MockAPI_UploadAsset_Call{Call: _e.mock.On("UploadAsset", ctx, uploadURL, file)}
+//   - name string
+func (_e *MockAPI_Expecter) UploadAsset(ctx any, uploadURL any, file any, name any) *MockAPI_UploadAsset_Call {
+	return &MockAPI_UploadAsset_Call{Call: _e.mock.On("UploadAsset", ctx, uploadURL, file, name)}
 }
 
-func (_c *MockAPI_UploadAsset_Call) Run(run func(ctx context.Context, uploadURL string, file string)) *MockAPI_UploadAsset_Call {
+func (_c *MockAPI_UploadAsset_Call) Run(run func(ctx context.Context, uploadURL string, file string, name string)) *MockAPI_UploadAsset_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -814,10 +815,15 @@ func (_c *MockAPI_UploadAsset_Call) Run(run func(ctx context.Context, uploadURL 
 		if args[2] != nil {
 			arg2 = args[2].(string)
 		}
+		var arg3 string
+		if args[3] != nil {
+			arg3 = args[3].(string)
+		}
 		run(
 			arg0,
 			arg1,
 			arg2,
+			arg3,
 		)
 	})
 	return _c
@@ -828,7 +834,7 @@ func (_c *MockAPI_UploadAsset_Call) Return(err error) *MockAPI_UploadAsset_Call 
 	return _c
 }
 
-func (_c *MockAPI_UploadAsset_Call) RunAndReturn(run func(ctx context.Context, uploadURL string, file string) error) *MockAPI_UploadAsset_Call {
+func (_c *MockAPI_UploadAsset_Call) RunAndReturn(run func(ctx context.Context, uploadURL string, file string, name string) error) *MockAPI_UploadAsset_Call {
 	_c.Call.Return(run)
 	return _c
 }

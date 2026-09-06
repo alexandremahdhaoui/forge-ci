@@ -185,7 +185,7 @@ func (c *Controller) Get(fs fsadapter.FS, in citypes.ArtifactGetInput) (citypes.
 // on another machine. The container type is forge's own word for an image
 // layout, and the registry push is what reads it.
 func treeTravels(artifact forge.Artifact) bool {
-	return artifact.Type == "container"
+	return artifact.Type == forge.TypeContainer
 }
 
 // restoreFile copies one kept file back and verifies the bytes against

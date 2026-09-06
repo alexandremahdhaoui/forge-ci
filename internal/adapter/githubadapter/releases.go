@@ -76,7 +76,11 @@ func (c *Client) PublishRelease(ctx context.Context, repo string, id int64) (Rel
 
 // UploadAsset attaches one file to a release through the upload URL the
 // release itself answered.
-func (c *Client) UploadAsset(ctx context.Context, uploadURL, file string) error {
+//
+// The asset is attached under name, which the caller composes: the file on
+// disk is the host build at dest/<name> as often as not, and the name a
+// consumer downloads is the one the release plan says.
+func (c *Client) UploadAsset(ctx context.Context, uploadURL, file, name string) error {
 	if i := strings.Index(uploadURL, "{"); i >= 0 {
 		uploadURL = uploadURL[:i]
 	}
@@ -90,7 +94,11 @@ func (c *Client) UploadAsset(ctx context.Context, uploadURL, file string) error 
 		return fmt.Errorf("attaching %s: %w", file, err)
 	}
 
-	target := uploadURL + "?name=" + url.QueryEscape(filepath.Base(file))
+	if name == "" {
+		name = filepath.Base(file)
+	}
+
+	target := uploadURL + "?name=" + url.QueryEscape(name)
 
 	if err := c.send(ctx, http.MethodPost, target, "application/octet-stream", data, nil); err != nil {
 		return fmt.Errorf("attaching %s: %w", file, err)

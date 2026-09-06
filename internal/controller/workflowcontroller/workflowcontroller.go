@@ -93,6 +93,9 @@ type Spec struct {
 	// and never read from the spec: the pipeline declares them once, and
 	// the rendered jobs follow.
 	Stages []citypes.DeclaredStage `json:"-"`
+	// Repos is the pipeline's repositories by name, handed in by the core
+	// beside the stages, for a cache keyed on what the run is built from.
+	Repos []citypes.DeclaredRepo `json:"-"`
 }
 
 // Workspace is the checkout preamble: one command that stands the whole
@@ -383,13 +386,16 @@ func New(
 // where the pipeline runs, so a containerFile resolves against the
 // workspace the sync wrote it into; stages are the pipeline's stages by
 // name, which a phased workflow renders as jobs.
-func (c *Controller) Declare(raw map[string]any, root string, stages []citypes.DeclaredStage) (citypes.DeclareOutput, error) {
+func (c *Controller) Declare(
+	raw map[string]any, root string, stages []citypes.DeclaredStage, repos []citypes.DeclaredRepo,
+) (citypes.DeclareOutput, error) {
 	spec, err := ParseSpec(raw)
 	if err != nil {
 		return citypes.DeclareOutput{}, err
 	}
 
 	spec.Stages = stages
+	spec.Repos = repos
 
 	if spec.ContainerFile != "" {
 		pin, err := c.fs.ReadFile(filepath.Join(root, filepath.FromSlash(spec.ContainerFile)))
@@ -602,13 +608,13 @@ func scriptFor(in citypes.RunInput) (string, error) {
 	}
 
 	for _, target := range in.Targets {
-		binary, expanded, err := computecontroller.CommandFor(target, in.Params)
+		binary, args, err := computecontroller.CommandFor(target, in.Params)
 		if err != nil {
 			return "", err
 		}
 
 		argv := []string{quote(binary)}
-		for _, arg := range strings.Fields(expanded) {
+		for _, arg := range args {
 			argv = append(argv, quote(arg))
 		}
 

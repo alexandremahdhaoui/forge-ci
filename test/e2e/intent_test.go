@@ -167,7 +167,7 @@ func TestThePhasesReachTheSameReleaseAsOneApply(t *testing.T) {
 	// engine that kept it, so the build output can go the way a runner's
 	// disk goes. Only the recorded artifact: a spec.assets glob names files
 	// no record carries, and those still live where the release runs.
-	require.NoError(t, os.Remove(filepath.Join(repo, "build", "dist", "demo-tool_linux_amd64")))
+	removeBuilt(t, repo)
 
 	mustRun(t, root, "forge-ci", "apply", "--config", "forge-ci.yaml", "--root", ".",
 		"--phase", "stages", "--stage", "release")
@@ -206,7 +206,7 @@ func TestTheStageJobsReachTheSameReleaseAsOneApply(t *testing.T) {
 	require.NoError(t, err, out)
 	require.Contains(t, out, "stage build")
 
-	require.NoError(t, os.Remove(filepath.Join(repo, "build", "dist", "demo-tool_linux_amd64")))
+	removeBuilt(t, repo)
 
 	_, err = apply("--phase", "stages", "--stage", "release", "--substage", "publish")
 	require.NoError(t, err)
@@ -274,4 +274,19 @@ func revisionFrom(t *testing.T, report string) string {
 	t.Fatalf("no revision line in the report:\n%s", report)
 
 	return ""
+}
+
+// removeBuilt deletes every recorded build of the demo tool, the host's and
+// the cross one, so what the release reads must have come back through the
+// engine that kept it.
+func removeBuilt(t *testing.T, repo string) {
+	t.Helper()
+
+	built, err := filepath.Glob(filepath.Join(repo, "build", "dist", "demo-tool*"))
+	require.NoError(t, err)
+	require.NotEmpty(t, built)
+
+	for _, f := range built {
+		require.NoError(t, os.Remove(f))
+	}
 }

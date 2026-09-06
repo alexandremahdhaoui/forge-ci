@@ -61,7 +61,7 @@ func TestItUploadsToTheHostTheReleaseNames(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "a-tool_linux_amd64")
 	require.NoError(t, os.WriteFile(file, []byte("payload"), 0o600))
 
-	require.NoError(t, client.UploadAsset(context.Background(), release.UploadURL, file))
+	require.NoError(t, client.UploadAsset(context.Background(), release.UploadURL, file, ""))
 
 	// The RFC 6570 template is trimmed at the brace and the name is the file's
 	// own, or GitHub attaches an asset nobody can find by name.
@@ -74,7 +74,7 @@ func TestUploadRefusesAReleaseThatAnsweredNoURL(t *testing.T) {
 	t.Parallel()
 
 	err := githubadapter.New(nil, "http://unused", "pat").
-		UploadAsset(context.Background(), "", "unused")
+		UploadAsset(context.Background(), "", "unused", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no upload URL")
 }

@@ -20,7 +20,7 @@ func TestWithNoNeedsTheScriptIsPlainSubshells(t *testing.T) {
 		Revision: "abc",
 		Repos:    []citypes.RepoCheckout{{Name: "one"}, {Name: "two"}},
 		Targets: []citypes.Target{{
-			Alias: "build", Forge: "test-all", In: []string{"one", "two"},
+			Alias: "build", Binary: "forge", Args: []string{"test-all"}, In: []string{"one", "two"},
 		}},
 	})
 	require.NoError(t, err)
@@ -44,7 +44,7 @@ func TestASyncingSubstageConvergesTheRunnerFirst(t *testing.T) {
 		Sync:     true,
 		Repos:    []citypes.RepoCheckout{{Name: "one", SHA: "aaa"}},
 		Targets: []citypes.Target{{
-			Alias: "build", Forge: "test-all", In: []string{"one"},
+			Alias: "build", Binary: "forge", Args: []string{"test-all"}, In: []string{"one"},
 		}},
 	})
 	require.NoError(t, err)
@@ -73,7 +73,7 @@ func TestAWaveIsBackgroundedAndWaitedFor(t *testing.T) {
 			{Name: "last", Needs: []string{"one", "two"}},
 		},
 		Targets: []citypes.Target{{
-			Alias: "build", Forge: "test-all", In: []string{"one", "two", "last"},
+			Alias: "build", Binary: "forge", Args: []string{"test-all"}, In: []string{"one", "two", "last"},
 		}},
 	})
 	require.NoError(t, err)
@@ -100,7 +100,7 @@ func TestAWaveQuotesEveryDir(t *testing.T) {
 			{Name: "last", Needs: []string{"a b", "c"}},
 		},
 		Targets: []citypes.Target{{
-			Alias: "build", Forge: "test-all", In: []string{"a b", "c", "last"},
+			Alias: "build", Binary: "forge", Args: []string{"test-all"}, In: []string{"a b", "c", "last"},
 		}},
 	})
 	require.NoError(t, err)
@@ -117,7 +117,7 @@ func TestACycleStopsTheScript(t *testing.T) {
 			{Name: "two", Needs: []string{"one"}},
 		},
 		Targets: []citypes.Target{{
-			Alias: "build", Forge: "test-all", In: []string{"one", "two"},
+			Alias: "build", Binary: "forge", Args: []string{"test-all"}, In: []string{"one", "two"},
 		}},
 	})
 	require.ErrorIs(t, err, citypes.ErrCycle)

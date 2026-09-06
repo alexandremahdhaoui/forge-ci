@@ -251,7 +251,11 @@ type job struct {
 	// all of it. Nothing has been built yet in front of the first stage, so
 	// its jobs skip a step that could only match nothing.
 	download bool
-	upload   bool
+	// uses names the jobs whose kept files this one brings back, when the
+	// substages it runs declared what they read. Empty with download set
+	// brings back everything the run has kept so far.
+	uses   []string
+	upload bool
 	// gated says the job runs only on proceed: everything after evaluate.
 	gated bool
 	// push says the workflow's push step follows the command, for a
@@ -308,7 +312,7 @@ func phasedJobs(spec Spec, w WorkflowSpec) ([]job, error) {
 				step:  "Run stage " + stage.Name,
 				flags: "--phase stages --stage " + stage.Name,
 				needs: append([]string{jobEvaluate}, prev...), gated: true,
-				download: len(prev) > 0, upload: true, push: w.Push,
+				download: len(prev) > 0, uses: usedJobs(spec, stageUses(stage)), upload: true, push: w.Push,
 			})
 			prev = []string{stage.Name}
 
@@ -343,7 +347,8 @@ func phasedJobs(spec Spec, w WorkflowSpec) ([]job, error) {
 				step:  "Run " + stage.Name + " " + sub.Name,
 				flags: "--phase stages --stage " + stage.Name + " --substage " + sub.Name,
 				needs: needs, gated: true,
-				download: len(prev) > 0 || len(sub.Needs) > 0, upload: true, push: w.Push,
+				download: len(prev) > 0 || len(sub.Needs) > 0, uses: usedJobs(spec, sub.Uses),
+				upload: true, push: w.Push,
 			})
 		}
 
@@ -385,6 +390,47 @@ func substageTitle(stage citypes.DeclaredStage, sub citypes.DeclaredSubstage) st
 	}
 
 	return stageTitle(stage) + " › " + sub.Name
+}
+
+// stageUses is what a stage's substages declared they read: the union of
+// their uses, or nil when any declared none - that one may read anything,
+// so the stage brings back everything.
+func stageUses(stage citypes.DeclaredStage) []string {
+	out := []string{}
+
+	for _, sub := range stage.Substages {
+		if len(sub.Uses) == 0 {
+			return nil
+		}
+
+		out = append(out, sub.Uses...)
+	}
+
+	return out
+}
+
+// usedJobs maps <stage>/<substage> pairs to the ids of the jobs that kept
+// their files: the stage's job at stage granularity, the substage's own
+// at substage granularity. The names are what the artifacts were kept
+// under, so the download names exactly them.
+func usedJobs(spec Spec, uses []string) []string {
+	if len(uses) == 0 {
+		return nil
+	}
+
+	ids := make([]string, 0, len(uses))
+
+	for _, u := range uses {
+		stage, sub, _ := strings.Cut(u, "/")
+
+		if spec.Jobs == JobsPerSubstage {
+			ids = append(ids, stage+"-"+sub)
+		} else {
+			ids = append(ids, stage)
+		}
+	}
+
+	return dedupe(ids)
 }
 
 func dedupe(in []string) []string {
@@ -468,7 +514,17 @@ func writePhasedJobs(b *strings.Builder, spec Spec, w WorkflowSpec, jobs []job) 
 			// files comes back unexecutable however carefully it was
 			// written. tar carries the bits, so a carried binary is still a
 			// binary a later stage can run.
-			fmt.Fprintf(b, "\n      - name: Bring back what the jobs before this one built\n        uses: actions/download-artifact@v8\n        with:\n          pattern: built-${{ github.run_id }}-*\n          merge-multiple: true\n          path: %s\n", carriedDir)
+			if len(j.uses) == 0 {
+				fmt.Fprintf(b, "\n      - name: Bring back what the jobs before this one built\n        uses: actions/download-artifact@v8\n        with:\n          pattern: built-${{ github.run_id }}-*\n          merge-multiple: true\n          path: %s\n", carriedDir)
+			}
+
+			// A substage that declared what it reads brings back exactly
+			// that, by the name the job kept it under. Still a pattern, so
+			// a job that built nothing and kept nothing is a no-op here
+			// rather than a missing artifact.
+			for _, used := range j.uses {
+				fmt.Fprintf(b, "\n      - name: Bring back what %s built\n        uses: actions/download-artifact@v8\n        with:\n          pattern: built-${{ github.run_id }}-%s\n          merge-multiple: true\n          path: %s\n", used, used, carriedDir)
+			}
 			fmt.Fprintf(b, "\n      - name: Unpack it\n        run: |\n          mkdir -p %s\n          for f in %s/*.tar.gz; do\n            [ -e \"$f\" ] || continue\n            tar -xzf \"$f\" -C %s\n          done\n", artifactDir, carriedDir, artifactDir)
 		}
 

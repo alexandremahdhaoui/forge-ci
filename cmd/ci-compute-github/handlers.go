@@ -30,7 +30,7 @@ func NewHandlers() Handlers {
 
 	return Handlers{
 		Declare: func(_ context.Context, in DeclareInput) (*DeclareOutput, error) {
-			out, err := ctrl.Declare(in.Spec, in.Root, toStages(in.Stages))
+			out, err := ctrl.Declare(in.Spec, in.Root, toStages(in.Stages), toRepos(in.Repos))
 			if err != nil {
 				return nil, err
 			}
@@ -96,7 +96,7 @@ func toRunInput(in RunInput) citypes.RunInput {
 	targets := make([]citypes.Target, 0, len(in.Targets))
 	for _, t := range in.Targets {
 		targets = append(targets, citypes.Target{
-			Alias: t.Alias, Forge: t.Forge, ForgeCI: t.ForgeCI, In: t.In,
+			Alias: t.Alias, Binary: t.Binary, Args: t.Args, In: t.In,
 		})
 	}
 
@@ -179,13 +179,25 @@ func fromArtifacts(in []forge.Artifact) ([]ForgeArtifact, error) {
 // toStages reads the pipeline's stages off the wire, the shape the phased
 // renderer lays its jobs out from. The display names come with them, so a job
 // is titled by the factory that declared it rather than by this engine.
+func toRepos(in []DeclaredRepo) []citypes.DeclaredRepo {
+	out := make([]citypes.DeclaredRepo, 0, len(in))
+
+	for _, r := range in {
+		out = append(out, citypes.DeclaredRepo{Name: r.Name})
+	}
+
+	return out
+}
+
 func toStages(in []DeclaredStage) []citypes.DeclaredStage {
 	out := make([]citypes.DeclaredStage, 0, len(in))
 
 	for _, s := range in {
 		subs := make([]citypes.DeclaredSubstage, 0, len(s.Substages))
 		for _, sub := range s.Substages {
-			subs = append(subs, citypes.DeclaredSubstage{Name: sub.Name, DisplayName: sub.DisplayName, Needs: sub.Needs})
+			subs = append(subs, citypes.DeclaredSubstage{
+				Name: sub.Name, DisplayName: sub.DisplayName, Needs: sub.Needs, Uses: sub.Uses,
+			})
 		}
 
 		out = append(out, citypes.DeclaredStage{

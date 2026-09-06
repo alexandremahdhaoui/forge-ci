@@ -327,3 +327,37 @@ func TestAJobIsTitledByTheFactoryWhenTheFactorySaysSo(t *testing.T) {
 		assert.Contains(t, ci, want)
 	}
 }
+
+// A substage that declared what it reads brings back the tarballs of exactly
+// the jobs that kept them, by name: the stage's job at stage granularity,
+// the substage's own at substage granularity. One that declared nothing
+// keeps the pattern over everything the run kept.
+func TestAUsesDeclarationBringsBackOnlyTheJobsItNamed(t *testing.T) {
+	t.Parallel()
+
+	spec := phasedSpec()
+	spec.Stages[2].Substages = []citypes.DeclaredSubstage{
+		{Name: "default", Uses: []string{"build/default"}},
+		{Name: "dist", Uses: []string{"build/default"}},
+	}
+
+	ci := renderCI(t, spec)
+	publish := ci[strings.Index(ci, "  publish:"):]
+	assert.Contains(t, publish, "- name: Bring back what build built\n        uses: actions/download-artifact@v8\n        with:\n          pattern: built-${{ github.run_id }}-build\n")
+	assert.NotContains(t, publish, "pattern: built-${{ github.run_id }}-*")
+
+	build := ci[strings.Index(ci, "  build:"):strings.Index(ci, "  publish:")]
+	assert.Contains(t, build, "pattern: built-${{ github.run_id }}-*", "a substage that declared nothing reads everything")
+
+	spec.Jobs = workflowcontroller.JobsPerSubstage
+	ci = renderCI(t, spec)
+	assert.Contains(t, ci, "pattern: built-${{ github.run_id }}-build-default\n")
+
+	// One substage of the stage declared nothing, so at stage granularity
+	// the stage reads everything.
+	spec.Jobs = workflowcontroller.JobsPerStage
+	spec.Stages[2].Substages[1].Uses = nil
+	ci = renderCI(t, spec)
+	publish = ci[strings.Index(ci, "  publish:"):]
+	assert.Contains(t, publish, "pattern: built-${{ github.run_id }}-*")
+}

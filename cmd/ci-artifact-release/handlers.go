@@ -251,7 +251,7 @@ func publish(
 		// different host from the API base, which is why the client sends
 		// to a full URL rather than joining a path onto the base.
 		for _, asset := range assets {
-			if err := api.UploadAsset(ctx, release.UploadURL, asset); err != nil {
+			if err := api.UploadAsset(ctx, release.UploadURL, asset.Path, asset.Name); err != nil {
 				return out, fmt.Errorf("releasing %s: %w", plan.Version, err)
 			}
 		}
@@ -293,14 +293,14 @@ func publish(
 // instance names, the door for cross-built binaries no artifact record
 // carries. A glob that matches nothing is an error - a distribution that
 // silently shrinks is worse than one that fails.
-func expandAssets(root string, uploads []string, spec map[string]any) ([]string, error) {
+func expandAssets(root string, uploads []artifactcontroller.Upload, spec map[string]any) ([]artifactcontroller.Upload, error) {
 	raw, _ := spec["assets"].([]any)
 
-	out := append([]string{}, uploads...)
+	out := append([]artifactcontroller.Upload{}, uploads...)
 	seen := map[string]bool{}
 
-	for _, path := range out {
-		seen[path] = true
+	for _, upload := range out {
+		seen[upload.Path] = true
 	}
 
 	for _, entry := range raw {
@@ -330,11 +330,13 @@ func expandAssets(root string, uploads []string, spec map[string]any) ([]string,
 
 			seen[rel] = true
 
-			out = append(out, rel)
+			// A glob names a file and nothing about it: a plain asset,
+			// uploaded under its own file name and absent from the index.
+			out = append(out, artifactcontroller.Upload{Path: rel, Asset: filepath.Base(rel)})
 		}
 	}
 
-	sort.Strings(out)
+	sort.Slice(out, func(i, j int) bool { return out[i].Asset < out[j].Asset })
 
 	return out, nil
 }
@@ -350,16 +352,23 @@ func resolveUpload(root, upload string) string {
 	return filepath.Join(root, upload)
 }
 
+// staged is one file to attach: where it is on disk and the name it is
+// attached under.
+type staged struct {
+	Path string
+	Name string
+}
+
 // stageAssets resolves the uploads against the root, digests each one, and
 // writes the distribution index beside them in a staging dir. The index is
 // built from the measured digests, never from claims.
 func stageAssets(
 	root string,
 	plan artifactcontroller.Plan,
-	uploads []string,
+	uploads []artifactcontroller.Upload,
 	revision string,
-) ([]string, []byte, error) {
-	assets := make([]string, 0, len(uploads)+1)
+) ([]staged, []byte, error) {
+	assets := make([]staged, 0, len(uploads)+1)
 	digests := make([]artifactcontroller.UploadDigest, 0, len(uploads))
 
 	for _, upload := range uploads {
@@ -374,9 +383,9 @@ func stageAssets(
 		// The driver absolutises the root already. This does not trust
 		// that, because the cost is one syscall and the failure it
 		// prevents lands after the tags are cut.
-		path, err := filepath.Abs(resolveUpload(root, upload))
+		path, err := filepath.Abs(resolveUpload(root, upload.Path))
 		if err != nil {
-			return nil, nil, fmt.Errorf("resolving upload %s: %w", upload, err)
+			return nil, nil, fmt.Errorf("resolving upload %s: %w", upload.Path, err)
 		}
 
 		digest, size, err := fsadapter.Digest(path)
@@ -384,8 +393,9 @@ func stageAssets(
 			return nil, nil, err
 		}
 
-		assets = append(assets, path)
-		digests = append(digests, artifactcontroller.UploadDigest{Path: path, Digest: digest, Size: size})
+		upload.Path = path
+		assets = append(assets, staged{Path: path, Name: upload.Asset})
+		digests = append(digests, artifactcontroller.UploadDigest{Upload: upload, Digest: digest, Size: size})
 	}
 
 	index, err := artifactcontroller.BuildIndex(
@@ -405,5 +415,5 @@ func stageAssets(
 		return nil, nil, fmt.Errorf("staging the index: %w", err)
 	}
 
-	return append(assets, indexPath), index, nil
+	return append(assets, staged{Path: indexPath, Name: "index.json"}), index, nil
 }

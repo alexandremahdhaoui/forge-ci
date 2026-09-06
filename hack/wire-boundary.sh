@@ -146,12 +146,50 @@ for dir in cmd/ci-compute-*; do
     # defect needs: exists to remove.
     grep -q "citypes.DeclaredSubstage{" "$handlers" || continue
 
-    for field in Needs; do
+    # Uses dropped is a stage job that brings back everything, which reads
+    # exactly like a substage that declared nothing.
+    for field in Needs Uses; do
         grep -qE "	$field \[\]string" "$spec" || continue
 
         if ! grep -qE "$field: *sub\.$field" "$handlers"; then
             echo "$handlers drops DeclaredSubstage.$field: the wire carries it and the mapping does not copy it." >&2
             echo "  A missing field here is not a compile error, it is a substage that runs before what it needs." >&2
+            fail=1
+        fi
+    done
+
+    # The pipeline's repos ride the same call, for a cache keyed on them.
+    # Dropped, a key over no repos is a key over nothing, and every job
+    # of every run shares one cache entry.
+    grep -q "	Repos \[\]DeclaredRepo" "$spec" || continue
+
+    # The run input carries repos of its own (the checkouts), so the match
+    # is the declare call itself carrying them, on one line.
+    if ! grep -qE "ctrl\.Declare\(.*in\.Repos" "$handlers"; then
+        echo "$handlers drops DeclareInput.Repos: the wire carries it and the mapping does not copy it." >&2
+        echo "  A missing field here is not a compile error, it is one cache key for every run." >&2
+        fail=1
+    fi
+done
+
+# A target is an executable and its arguments, both carried by the wire.
+# Binary dropped is a target that cannot run; Args dropped is a target that
+# runs its binary with nothing, which for most binaries prints usage and
+# exits 0 - a green run that did no work.
+for dir in cmd/ci-compute-*; do
+    handlers="$dir/handlers.go"
+    spec="$dir/zz_generated.spec.go"
+
+    [ -f "$handlers" ] && [ -f "$spec" ] || continue
+
+    grep -q 'citypes.Target{' "$handlers" || continue
+
+    for field in Binary Args; do
+        grep -qE "	$field +(\[\])?string" "$spec" || continue
+
+        if ! grep -qE "$field: *t\.$field" "$handlers"; then
+            echo "$handlers drops Target.$field: the wire carries it and the mapping does not copy it." >&2
+            echo "  A missing field here is not a compile error, it is a target that runs nothing." >&2
             fail=1
         fi
     done

@@ -45,6 +45,10 @@ type DeclareInput struct {
 	Spec   map[string]any  `json:"spec,omitempty"`
 	Root   string          `json:"root,omitempty"`
 	Stages []DeclaredStage `json:"stages,omitempty"`
+	// Repos is the pipeline's repositories by name - the same ones the
+	// revision hashes - for a compute engine that keys a cache on what the
+	// run is built from. An engine that keys nothing ignores them.
+	Repos []DeclaredRepo `json:"repos,omitempty"`
 }
 
 // DeclaredStage is one stage by name with its substages, in order. An engine
@@ -64,6 +68,17 @@ type DeclaredSubstage struct {
 	// an engine that renders one job per substage and has to wire the
 	// order between them.
 	Needs []string `json:"needs,omitempty"`
+	// Uses names substages of earlier stages, as <stage>/<substage>, whose
+	// built artifacts this one reads, for an engine that brings back what
+	// a job before it kept. Absent means everything every earlier stage
+	// built.
+	Uses []string `json:"uses,omitempty"`
+}
+
+// DeclaredRepo is one repository of the pipeline, by the directory name it
+// is checked out under.
+type DeclaredRepo struct {
+	Name string `json:"name"`
 }
 
 type DeclareOutput struct {
@@ -140,11 +155,13 @@ type RepoCheckout struct {
 	Needs []string `json:"needs,omitempty"`
 }
 
+// Target is one thing to run: an executable found on PATH and its
+// arguments, one per element, in each repo named by In.
 type Target struct {
-	Alias   string   `json:"alias"`
-	Forge   string   `json:"forge,omitempty"`
-	ForgeCI string   `json:"forgeCI,omitempty"`
-	In      []string `json:"in,omitempty"`
+	Alias  string   `json:"alias"`
+	Binary string   `json:"binary"`
+	Args   []string `json:"args,omitempty"`
+	In     []string `json:"in,omitempty"`
 }
 
 type RunInput struct {

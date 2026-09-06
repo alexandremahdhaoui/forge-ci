@@ -10,17 +10,26 @@ import (
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/artifactcontroller"
 )
 
-func TestBuildIndexGroupsPlatformSuffixedUploads(t *testing.T) {
+// upload is one built binary as the plan describes it: the fields the
+// record carried, and the asset name composed from them.
+func upload(path, name, os, arch string) artifactcontroller.Upload {
+	return artifactcontroller.Upload{
+		Path: path, Asset: artifactcontroller.AssetName(name, os, arch), Name: name, OS: os, Arch: arch,
+	}
+}
+
+func TestBuildIndexGroupsUploadsByTheirRecordedPlatform(t *testing.T) {
 	t.Parallel()
 
 	raw, err := artifactcontroller.BuildIndex(
 		"abc123def456", "2026-08-26T00:00:00Z",
 		artifactcontroller.Release{Tag: "dist-abc123def456"},
 		[]artifactcontroller.UploadDigest{
-			{Path: "/w/m/build/dist/alpha_linux_amd64", Digest: "aa", Size: 10},
-			{Path: "/w/m/build/dist/alpha_linux_arm64", Digest: "bb", Size: 11},
-			{Path: "/w/m/build/dist/beta-tool_linux_amd64", Digest: "cc", Size: 12},
-			{Path: "/w/m/build/bin/plain", Digest: "dd", Size: 13}, // no suffix: plain asset
+			{Upload: upload("/w/m/build/dist/alpha_linux_amd64", "alpha", "linux", "amd64"), Digest: "aa", Size: 10},
+			{Upload: upload("/w/m/build/dist/alpha_linux_arm64", "alpha", "linux", "arm64"), Digest: "bb", Size: 11},
+			{Upload: upload("/w/m/build/dist/beta-tool_linux_amd64", "beta-tool", "linux", "amd64"), Digest: "cc", Size: 12},
+			// A glob asset names no tool and no platform: a plain asset.
+			{Upload: artifactcontroller.Upload{Path: "/w/m/build/bin/plain", Asset: "plain"}, Digest: "dd", Size: 13},
 		})
 	require.NoError(t, err)
 
@@ -51,14 +60,14 @@ func TestBuildIndexRefusesAmbiguityAndClaims(t *testing.T) {
 	_, err := artifactcontroller.BuildIndex("abc", "",
 		artifactcontroller.Release{},
 		[]artifactcontroller.UploadDigest{
-			{Path: "x_linux_amd64", Digest: "aa"},
-			{Path: "sub/x_linux_amd64", Digest: "bb"},
+			{Upload: upload("x_linux_amd64", "x", "linux", "amd64"), Digest: "aa"},
+			{Upload: upload("sub/x_linux_amd64", "x", "linux", "amd64"), Digest: "bb"},
 		})
 	require.ErrorContains(t, err, "two binaries for linux/amd64")
 
 	_, err = artifactcontroller.BuildIndex("abc", "",
 		artifactcontroller.Release{},
-		[]artifactcontroller.UploadDigest{{Path: "x_linux_amd64"}})
+		[]artifactcontroller.UploadDigest{{Upload: upload("x_linux_amd64", "x", "linux", "amd64")}})
 	require.ErrorContains(t, err, "no digest")
 
 	_, err = artifactcontroller.BuildIndex("", "", artifactcontroller.Release{}, nil)

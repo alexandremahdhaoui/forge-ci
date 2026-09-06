@@ -30,12 +30,19 @@ import (
 // A substage with no record has not run, which a promotion tolerant of
 // failure allows, and it is skipped rather than refused: whether this stage
 // may run at all was decided by the ordering check before this.
+//
+// uses restricts what comes back to the <stage>/<substage> pairs named;
+// nil brings back everything every earlier stage built. The pairs come
+// from the substages about to run: a stage whose every substage declared
+// what it reads carries only that, and one where any substage declared
+// nothing carries all of it, because that substage may read anything.
 func (c *Controller) carryForward(
 	ctx context.Context,
 	index engineIndex,
 	revision citypes.Revision,
 	root string,
 	before []config.Stage,
+	uses []string,
 ) ([]forge.Artifact, error) {
 	stages := make([]StageReport, 0, len(before))
 
@@ -43,6 +50,10 @@ func (c *Controller) carryForward(
 		report := StageReport{Name: stage.Name}
 
 		for _, sub := range stage.Substages {
+			if uses != nil && !named(uses, stage.Name+"/"+sub.Name) {
+				continue
+			}
+
 			run, err := c.getRun(ctx, index, runKey(revision.ID, stage.Name, sub.Name))
 			if err != nil {
 				return nil, err
@@ -65,4 +76,30 @@ func (c *Controller) carryForward(
 	}
 
 	return c.restoreArtifacts(ctx, index, revision.ID, root, stages)
+}
+
+// usesOf is what a stage's substages declared they read: the union of
+// their uses, or nil when any of them declared none.
+func usesOf(stage config.Stage) []string {
+	out := []string{}
+
+	for _, sub := range stage.Substages {
+		if len(sub.Uses) == 0 {
+			return nil
+		}
+
+		out = append(out, sub.Uses...)
+	}
+
+	return out
+}
+
+func named(list []string, name string) bool {
+	for _, n := range list {
+		if n == name {
+			return true
+		}
+	}
+
+	return false
 }

@@ -31,7 +31,7 @@ func releaseRoot(t *testing.T, withAsset bool) (string, citypes.ArtifactInput) {
 		Revision:  "abc123",
 		Version:   "v0.2.0",
 		Repos:     map[string]string{"m": "sha-m"},
-		Artifacts: []forge.Artifact{{Name: "tool", Type: "binary", Location: rel}},
+		Artifacts: []forge.Artifact{{Name: "tool", Type: "binary", OS: "linux", Arch: "amd64", Location: rel}},
 		Spec:      map[string]any{"repo": "o/r", "root": root},
 	}
 }
@@ -56,8 +56,8 @@ func TestTheWritesHappenInAnOrderACrashCannotHalve(t *testing.T) {
 	api.EXPECT().CreateDraftRelease(mock.Anything, "o/r", "v0.2.0").
 		Run(func(context.Context, string, string) { order = append(order, "draft") }).
 		Return(githubadapter.Release{ID: 9, Draft: true, UploadURL: "http://up/{?name}"}, nil).Once()
-	api.EXPECT().UploadAsset(mock.Anything, "http://up/{?name}", mock.Anything).
-		Run(func(context.Context, string, string) { order = append(order, "upload") }).Return(nil).Times(2)
+	api.EXPECT().UploadAsset(mock.Anything, "http://up/{?name}", mock.Anything, mock.Anything).
+		Run(func(context.Context, string, string, string) { order = append(order, "upload") }).Return(nil).Times(2)
 	api.EXPECT().PublishRelease(mock.Anything, "o/r", int64(9)).
 		Run(func(context.Context, string, int64) { order = append(order, "publish") }).
 		Return(githubadapter.Release{ID: 9, HTMLURL: "http://rel/v0.2.0"}, nil).Once()

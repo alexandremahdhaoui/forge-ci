@@ -38,7 +38,8 @@ engines:
 state: st
 targets:
   - alias: build
-    forge: test-all
+    binary: forge
+    args: [test-all]
 stages:
   - name: build
     substages:

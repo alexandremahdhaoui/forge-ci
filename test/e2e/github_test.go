@@ -166,7 +166,8 @@ state: ci-state
 triggers: [on-change]
 targets:
   - alias: build-all
-    forge: test-all
+    binary: forge
+    args: [test-all]
     in: [demo-repo]
 stages:
   - name: remote

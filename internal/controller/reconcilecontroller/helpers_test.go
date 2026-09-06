@@ -352,8 +352,8 @@ func pipeline(stages ...config.Stage) config.Pipeline {
 		},
 		State: "st",
 		Targets: []config.Target{
-			{Alias: "build", Forge: "test-all", In: []string{"golden-rust"}},
-			{Alias: "self", ForgeCI: "apply"},
+			{Alias: "build", Binary: "forge", Args: []string{"test-all"}, In: []string{"golden-rust"}},
+			{Alias: "self", Binary: "forge-ci", Args: []string{"apply"}},
 		},
 		Stages: stages,
 	}

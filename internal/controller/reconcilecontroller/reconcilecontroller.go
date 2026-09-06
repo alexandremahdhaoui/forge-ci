@@ -430,7 +430,7 @@ func (c *Controller) applyPhases(
 		var carried []forge.Artifact
 
 		if publishes(index, stage) {
-			carried, err = c.carryForward(ctx, index, revision, root, stagesBefore(p, stage.Name))
+			carried, err = c.carryForward(ctx, index, revision, root, stagesBefore(p, stage.Name), usesOf(stage))
 			if err != nil {
 				return Report{}, fmt.Errorf("carrying what the stages before %q built: %w", stage.Name, err)
 			}
@@ -1116,7 +1116,9 @@ func (c *Controller) reconcileResources(
 		// run as jobs knows them. Both optional on the wire: an engine that
 		// reads nothing validates without them.
 		if err := c.caller.Call(ctx, engine.Engine, ToolDeclare,
-			citypes.DeclareInput{Spec: orEmpty(engine.Spec), Root: root, Stages: declaredStages(p)}, &declared); err != nil {
+			citypes.DeclareInput{
+				Spec: orEmpty(engine.Spec), Root: root, Stages: declaredStages(p), Repos: declaredRepos(p),
+			}, &declared); err != nil {
 			return nil, false, false, fmt.Errorf("asking engine %q what it needs: %w", engine.Alias, err)
 		}
 
@@ -1212,7 +1214,9 @@ func declaredStages(p config.Pipeline) []citypes.DeclaredStage {
 	for _, stage := range p.Stages {
 		subs := make([]citypes.DeclaredSubstage, 0, len(stage.Substages))
 		for _, sub := range stage.Substages {
-			subs = append(subs, citypes.DeclaredSubstage{Name: sub.Name, DisplayName: sub.DisplayName})
+			subs = append(subs, citypes.DeclaredSubstage{
+				Name: sub.Name, DisplayName: sub.DisplayName, Needs: sub.Needs, Uses: sub.Uses,
+			})
 		}
 
 		out = append(out, citypes.DeclaredStage{
@@ -1409,6 +1413,19 @@ func checkouts(p config.Pipeline, root string, revision citypes.Revision) []city
 			// the same declaration.
 			Needs: repo.Needs,
 		})
+	}
+
+	return out
+}
+
+// declaredRepos is the pipeline's repos by name, the shape an engine that
+// keys a cache on the run's inputs is handed. The same list the revision
+// hashes, so a key over their heads is a key over the revision's inputs.
+func declaredRepos(p config.Pipeline) []citypes.DeclaredRepo {
+	out := make([]citypes.DeclaredRepo, 0, len(p.Repos))
+
+	for _, repo := range p.Repos {
+		out = append(out, citypes.DeclaredRepo{Name: repo.Name})
 	}
 
 	return out

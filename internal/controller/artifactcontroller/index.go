@@ -3,8 +3,6 @@ package artifactcontroller
 import (
 	"encoding/json"
 	"fmt"
-	"path"
-	"regexp"
 	"sort"
 	"strings"
 )
@@ -42,24 +40,20 @@ type Platform struct {
 	Asset  string `json:"asset"`
 }
 
-// UploadDigest is one upload the adapter hashed: its path, sha256 hex and
-// size.
+// UploadDigest is one upload the adapter hashed: the upload with its sha256
+// hex and size.
 type UploadDigest struct {
-	Path   string
+	Upload
 	Digest string
 	Size   int64
 }
 
-// platformSuffix is the `name_os_arch` convention a cross-built binary
-// travels under. The segments are whatever the pipeline named; only the
-// shape is ours.
-var platformSuffix = regexp.MustCompile(`^(.+)_([a-z0-9]+)_([a-z0-9]+)$`)
-
 // BuildIndex renders the distribution index for one release: every upload
-// whose file name carries the `name_os_arch` platform suffix becomes a
-// tool entry; anything else is a plain asset and stays out of the index.
-// The digests are what the adapter measured on the actual files - the
-// index never claims a byte nobody hashed.
+// whose record named a tool and a platform becomes a tool entry; a plain
+// asset carries no name and stays out of the index. The digests are what
+// the adapter measured on the actual files - the index never claims a byte
+// nobody hashed.
+//
 // BuildIndex writes the index a consumer verifies against: the revision, the
 // release it travels in, and every binary's digest.
 //
@@ -77,10 +71,7 @@ func BuildIndex(revision, createdAt string, release Release, files []UploadDiges
 	names := []string{}
 
 	for _, file := range files {
-		base := path.Base(file.Path)
-
-		m := platformSuffix.FindStringSubmatch(base)
-		if m == nil {
+		if file.Name == "" || file.OS == "" || file.Arch == "" {
 			continue
 		}
 
@@ -88,7 +79,7 @@ func BuildIndex(revision, createdAt string, release Release, files []UploadDiges
 			return nil, fmt.Errorf("upload %s carries no digest; the index never claims a byte nobody hashed", file.Path)
 		}
 
-		name, platform := m[1], m[2]+"/"+m[3]
+		name, platform := file.Name, file.OS+"/"+file.Arch
 
 		tool, ok := byName[name]
 		if !ok {
@@ -104,7 +95,7 @@ func BuildIndex(revision, createdAt string, release Release, files []UploadDiges
 		tool.Platforms[platform] = Platform{
 			Digest: "sha256:" + file.Digest,
 			Size:   file.Size,
-			Asset:  base,
+			Asset:  file.Asset,
 		}
 	}
 

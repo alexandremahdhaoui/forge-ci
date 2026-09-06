@@ -306,7 +306,7 @@ func TestAContainerReleasePublishesOverTheWire(t *testing.T) {
 			Version:   "v0.50.0",
 			TagPrefix: "forge",
 			Artifacts: []forge.Artifact{
-				{Name: "forge", Type: "binary", Location: "build/dist/forge_linux_amd64"},
+				{Name: "forge", Type: "binary", OS: "linux", Arch: "amd64", Location: "build/dist/forge_linux_amd64"},
 				{Name: "toolchain", Type: "container", Location: "file://" + layoutPath},
 			},
 			Spec: map[string]any{
@@ -358,7 +358,7 @@ func TestAContainerReleaseWithNothingToPublishFails(t *testing.T) {
 		citypes.ArtifactInput{
 			Revision:  "abc123def456",
 			Version:   "v0.50.0",
-			Artifacts: []forge.Artifact{{Name: "forge", Type: "binary", Location: "x_linux_amd64"}},
+			Artifacts: []forge.Artifact{{Name: "forge", Type: "binary", OS: "linux", Arch: "amd64", Location: "x_linux_amd64"}},
 			Spec:      map[string]any{"image": "example.invalid/owner/forge"},
 		}, &out)
 	require.Error(t, err)
@@ -454,7 +454,7 @@ func TestTheDecidedVersionReachesTheTargetEnvironmentOverMCP(t *testing.T) {
 			Stage:    "publish",
 			Substage: "dist",
 			Root:     dir,
-			Targets:  []citypes.Target{{Alias: "stamp", Forge: "test run stamp", In: []string{"."}}},
+			Targets:  []citypes.Target{{Alias: "stamp", Binary: "forge", Args: []string{"test", "run", "stamp"}, In: []string{"."}}},
 			Repos:    []citypes.RepoCheckout{{Name: ".", Path: dir, SHA: "abc"}},
 		}, &runOut)
 	require.NoError(t, err)
@@ -500,7 +500,7 @@ func TestTheNeedsGraphOrdersDirsOverMCP(t *testing.T) {
 			Substage: "default",
 			Root:     dir,
 			Targets: []citypes.Target{{
-				Alias: "build", Forge: "test-all",
+				Alias: "build", Binary: "forge", Args: []string{"test-all"},
 				// Listed with the dependent one first on purpose: the
 				// declaration decides the order, not the list.
 				In: []string{"last", "first", "second"},

@@ -58,7 +58,7 @@ type API interface {
 	PublishRelease(ctx context.Context, repo string, id int64) (Release, error)
 	// UploadAsset attaches one file through the URL the release answered,
 	// which is on a different host from the API base.
-	UploadAsset(ctx context.Context, uploadURL, file string) error
+	UploadAsset(ctx context.Context, uploadURL, file, name string) error
 }
 
 // RunInfo is the slice of a workflow run the compute engine acts on.

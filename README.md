@@ -50,7 +50,8 @@ state: ci-state
 
 targets:
   - alias: build-all
-    forge: test-all
+    binary: forge
+    args: [test-all]
     in: [my-repo]
 
 stages:

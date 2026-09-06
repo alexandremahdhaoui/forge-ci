@@ -51,10 +51,13 @@ something nobody can reproduce.
 A tag that already exists is refused rather than moved, because a moved tag changes
 what a consumer already pinned.
 
-What uploads: every binary artifact the runs built, plus anything whose file name
-carries the name_os_arch platform suffix - a cross-built binary travels under that
-convention whatever engine produced it. A container image or a URL is somebody
-else's to serve.
+What uploads: every binary the runs built for a platform, read from the fields
+its record carries - the engine that built it said which OS and architecture,
+and the asset is named <name>_<os>_<arch> from those fields, never parsed from
+a file name. A record with no platform says nothing about where it runs and
+stays home; a container image or a URL is somebody else's to serve. spec.assets
+globs add plain assets no record carries, which ride the release and stay out
+of the index.
 
 The release itself is ONE aggregated release per revision, tagged with the version
 the core decided, in the repo spec.repo names, carrying every upload plus index.json - the distribution
