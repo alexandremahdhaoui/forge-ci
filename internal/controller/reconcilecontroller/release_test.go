@@ -179,6 +179,9 @@ func TestAPhasedApplyCarriesTheDecisionThroughState(t *testing.T) {
 
 	reconcile := phase(reconcilecontroller.PhaseSelfReconcile)
 	require.Empty(t, reconcile.Revision.ID, "the reconcile phase resolves no revision")
+	require.Equal(t, reconcilecontroller.ReconciliationConverged, reconcile.Reconciliation,
+		"no drift: the word that lets the evaluate job run")
+	require.False(t, reconcile.Superseded)
 
 	evaluate := phase(reconcilecontroller.PhaseEvaluate)
 	require.Equal(t, reconcilecontroller.EvaluationProceed, evaluate.Evaluation)

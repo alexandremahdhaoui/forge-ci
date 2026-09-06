@@ -149,9 +149,12 @@ func TestThePhasesReachTheSameReleaseAsOneApply(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(repo, "README.md"), []byte("two"), 0o600))
 	mustRun(t, repo, "git", "commit", "-am", "fix: the door")
 
-	mustRun(t, root, "forge-ci", "apply", "--config", "forge-ci.yaml", "--root", ".", "--phase", "self-reconcile")
+	// The reconcile phase answers its own word last, the one a rendered
+	// workflow reads before it lets the evaluate job run.
+	out := mustRun(t, root, "forge-ci", "apply", "--config", "forge-ci.yaml", "--root", ".", "--phase", "self-reconcile")
+	require.True(t, strings.HasSuffix(strings.TrimSpace(out), "self-reconcile: converged"), out)
 
-	out := mustRun(t, root, "forge-ci", "apply", "--config", "forge-ci.yaml", "--root", ".", "--phase", "evaluate")
+	out = mustRun(t, root, "forge-ci", "apply", "--config", "forge-ci.yaml", "--root", ".", "--phase", "evaluate")
 	require.True(t, strings.HasSuffix(strings.TrimSpace(out), "evaluate: proceed"), out)
 	require.Contains(t, out, "Release v0.1.1 (patch).")
 

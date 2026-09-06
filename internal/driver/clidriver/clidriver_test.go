@@ -144,6 +144,31 @@ func TestASupersededApplyReportsLoudlyAndDoesNotFail(t *testing.T) {
 	require.Contains(t, text, "committed and pushed golden-go @ 3f1c9a2b4d5e to main")
 	require.NotContains(t, text, "revision ",
 		"no revision was resolved, so printing an empty one would read as a bug")
+	require.True(t, strings.HasSuffix(text, "self-reconcile: superseded\n"),
+		"the last line is the word a rendered workflow reads to stop the jobs after the reconcile; got %q", text)
+}
+
+// A self-reconcile phase that found no drift ends on the other word, on its
+// last line, so a rendered workflow reads one line either way and lets the
+// evaluate job run only on this one.
+func TestAConvergedSelfReconcilePhaseEndsOnItsWord(t *testing.T) {
+	var out bytes.Buffer
+
+	r := clidrivermock.NewMockReconciler(t)
+	r.EXPECT().Apply(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(reconcilecontroller.Report{
+		Reconciliation: reconcilecontroller.ReconciliationConverged,
+		Actions:        []string{"kept file golden-go/.github/workflows/notify.yaml"},
+	}, nil).Once()
+
+	err := clidriver.New(&out, r).Run(context.Background(),
+		[]string{"apply", "--config", write(t, minimal), "--phase", "self-reconcile"})
+	require.NoError(t, err)
+
+	text := out.String()
+	require.Contains(t, text, "kept file golden-go/.github/workflows/notify.yaml")
+	require.True(t, strings.HasSuffix(text, "self-reconcile: converged\n"), "got %q", text)
+	require.NotContains(t, text, "superseded")
+	require.NotContains(t, text, "revision ")
 }
 
 // A plan says so on its first line. An operator reading a wall of actions

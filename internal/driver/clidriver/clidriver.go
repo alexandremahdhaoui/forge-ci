@@ -308,10 +308,25 @@ func render(report reconcilecontroller.Report) string {
 	// The superseded report comes first and reads as its own thing. It is
 	// not a failure and the exit status says so, so the only way an operator
 	// learns why no stage ran is by reading this.
+	//
+	// Its last line is the machine-readable word a rendered workflow reads,
+	// the same contract the evaluate phase keeps: the job after the reconcile
+	// runs only when the reconcile converged.
 	if report.Superseded {
 		b.WriteString("reconcile changed this pipeline's own resources and settled them\n")
 		b.WriteString("this run is superseded by the run those changes trigger\n")
 		writeActions(&b, report.Actions)
+		fmt.Fprintf(&b, "%s: %s\n", reconcilecontroller.PhaseSelfReconcile, reconcilecontroller.ReconciliationSuperseded)
+
+		return b.String()
+	}
+
+	// A self-reconcile phase that found no drift says so on its last line,
+	// the same word a superseded one prints in the other case, so a rendered
+	// workflow reads one line either way.
+	if report.Reconciliation != "" {
+		writeActions(&b, report.Actions)
+		fmt.Fprintf(&b, "%s: %s\n", reconcilecontroller.PhaseSelfReconcile, report.Reconciliation)
 
 		return b.String()
 	}

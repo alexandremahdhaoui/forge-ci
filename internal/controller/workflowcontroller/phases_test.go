@@ -63,9 +63,16 @@ func TestPhasesRenderOneJobPerStageGatedOnTheEvaluation(t *testing.T) {
 	ci := renderCI(t, phasedSpec())
 
 	for _, want := range []string{
-		"  self-reconcile:\n    name: Reconcile CI resources\n",
-		"  evaluate:\n    name: Evaluate next steps\n    needs: [self-reconcile]\n    outputs:\n      outcome: ${{ steps.phase.outputs.outcome }}\n" +
+		"  self-reconcile:\n    name: Reconcile CI resources\n    outputs:\n      outcome: ${{ steps.phase.outputs.outcome }}\n",
+		// The evaluate job runs only when the reconcile converged. A whole
+		// apply that superseded itself stops in-process; this gate is what
+		// stops the phased run the same way, so the run the settle's push
+		// fired is the one that releases - once, not once per run.
+		"  evaluate:\n    name: Evaluate next steps\n    needs: [self-reconcile]\n    if: needs.self-reconcile.outputs.outcome == 'converged'\n" +
+			"    outputs:\n      outcome: ${{ steps.phase.outputs.outcome }}\n" +
 			"      revision: ${{ steps.phase.outputs.revision }}\n",
+		"--phase self-reconcile)",
+		"sed -n 's/^self-reconcile: //p' | tail -n 1",
 		"  check:\n    name: check\n    needs: [evaluate]\n    if: needs.evaluate.outputs.outcome == 'proceed'\n",
 		"  build:\n    name: build\n    needs: [evaluate, check]\n    if: needs.evaluate.outputs.outcome == 'proceed'\n",
 		"  publish:\n    name: publish\n    needs: [evaluate, build]\n    if: needs.evaluate.outputs.outcome == 'proceed'\n",
@@ -73,7 +80,7 @@ func TestPhasesRenderOneJobPerStageGatedOnTheEvaluation(t *testing.T) {
 		"- name: Evaluate next steps\n",
 		"- name: Run stage check\n",
 		"- name: Run stage publish\n",
-		"forge-ci apply --config forge-ci.yaml --root . --phase self-reconcile",
+		"out=$(forge-ci apply --config forge-ci.yaml --root . --phase self-reconcile)",
 		"--phase evaluate)",
 		"sed -n 's/^evaluate: //p' | tail -n 1",
 		"forge-ci apply --config forge-ci.yaml --root . --phase stages --stage check --revision ${{ needs.evaluate.outputs.revision }}\n",

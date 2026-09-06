@@ -32,7 +32,12 @@ keyboard all call the same thing and a duplicate call costs nothing.
 `apply --phase <name>` runs one part of the loop: `self-reconcile`,
 `evaluate` or `stages`. Each phase reads and writes state, so the next can
 run in another process. A compute engine renders the phases as jobs, so a
-run reads as what it is. The `evaluate` phase is where a revision with
+run reads as what it is. The `self-reconcile` phase answers one word,
+`superseded` or `converged`, and the phases after it run only on
+`converged`: a whole apply that superseded itself stops in-process, and
+this is what stops a phased run the same way, so the run the settle's push
+fired is the one that carries the work. Without it a pipeline whose release
+moves its own image pin released once per run, forever. The `evaluate` phase is where a revision with
 nothing to release ends: already released, no new commit in the release
 set, only commits of a kind that never releases, or the same code as the
 last release. It answers one word, `skip` or `proceed`, and the phases

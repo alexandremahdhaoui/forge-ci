@@ -242,6 +242,8 @@ func TestAChangedReconcileStopsTheApplyBeforeTheRevision(t *testing.T) {
 	require.NoError(t, err, "a corrected drift is not a failure")
 
 	require.True(t, report.Superseded)
+	require.Equal(t, reconcilecontroller.ReconciliationSuperseded, report.Reconciliation,
+		"the word a rendered workflow reads to stop the jobs after the reconcile")
 	require.Empty(t, report.Revision.ID, "no revision was resolved, so none can be dirty")
 	require.Empty(t, report.Stages)
 	require.False(t, report.Minted)

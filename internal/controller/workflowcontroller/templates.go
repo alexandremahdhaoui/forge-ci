@@ -257,6 +257,10 @@ type job struct {
 	// push says the workflow's push step follows the command, for a
 	// pipeline whose stages write into its own checkout.
 	push bool
+	// capture is the phase whose one-word answer this job publishes as its
+	// `outcome` output: the last `<phase>: <word>` line of the report. The
+	// two fixed jobs set it; a stage job answers nothing a later job reads.
+	capture string
 }
 
 // phasedJobs lays the jobs out: the two fixed ones in front, the stage
@@ -269,11 +273,12 @@ func phasedJobs(spec Spec, w WorkflowSpec) ([]job, error) {
 		{
 			id: jobSelfReconcile, name: "Reconcile CI resources",
 			step: "Reconcile CI resources", flags: "--phase " + jobSelfReconcile,
+			capture: jobSelfReconcile,
 		},
 		{
 			id: jobEvaluate, name: "Evaluate next steps",
 			step: "Evaluate next steps", flags: "--phase " + jobEvaluate,
-			needs: []string{jobSelfReconcile},
+			needs: []string{jobSelfReconcile}, capture: jobEvaluate,
 		},
 	}
 
@@ -396,12 +401,17 @@ func dedupe(in []string) []string {
 	return out
 }
 
-// writePhasedJobs renders one apply as jobs. The evaluate job's last line
-// is one word, skip or proceed, captured as its output; every job after it
-// runs only on proceed, so a run with nothing to release shows them skipped
-// rather than green. A self reconcile that superseded itself exits 0 with
-// no revision, and the evaluate job then runs on the superseded state and
-// skips on its own - the run that push fired carries the work.
+// writePhasedJobs renders one apply as jobs. Each of the two fixed jobs
+// answers one word on its last line, captured as its output. The self
+// reconcile answers superseded or converged: a whole apply that superseded
+// itself stops in-process, and the evaluate job is what makes the phased
+// run stop the same way - it runs only when the reconcile converged, so the
+// run the settle's push fired is the one that carries the work. Without
+// that gate the evaluate job ran on the superseded state, released, and
+// the superseding run released again (forty-one times on one pipeline).
+// The evaluate job answers skip or proceed; every job after it runs only on
+// proceed, so a run with nothing to release shows them skipped rather than
+// green, and a skipped evaluate has no outputs, so they skip then too.
 func writePhasedJobs(b *strings.Builder, spec Spec, w WorkflowSpec, jobs []job) {
 	b.WriteString("\njobs:\n")
 
@@ -416,13 +426,20 @@ func writePhasedJobs(b *strings.Builder, spec Spec, w WorkflowSpec, jobs []job) 
 			fmt.Fprintf(b, "    needs: [%s]\n", strings.Join(j.needs, ", "))
 		}
 
+		if j.id == jobEvaluate {
+			fmt.Fprintf(b, "    if: needs.%s.outputs.outcome == '%s'\n", jobSelfReconcile, "converged")
+		}
+
 		if j.gated {
-			fmt.Fprintf(b, "    if: needs.%s.outputs.outcome == 'proceed'\n", jobEvaluate)
+			fmt.Fprintf(b, "    if: needs.%s.outputs.outcome == '%s'\n", jobEvaluate, "proceed")
+		}
+
+		if j.capture != "" {
+			b.WriteString("    outputs:\n      outcome: ${{ steps.phase.outputs.outcome }}\n")
 		}
 
 		if j.id == jobEvaluate {
-			b.WriteString("    outputs:\n      outcome: ${{ steps.phase.outputs.outcome }}\n" +
-				"      revision: ${{ steps.phase.outputs.revision }}\n")
+			b.WriteString("      revision: ${{ steps.phase.outputs.revision }}\n")
 		}
 
 		b.WriteString("    runs-on: ubuntu-latest\n")
@@ -470,7 +487,8 @@ func writePhasedJobs(b *strings.Builder, spec Spec, w WorkflowSpec, jobs []job) 
 			command += " --revision ${{ needs." + jobEvaluate + ".outputs.revision }}"
 		}
 
-		if j.id == jobEvaluate {
+		switch {
+		case j.id == jobEvaluate:
 			// Two lines of the report are contracts. The last is the
 			// word, captured rather than parsed from the middle because a
 			// report can say anything before it. The first is the revision
@@ -480,9 +498,14 @@ func writePhasedJobs(b *strings.Builder, spec Spec, w WorkflowSpec, jobs []job) 
 			// answers for the commits the run started with.
 			writeIndented(b, "out=$("+command+")\n"+
 				"printf '%s\\n' \"$out\"\n"+
-				"echo \"outcome=$(printf '%s\\n' \"$out\" | sed -n 's/^"+jobEvaluate+": //p' | tail -n 1)\" >> \"$GITHUB_OUTPUT\"\n"+
+				"echo \"outcome=$(printf '%s\\n' \"$out\" | sed -n 's/^"+j.capture+": //p' | tail -n 1)\" >> \"$GITHUB_OUTPUT\"\n"+
 				"echo \"revision=$(printf '%s\\n' \"$out\" | sed -n 's/^revision //p' | head -n 1)\" >> \"$GITHUB_OUTPUT\"")
-		} else {
+		case j.capture != "":
+			// One line is the contract: the last `<phase>: <word>`.
+			writeIndented(b, "out=$("+command+")\n"+
+				"printf '%s\\n' \"$out\"\n"+
+				"echo \"outcome=$(printf '%s\\n' \"$out\" | sed -n 's/^"+j.capture+": //p' | tail -n 1)\" >> \"$GITHUB_OUTPUT\"")
+		default:
 			writeIndented(b, command)
 		}
 

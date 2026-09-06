@@ -111,12 +111,27 @@ type Report struct {
 	// proceed, which a rendered workflow reads to decide whether the phases
 	// after it run at all. Empty outside that phase.
 	Evaluation string `json:"evaluation,omitempty"`
+
+	// Reconciliation is the one word the reconcile answers, superseded or
+	// converged, which a rendered workflow reads to decide whether the
+	// evaluate job runs at all. A whole apply that superseded itself stops
+	// in-process; a phased apply is cut into jobs, and without this word the
+	// job after the reconcile ran on the superseded state and released a
+	// version the superseding run then released again. Set whenever the
+	// reconcile ended the run or was the phase asked for.
+	Reconciliation string `json:"reconciliation,omitempty"`
 }
 
 // The words the evaluate phase answers.
 const (
 	EvaluationSkip    = "skip"
 	EvaluationProceed = "proceed"
+)
+
+// The words the self-reconcile phase answers.
+const (
+	ReconciliationSuperseded = "superseded"
+	ReconciliationConverged  = "converged"
 )
 
 // Advanced reports whether anything blocked. A superseded report did not
@@ -276,7 +291,7 @@ func (c *Controller) applyFrom(
 	// the run continues and measures the converged state; if it dirtied a
 	// member tree the -dirty refusal at release stays the honest guard.
 	if changed && published {
-		return Report{Actions: actions, Superseded: true}, nil
+		return Report{Actions: actions, Superseded: true, Reconciliation: ReconciliationSuperseded}, nil
 	}
 
 	if changed {
@@ -285,7 +300,7 @@ func (c *Controller) applyFrom(
 	}
 
 	if phase == PhaseSelfReconcile {
-		return Report{Actions: actions}, nil
+		return Report{Actions: actions, Reconciliation: ReconciliationConverged}, nil
 	}
 
 	return c.applyPhases(ctx, p, index, root, opts, actions)
