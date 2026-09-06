@@ -855,7 +855,7 @@ func TestAPublishingWorkflowGetsACredentialAndThePermissionToUseIt(t *testing.T)
 		Workflows: []workflowcontroller.WorkflowSpec{{
 			Name:     "pipeline",
 			Kind:     "command",
-			On:     workflowcontroller.OnSpec{Cron: "0 * * * *"},
+			On:       workflowcontroller.OnSpec{Cron: "0 * * * *"},
 			Command:  "forge-ci apply --config forge-ci.yaml --root .",
 			Token:    true,
 			Packages: true,
@@ -884,7 +884,7 @@ func TestAWorkflowThatPublishesNothingCarriesNoToken(t *testing.T) {
 		Workflows: []workflowcontroller.WorkflowSpec{{
 			Name:    "check",
 			Kind:    "command",
-			On:    workflowcontroller.OnSpec{Cron: "0 * * * *"},
+			On:      workflowcontroller.OnSpec{Cron: "0 * * * *"},
 			Command: "forge test-all",
 		}},
 	})
@@ -915,7 +915,7 @@ func TestTheWorkflowSecretReachesTheCommandAndNotOnlyTheCheckout(t *testing.T) {
 		Workflows: []workflowcontroller.WorkflowSpec{{
 			Name:    "pipeline",
 			Kind:    "command",
-			On:  workflowcontroller.OnSpec{Events: []string{"member-pushed"}},
+			On:      workflowcontroller.OnSpec{Events: []string{"member-pushed"}},
 			Secret:  "FORGE_CI_GITHUB_TOKEN",
 			Command: "forge-ci apply --config forge-ci.yaml --root .",
 		}},
@@ -941,7 +941,7 @@ func TestAWorkflowWithNoSecretCarriesNoSecretEnv(t *testing.T) {
 		Workflows: []workflowcontroller.WorkflowSpec{{
 			Name:    "check",
 			Kind:    "command",
-			On:    workflowcontroller.OnSpec{Cron: "0 * * * *"},
+			On:      workflowcontroller.OnSpec{Cron: "0 * * * *"},
 			Command: "forge test-all",
 		}},
 	})

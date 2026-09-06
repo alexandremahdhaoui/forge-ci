@@ -23,14 +23,14 @@ func phasedSpec() workflowcontroller.Spec {
 			{Name: "publish", Substages: []citypes.DeclaredSubstage{{Name: "default"}, {Name: "dist"}}},
 		},
 		Workflows: []workflowcontroller.WorkflowSpec{{
-			Name:            "ci",
-			Kind:            workflowcontroller.KindCommand,
+			Name: "ci",
+			Kind: workflowcontroller.KindCommand,
 			On: workflowcontroller.OnSpec{
 				Push: &workflowcontroller.PushSpec{Branches: []string{"main"}, IgnorePaths: []string{"*.md", "docs/**"}},
 			},
-			Job:             "apply",
-			Secret:          "FORGE_CI_GITHUB_TOKEN",
-			Command:         "forge-ci apply --config forge-ci.yaml --root .",
+			Job:     "apply",
+			Secret:  "FORGE_CI_GITHUB_TOKEN",
+			Command: "forge-ci apply --config forge-ci.yaml --root .",
 		}},
 	}
 }

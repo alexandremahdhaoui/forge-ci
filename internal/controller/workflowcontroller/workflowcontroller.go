@@ -259,7 +259,7 @@ type WorkflowSpec struct {
 	Header string `json:"header,omitempty"`
 
 	// command kind.
-	On OnSpec `json:"on,omitzero"`
+	On         OnSpec   `json:"on,omitzero"`
 	Job        string   `json:"job,omitempty"`
 	StepName   string   `json:"stepName,omitempty"`
 	Secret     string   `json:"secret,omitempty"`
