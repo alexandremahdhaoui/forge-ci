@@ -46,11 +46,15 @@ engines:
       ref: <string>
       setup: <list>
       workspace: <object>
-      container: <string>
-      containerFile: <string>
+      container: <object>
+      runsOn: <string>
+      concurrency: <object>
+      caches: <list>
+      carry: <object>
+      failureReport: <object>
+      actions: <object>
       secrets: <list>
       workflows: <list>
-      phases: <bool>
       jobs: <string>
       runner: <object>
 ```

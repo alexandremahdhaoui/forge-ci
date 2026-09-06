@@ -8,6 +8,6 @@ The `spec` block on this engine's entry in `forge-ci.yaml`.
 |---|---|---|---|
 | `watch` | list of string | yes | Directories to watch. Each must be a git repo. |
 | `previous` | string | no | The last fingerprint. Omit it and the first look counts as changed. |
-| `notify` | object | no | Declare the workflow that makes a watched repo report its own pushes. Nothing on GitHub starts a workflow in one repo when another moves, so a watched repo has to send a repository_dispatch and something has to put that workflow there. Omit this key and the engine declares nothing, which is what it did before. Keys: owner, factory, eventType and secret are required; workflow defaults to notify, branch to main, and fromEnv to the secret name. |
+| `notify` | object | no | Declare the workflow that makes a watched repo report its own pushes. Nothing on GitHub starts a workflow in one repo when another moves, so a watched repo has to send a repository_dispatch and something has to put that workflow there. Omit this key and the engine declares nothing, which is what it did before. Keys: owner, factory, eventType and secret are required; workflow defaults to notify, branch to main, fromEnv to the secret name, runsOn (the dispatch job's runner label) to ubuntu-latest and apiBaseURL (where the rendered workflow sends the dispatch) to the public API. |
 
 forge-ci never validates a spec. This engine does, because only it knows what the keys mean.

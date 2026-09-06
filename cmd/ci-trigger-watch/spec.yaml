@@ -36,4 +36,6 @@ spec:
     to send a repository_dispatch and something has to put that workflow there. Omit
     this key and the engine declares nothing, which is what it did before. Keys: owner,
     factory, eventType and secret are required; workflow defaults to notify, branch
-    to main, and fromEnv to the secret name.'
+    to main, fromEnv to the secret name, runsOn (the dispatch job''s runner label)
+    to ubuntu-latest and apiBaseURL (where the rendered workflow sends the dispatch)
+    to the public API.'

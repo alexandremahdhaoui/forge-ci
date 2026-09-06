@@ -14,9 +14,8 @@ func phasedSpec() workflowcontroller.Spec {
 	return workflowcontroller.Spec{
 		Repo:      "o/r",
 		Dir:       "r",
-		Container: "ghcr.io/o/toolchain:v1",
+		Container: workflowcontroller.ContainerSpec{Ref: "ghcr.io/o/toolchain:v1"},
 		Workspace: workflowcontroller.Workspace{BootstrapCommand: "forge clone git@github.com:o/r.git ."},
-		Phases:    true,
 		Jobs:      workflowcontroller.JobsPerStage,
 		Stages: []citypes.DeclaredStage{
 			{Name: "check", Substages: []citypes.DeclaredSubstage{{Name: "default"}}},
@@ -26,8 +25,9 @@ func phasedSpec() workflowcontroller.Spec {
 		Workflows: []workflowcontroller.WorkflowSpec{{
 			Name:            "ci",
 			Kind:            workflowcontroller.KindCommand,
-			PushBranches:    []string{"main"},
-			PushPathsIgnore: []string{"*.md", "docs/**"},
+			On: workflowcontroller.OnSpec{
+				Push: &workflowcontroller.PushSpec{Branches: []string{"main"}, IgnorePaths: []string{"*.md", "docs/**"}},
+			},
 			Job:             "apply",
 			Secret:          "FORGE_CI_GITHUB_TOKEN",
 			Command:         "forge-ci apply --config forge-ci.yaml --root .",
@@ -239,30 +239,25 @@ func TestAStageNamedLikeAFixedJobIsRefused(t *testing.T) {
 	require.Contains(t, err.Error(), `two jobs would be named "build-unit-tests"`)
 }
 
-// jobs is a knob on a phased workflow and nothing else; a value nobody
-// implements is refused by name.
-func TestJobsNeedsPhasesAndAKnownValue(t *testing.T) {
+// jobs is how a command workflow is cut, and a value nobody implements is
+// refused by name. The default is whole: one job running the whole apply,
+// which is what every pipeline was before phases existed.
+func TestJobsIsOneOfThreeCutsAndDefaultsToWhole(t *testing.T) {
 	t.Parallel()
 
 	base := map[string]any{
-		"repo": "o/r", "container": "img",
+		"repo": "o/r", "container": map[string]any{"ref": "img"},
 		"workspace": map[string]any{"bootstrapCommand": "forge clone x ."},
 	}
 
-	spec := map[string]any{"jobs": "substage"}
+	spec := map[string]any{"jobs": "step"}
 	for k, v := range base {
 		spec[k] = v
 	}
 
 	_, err := workflowcontroller.ParseSpec(spec)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "spec.phases: true")
-
-	spec["phases"] = true
-	spec["jobs"] = "step"
-	_, err = workflowcontroller.ParseSpec(spec)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), `spec.jobs "step" is not stage or substage`)
+	require.Contains(t, err.Error(), `spec.jobs "step" is not whole, stage or substage`)
 
 	spec["jobs"] = "substage"
 	parsed, err := workflowcontroller.ParseSpec(spec)
@@ -272,7 +267,12 @@ func TestJobsNeedsPhasesAndAKnownValue(t *testing.T) {
 	delete(spec, "jobs")
 	parsed, err = workflowcontroller.ParseSpec(spec)
 	require.NoError(t, err)
-	require.Equal(t, workflowcontroller.JobsPerStage, parsed.Jobs, "the default is one job per stage")
+	require.Equal(t, workflowcontroller.JobsWhole, parsed.Jobs, "the default is one whole job")
+
+	// The key that used to switch phases on is refused naming its fold.
+	spec["phases"] = true
+	_, err = workflowcontroller.ParseSpec(spec)
+	require.ErrorContains(t, err, "phases is no longer a key; write jobs: stage")
 }
 
 // With phases off, nothing changes: the ignore list is the only new line,
@@ -281,14 +281,14 @@ func TestPathsIgnoreRendersOnlyWhenSet(t *testing.T) {
 	t.Parallel()
 
 	spec := phasedSpec()
-	spec.Phases = false
+	spec.Jobs = workflowcontroller.JobsWhole
 
 	files, err := workflowcontroller.RenderAll(spec)
 	require.NoError(t, err)
 	assert.Contains(t, files[0].Content, "  push:\n    branches: [main]\n    paths-ignore: [\"*.md\", \"docs/**\"]\n")
 	assert.Equal(t, 1, strings.Count(files[0].Content, "runs-on:"))
 
-	spec.Workflows[0].PushPathsIgnore = nil
+	spec.Workflows[0].On.Push.IgnorePaths = nil
 
 	files, err = workflowcontroller.RenderAll(spec)
 	require.NoError(t, err)
@@ -360,4 +360,124 @@ func TestAUsesDeclarationBringsBackOnlyTheJobsItNamed(t *testing.T) {
 	ci = renderCI(t, spec)
 	publish = ci[strings.Index(ci, "  publish:"):]
 	assert.Contains(t, publish, "pattern: built-${{ github.run_id }}-*")
+}
+
+// Every literal the renderer used to hold is the spec's now, and a spec
+// that says nothing renders exactly what it did: the goldens prove the
+// second half, and this proves the first by setting each key and reading
+// it back out of the file.
+func TestTheJobShapeIsTheSpecs(t *testing.T) {
+	t.Parallel()
+
+	spec := phasedSpec()
+	spec.RunsOn = "self-hosted"
+	spec.Concurrency = workflowcontroller.ConcurrencySpec{Group: "one-at-a-time", CancelInProgress: true}
+	spec.Carry = workflowcontroller.CarrySpec{Compression: workflowcontroller.CompressionNone, Retention: 2}
+	spec.Actions = workflowcontroller.ActionsSpec{
+		Cache: "actions/cache@v9", DownloadArtifact: "actions/download-artifact@v9", UploadArtifact: "actions/upload-artifact@v9",
+	}
+	spec.FailureReport = workflowcontroller.FailureReportSpec{Title: "red: {{.Workflow}}", Body: "look at it"}
+	spec.Workflows[0].ReportFailure = true
+
+	ci := renderCI(t, spec)
+
+	for _, want := range []string{
+		"    runs-on: self-hosted\n",
+		"concurrency:\n  group: one-at-a-time\n  cancel-in-progress: true\n",
+		"uses: actions/cache/restore@v9\n",
+		"uses: actions/cache/save@v9\n",
+		"uses: actions/download-artifact@v9\n",
+		"uses: actions/upload-artifact@v9\n",
+		"tar -cf .forge-ci/carried/built-check.tar -C",
+		"path: .forge-ci/carried/built-check.tar\n          retention-days: 2\n",
+		"tar -xf \"$f\" -C",
+		`TITLE: "red: ci"`,
+		`\"body\":\"look at it\"`,
+	} {
+		assert.Contains(t, ci, want)
+	}
+
+	assert.NotContains(t, ci, "ubuntu-latest")
+	assert.NotContains(t, ci, ".tar.gz")
+	assert.NotContains(t, ci, "@v6")
+}
+
+// caches: [] is no cache at all, which is different from saying nothing.
+func TestAnEmptyCachesListRendersNoCacheStep(t *testing.T) {
+	t.Parallel()
+
+	spec := phasedSpec()
+	caches := []workflowcontroller.CacheSpec{}
+	spec.Caches = &caches
+
+	ci := renderCI(t, spec)
+	assert.NotContains(t, ci, "actions/cache")
+	assert.NotContains(t, ci, "tool store")
+
+	// Saying nothing keeps the tool store.
+	spec.Caches = nil
+	ci = renderCI(t, spec)
+	assert.Contains(t, ci, "      - name: Restore the tool store\n        id: tool-store\n        uses: actions/cache/restore@v6\n        with:\n          path: ~/.cache/forge\n")
+	assert.Contains(t, ci, "      - name: Save the tool store\n")
+}
+
+// A key this spec does not name fails by name, and a key it used to name
+// fails naming the key that carries it now.
+func TestAnUnknownOrRetiredKeyIsRefusedByName(t *testing.T) {
+	t.Parallel()
+
+	base := func() map[string]any {
+		return map[string]any{
+			"repo": "o/r", "container": map[string]any{"ref": "img"},
+			"workspace": map[string]any{"bootstrapCommand": "forge clone x ."},
+			"workflows": []any{map[string]any{
+				"name": "ci", "kind": "command", "command": "true", "secret": "S",
+				"on": map[string]any{"events": []any{"member-pushed"}},
+			}},
+		}
+	}
+
+	spec := base()
+	spec["runsOnn"] = "x"
+	_, err := workflowcontroller.ParseSpec(spec)
+	require.ErrorContains(t, err, `unknown field "runsOnn"`)
+
+	spec = base()
+	spec["containerFile"] = ".forge/toolchain-image"
+	_, err = workflowcontroller.ParseSpec(spec)
+	require.ErrorContains(t, err, "containerFile is no longer a key; write container: {file: ...}")
+
+	spec = base()
+	spec["container"] = "img"
+	_, err = workflowcontroller.ParseSpec(spec)
+	require.ErrorContains(t, err, "container is an object now")
+
+	for old, now := range map[string]string{
+		"cron": "on: {cron: ...}", "events": "on: {events: [...]}",
+		"pushBranches": "on: {push: {branches: [...]}}", "pushPathsIgnore": "on: {push: {ignorePaths: [...]}}",
+	} {
+		spec = base()
+		spec["workflows"].([]any)[0].(map[string]any)[old] = "x"
+		_, err = workflowcontroller.ParseSpec(spec)
+		require.ErrorContains(t, err, old+" is no longer a key; write "+now)
+	}
+
+	// on.push needs branches: a push block with nothing to match starts
+	// nothing, silently.
+	spec = base()
+	spec["workflows"].([]any)[0].(map[string]any)["on"] = map[string]any{"push": map[string]any{}}
+	_, err = workflowcontroller.ParseSpec(spec)
+	require.ErrorContains(t, err, "on.push needs branches")
+
+	// And the parsed shape reaches the render: on.push.ignorePaths is the
+	// platform's paths-ignore.
+	spec = base()
+	spec["workflows"].([]any)[0].(map[string]any)["on"] = map[string]any{
+		"push": map[string]any{"branches": []any{"main"}, "ignorePaths": []any{"*.md"}},
+	}
+	parsed, err := workflowcontroller.ParseSpec(spec)
+	require.NoError(t, err)
+	files, err := workflowcontroller.RenderAll(parsed)
+	require.NoError(t, err)
+	assert.Contains(t, files[0].Content, "  push:\n    branches: [main]\n    paths-ignore: [\"*.md\"]\n")
 }

@@ -9,6 +9,7 @@
 package workflowcontroller
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -56,16 +57,35 @@ type Spec struct {
 	// replaces the toolchain install and NOT the workspace bootstrap: a
 	// container supplies tools, the members still have to be cloned.
 	//
-	// Empty keeps the runner's own machine. That is what the factory
+	// Absent keeps the runner's own machine. That is what the factory
 	// publishing the image needs: a pipeline that ran inside the image it
 	// builds could not publish a fixed one after a bad release.
-	Container string `json:"container,omitempty"`
-	// ContainerFile names a file under the pipeline root holding the full
-	// image reference, tag included - the file a workspace sync generates
-	// from its resolved toolchain pin. It is the alternative to typing the
-	// pin into this spec: the resolver owns the version and this engine
-	// only reads it. Exactly one of container or containerFile may be set.
-	ContainerFile string `json:"containerFile,omitempty"`
+	Container ContainerSpec `json:"container,omitzero"`
+	// RunsOn is the runner label every rendered job runs on. Absent means
+	// ubuntu-latest, which is what every workflow rendered before the key
+	// existed.
+	RunsOn string `json:"runsOn,omitempty"`
+	// Concurrency is the group every command workflow serializes on. Absent
+	// means the platform's own name for the workflow, queued rather than
+	// cancelled: an apply that is writing state must finish, and the next
+	// one then sees what it wrote.
+	Concurrency ConcurrencySpec `json:"concurrency,omitzero"`
+	// Caches are what every workspace-building job restores before its
+	// bootstrap and saves afterwards. Absent means one cache, the tool
+	// store under ~/.cache/forge keyed by its content, which is what every
+	// job rendered before the key existed; an empty list means no cache at
+	// all. A cache keyed by repos is restored after the checkout and saved
+	// after the toolchain script, under the heads of the pipeline's repos.
+	Caches *[]CacheSpec `json:"caches,omitempty"`
+	// Carry is how what a job built crosses to the jobs after it.
+	Carry CarrySpec `json:"carry,omitzero"`
+	// FailureReport is the issue a failing run of a workflow that asked for
+	// one opens: its title, with {{.Workflow}} standing for the workflow's
+	// name, and its body.
+	FailureReport FailureReportSpec `json:"failureReport,omitzero"`
+	// Actions pins the platform actions the rendered steps use. Absent means
+	// the versions every workflow rendered before the key existed.
+	Actions ActionsSpec `json:"actions,omitzero"`
 	// Secrets are the Actions secrets the workflows read.
 	Secrets []SecretSpec `json:"secrets,omitempty"`
 	// Workflows are the files this engine owns under .github/workflows.
@@ -73,21 +93,22 @@ type Spec struct {
 	// Runner configures the run tool's dispatch target. Empty name means
 	// the engine declares no runner and cannot run substages.
 	Runner RunnerSpec `json:"runner,omitzero"`
-	// Phases renders every command workflow as jobs - self-reconcile,
-	// evaluate, the stages, release - each running one phase of the apply,
-	// so the run reads as what it is instead of one job named after its
-	// first step. A skipped evaluation shows the jobs after it as skipped,
-	// which is GitHub's own word for it. The files a build produces cross
-	// from the stage jobs to the release job as Actions artifacts. Off, a
-	// command workflow is one job running the whole apply, which is what
-	// every pipeline was before phases existed.
-	Phases bool `json:"phases,omitempty"`
-	// Jobs is how fine the stage jobs are cut: "stage" renders one job per
-	// pipeline stage, its substages running beside each other inside it;
-	// "substage" renders one job per substage and one promotion job per
-	// stage, so a failure and a gate show where they happened, at the cost
-	// of one workspace checkout per job. Empty means stage.
+	// Jobs is how a command workflow is cut: "whole" renders one job running
+	// the whole apply, which is what every pipeline was before phases
+	// existed; "stage" renders one job per phase and per pipeline stage, its
+	// substages running beside each other inside it; "substage" renders one
+	// job per substage, so a failure shows where it happened, at the cost of
+	// one workspace checkout per job. Absent means whole. Cut into phases,
+	// the run reads as what it is - self-reconcile, evaluate, the stages -
+	// and a skipped evaluation shows the jobs after it as skipped, which is
+	// GitHub's own word for it; the files a build produces cross between
+	// the jobs as Actions artifacts.
 	Jobs string `json:"jobs,omitempty"`
+
+	// image is the container reference the jobs run in, once resolved:
+	// container.ref verbatim, or the contents of container.file read at
+	// declare time. Empty is the runner's own machine.
+	image string
 
 	// Stages are the pipeline's stages by name, handed in at declare time
 	// and never read from the spec: the pipeline declares them once, and
@@ -108,14 +129,111 @@ type Workspace struct {
 	// no order, which is what a recipe here got wrong three times.
 	BootstrapCommand string `json:"bootstrapCommand"`
 	// ToolchainScript is the verbatim run block installing whatever the
-	// targets need.
-	ToolchainScript string `json:"toolchainScript"`
-	// ToolchainCachePaths names what the script installs, so a run of
-	// several jobs installs it once: the paths are restored before the
-	// script and saved after it, keyed on every member's HEAD, because a
-	// toolchain built from the checkout is a function of the checkout and
-	// nothing else. Empty means no cache; meaningless without a script.
-	ToolchainCachePaths []string `json:"toolchainCachePaths,omitempty"`
+	// targets need. What it installs is cached by a caches entry keyed by
+	// repos, restored before the script and saved after it.
+	ToolchainScript string `json:"toolchainScript,omitempty"`
+}
+
+// ContainerSpec names the image the jobs run in: a reference typed here, or
+// a file under the pipeline root holding one - the file a workspace sync
+// generates from its resolved toolchain pin, so the resolver owns the
+// version and this engine only reads it. Exactly one of the two.
+type ContainerSpec struct {
+	Ref  string `json:"ref,omitempty"`
+	File string `json:"file,omitempty"`
+}
+
+// ConcurrencySpec is the group a command workflow's runs serialize on.
+type ConcurrencySpec struct {
+	Group            string `json:"group,omitempty"`
+	CancelInProgress bool   `json:"cancelInProgress,omitempty"`
+}
+
+// CacheSpec is one cache a workspace-building job restores and saves: the
+// paths it holds, and how its key is derived. "content" names the saved
+// store by a listing of what it holds and restores the newest for this OS,
+// which is right for a store that converges on its own; "repos" hashes the
+// heads of the pipeline's repos, exact match only, which is right for a
+// toolchain built from the checkout.
+type CacheSpec struct {
+	Name  string   `json:"name"`
+	Paths []string `json:"paths"`
+	Key   string   `json:"key,omitempty"`
+}
+
+// CarrySpec is how a job's built files cross to the jobs after it: the
+// compression of the tarball, and how long the platform keeps it.
+type CarrySpec struct {
+	Compression string `json:"compression,omitempty"`
+	Retention   int    `json:"retention,omitempty"`
+}
+
+// FailureReportSpec is the issue a failing run opens. {{.Workflow}} in the
+// title stands for the workflow's name; the body is verbatim.
+type FailureReportSpec struct {
+	Title string `json:"title,omitempty"`
+	Body  string `json:"body,omitempty"`
+}
+
+// ActionsSpec pins the platform actions the rendered steps use.
+type ActionsSpec struct {
+	Cache            string `json:"cache,omitempty"`
+	DownloadArtifact string `json:"downloadArtifact,omitempty"`
+	UploadArtifact   string `json:"uploadArtifact,omitempty"`
+}
+
+// OnSpec is what starts a command workflow: a cron, dispatch events, and
+// pushes to the repo it lives on.
+type OnSpec struct {
+	Cron   string   `json:"cron,omitempty"`
+	Events []string `json:"events,omitempty"`
+	// Push also starts this workflow when the repo it lives on is pushed. A
+	// factory's own pipeline wants it: nothing dispatches when the
+	// workspace files themselves change, so without it an edit to the
+	// pipeline's own config never runs it. IgnorePaths keeps a push that
+	// touched only those paths from starting the workflow at all, GitHub's
+	// own paths-ignore: it filters pushes to THIS repo only and is blind to
+	// what a file is for, so list only what nothing embeds.
+	Push *PushSpec `json:"push,omitempty"`
+}
+
+// PushSpec is the push half of an on-block.
+type PushSpec struct {
+	Branches    []string `json:"branches"`
+	IgnorePaths []string `json:"ignorePaths,omitempty"`
+}
+
+// The keys of a CacheSpec, the cuts of a workflow, and the compressions of
+// a carry.
+const (
+	CacheKeyContent = "content"
+	CacheKeyRepos   = "repos"
+
+	JobsWhole = "whole"
+
+	CompressionGzip = "gzip"
+	CompressionNone = "none"
+)
+
+// The defaults, each equal to what every workflow rendered before its key
+// existed, so a spec that says nothing renders byte for byte what it did.
+const (
+	defaultRunsOn           = "ubuntu-latest"
+	defaultConcurrencyGroup = "${{ github.workflow }}"
+	defaultCarryRetention   = 7
+	defaultFailureTitle     = "{{.Workflow}} is failing"
+	defaultFailureBody      = "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID failed. " +
+		"Nothing else reports this run, so it reports itself. Close this once a run goes green; " +
+		"a failure after that files a new one."
+	defaultActionCache    = "actions/cache@v6"
+	defaultActionDownload = "actions/download-artifact@v8"
+	defaultActionUpload   = "actions/upload-artifact@v7"
+)
+
+// DefaultCaches is the one cache every job carried before caches existed:
+// the tool store, named by its content.
+func DefaultCaches() []CacheSpec {
+	return []CacheSpec{{Name: "tool-store", Paths: []string{"~/.cache/forge"}, Key: CacheKeyContent}}
 }
 
 // SetupStep is one `uses:` action at the top of a generated workflow.
@@ -141,26 +259,13 @@ type WorkflowSpec struct {
 	Header string `json:"header,omitempty"`
 
 	// command kind.
-	Cron   string   `json:"cron,omitempty"`
-	Events []string `json:"events,omitempty"`
-	// PushBranches also starts this workflow when the repo it lives on is
-	// pushed. A factory's own pipeline wants it: nothing dispatches when the
-	// workspace files themselves change, so without it an edit to the
-	// pipeline's own config never runs it.
-	PushBranches []string `json:"pushBranches,omitempty"`
-	// PushPathsIgnore keeps a push that touched only these paths from
-	// starting the workflow at all, GitHub's own paths-ignore. It filters
-	// pushes to THIS repo only, and it is blind to what a file is used for:
-	// a README a binary embeds is a code change, so list only what nothing
-	// embeds. The vocabulary and ignorePaths in the pipeline are what stop a
-	// release for a member push; this only saves the runner minutes.
-	PushPathsIgnore []string `json:"pushPathsIgnore,omitempty"`
-	Job             string   `json:"job,omitempty"`
-	StepName        string   `json:"stepName,omitempty"`
-	Secret          string   `json:"secret,omitempty"`
-	PayloadEnv      []string `json:"payloadEnv,omitempty"`
-	Command         string   `json:"command,omitempty"`
-	Push            bool     `json:"push,omitempty"`
+	On OnSpec `json:"on,omitzero"`
+	Job        string   `json:"job,omitempty"`
+	StepName   string   `json:"stepName,omitempty"`
+	Secret     string   `json:"secret,omitempty"`
+	PayloadEnv []string `json:"payloadEnv,omitempty"`
+	Command    string   `json:"command,omitempty"`
+	Push       bool     `json:"push,omitempty"`
 
 	// Token puts secrets.GITHUB_TOKEN into the step's environment. Nothing
 	// else does: engines inherit forge-ci's environment and nothing else,
@@ -230,9 +335,15 @@ func ParseSpec(raw map[string]any) (Spec, error) {
 		return Spec{}, fmt.Errorf("encoding the spec: %w", err)
 	}
 
+	// A key this spec does not name is refused by name, and a key this spec
+	// used to name is refused naming the key that replaced it. A silently
+	// dropped key read as configuration that took effect.
+	dec := json.NewDecoder(bytes.NewReader(payload))
+	dec.DisallowUnknownFields()
+
 	var s Spec
-	if err := json.Unmarshal(payload, &s); err != nil {
-		return Spec{}, fmt.Errorf("parsing the spec: %w", err)
+	if err := dec.Decode(&s); err != nil {
+		return Spec{}, fmt.Errorf("parsing the spec: %w", foldHint(err))
 	}
 
 	if s.Repo == "" {
@@ -274,9 +385,13 @@ func ParseSpec(raw map[string]any) (Spec, error) {
 				return Spec{}, fmt.Errorf("workflow %q: a command workflow needs command and secret", w.Name)
 			}
 
-			if w.Cron == "" && len(w.Events) == 0 {
+			if w.On.Cron == "" && len(w.On.Events) == 0 && w.On.Push == nil {
 				return Spec{}, fmt.Errorf(
-					"workflow %q: a command workflow needs a cron or events; an empty on-block is a workflow nothing can start", w.Name)
+					"workflow %q: a command workflow needs on.cron, on.events or on.push; an empty on-block is a workflow nothing can start", w.Name)
+			}
+
+			if w.On.Push != nil && len(w.On.Push.Branches) == 0 {
+				return Spec{}, fmt.Errorf("workflow %q: on.push needs branches", w.Name)
 			}
 
 			needsWorkspace = true
@@ -315,34 +430,48 @@ func ParseSpec(raw map[string]any) (Spec, error) {
 					"a container image supplies tools and not a workspace, so the members still need cloning")
 		}
 
-		if ws.ToolchainScript == "" && s.Container == "" && s.ContainerFile == "" {
+		if ws.ToolchainScript == "" && s.Container.Ref == "" && s.Container.File == "" {
 			return Spec{}, errors.New(
-				"workspace.toolchainScript is required unless spec.container or spec.containerFile names " +
+				"workspace.toolchainScript is required unless spec.container names " +
 					"an image the jobs run in, which is what supplies the toolchain instead")
 		}
 	}
 
-	if len(s.Workspace.ToolchainCachePaths) > 0 && s.Workspace.ToolchainScript == "" {
-		return Spec{}, errors.New(
-			"workspace.toolchainCachePaths names what toolchainScript installs, and there is no script")
-	}
-
 	switch s.Jobs {
 	case "":
-		s.Jobs = JobsPerStage
-	case JobsPerStage, JobsPerSubstage:
-		if !s.Phases {
-			return Spec{}, errors.New("spec.jobs cuts the stage jobs of a phased workflow; set spec.phases: true or drop it")
-		}
+		s.Jobs = JobsWhole
+	case JobsWhole, JobsPerStage, JobsPerSubstage:
 	default:
-		return Spec{}, fmt.Errorf("spec.jobs %q is not %s or %s", s.Jobs, JobsPerStage, JobsPerSubstage)
+		return Spec{}, fmt.Errorf("spec.jobs %q is not %s, %s or %s", s.Jobs, JobsWhole, JobsPerStage, JobsPerSubstage)
 	}
 
-	if s.Container != "" && s.ContainerFile != "" {
+	if s.Container.Ref != "" && s.Container.File != "" {
 		return Spec{}, errors.New(
-			"exactly one of spec.container or spec.containerFile pins the image: " +
+			"exactly one of spec.container.ref or spec.container.file pins the image: " +
 				"a literal reference, or the file the workspace sync resolves one into")
 	}
+
+	for i, cache := range s.caches() {
+		if cache.Name == "" || len(cache.Paths) == 0 {
+			return Spec{}, fmt.Errorf("caches[%d] needs a name and paths", i)
+		}
+
+		switch cache.Key {
+		case "", CacheKeyContent, CacheKeyRepos:
+		default:
+			return Spec{}, fmt.Errorf("caches[%d] (%s): key %q is not %s or %s",
+				i, cache.Name, cache.Key, CacheKeyContent, CacheKeyRepos)
+		}
+	}
+
+	switch s.Carry.Compression {
+	case "", CompressionGzip, CompressionNone:
+	default:
+		return Spec{}, fmt.Errorf("spec.carry.compression %q is not %s or %s",
+			s.Carry.Compression, CompressionGzip, CompressionNone)
+	}
+
+	s = s.withDefaults()
 
 	if s.Runner.PollIntervalSeconds <= 0 {
 		s.Runner.PollIntervalSeconds = 15
@@ -353,6 +482,110 @@ func ParseSpec(raw map[string]any) (Spec, error) {
 	}
 
 	return s, nil
+}
+
+// caches is the spec's cache list, or the one every job carried before the
+// key existed when the spec says nothing. An empty list is an empty list.
+func (s Spec) caches() []CacheSpec {
+	if s.Caches == nil {
+		return DefaultCaches()
+	}
+
+	return *s.Caches
+}
+
+// withDefaults fills every key the spec left unsaid with what every
+// workflow rendered before that key existed, so a spec that says nothing
+// renders byte for byte what it did. The parser applies it, and so does the
+// renderer, so a spec built in code renders the same as one parsed.
+func (s Spec) withDefaults() Spec {
+	if s.image == "" {
+		s.image = s.Container.Ref
+	}
+
+	if s.Jobs == "" {
+		s.Jobs = JobsWhole
+	}
+
+	if s.RunsOn == "" {
+		s.RunsOn = defaultRunsOn
+	}
+
+	if s.Concurrency.Group == "" {
+		s.Concurrency.Group = defaultConcurrencyGroup
+	}
+
+	caches := s.caches()
+	for i := range caches {
+		if caches[i].Key == "" {
+			caches[i].Key = CacheKeyContent
+		}
+	}
+
+	s.Caches = &caches
+
+	if s.Carry.Compression == "" {
+		s.Carry.Compression = CompressionGzip
+	}
+
+	if s.Carry.Retention <= 0 {
+		s.Carry.Retention = defaultCarryRetention
+	}
+
+	if s.FailureReport.Title == "" {
+		s.FailureReport.Title = defaultFailureTitle
+	}
+
+	if s.FailureReport.Body == "" {
+		s.FailureReport.Body = defaultFailureBody
+	}
+
+	if s.Actions.Cache == "" {
+		s.Actions.Cache = defaultActionCache
+	}
+
+	if s.Actions.DownloadArtifact == "" {
+		s.Actions.DownloadArtifact = defaultActionDownload
+	}
+
+	if s.Actions.UploadArtifact == "" {
+		s.Actions.UploadArtifact = defaultActionUpload
+	}
+
+	return s
+}
+
+// folds names, for every key this spec used to carry, the key that carries
+// it now. A strict parse refuses the old key; this turns the refusal into
+// the edit.
+var folds = map[string]string{
+	"containerFile":       "container: {file: ...}",
+	"phases":              "jobs: stage or jobs: substage (jobs: whole is the default)",
+	"toolchainCachePaths": "caches: [{name, paths, key: repos}]",
+	"cron":                "on: {cron: ...}",
+	"events":              "on: {events: [...]}",
+	"pushBranches":        "on: {push: {branches: [...]}}",
+	"pushPathsIgnore":     "on: {push: {ignorePaths: [...]}}",
+}
+
+// foldHint rewrites a strict-parse refusal of a retired key into the fold
+// that replaced it. Any other error is answered as it came.
+func foldHint(err error) error {
+	msg := err.Error()
+
+	for old, now := range folds {
+		if strings.Contains(msg, `unknown field "`+old+`"`) {
+			return fmt.Errorf("%s is no longer a key; write %s", old, now)
+		}
+	}
+
+	// container was a string once, and a string cannot fill an object.
+	if strings.Contains(msg, "cannot unmarshal string into Go struct field") &&
+		strings.Contains(msg, ".container") {
+		return errors.New("container is an object now; write container: {ref: ...} or container: {file: ...}")
+	}
+
+	return err
 }
 
 // Controller answers declare and run for the github compute engine.
@@ -397,19 +630,19 @@ func (c *Controller) Declare(
 	spec.Stages = stages
 	spec.Repos = repos
 
-	if spec.ContainerFile != "" {
-		pin, err := c.fs.ReadFile(filepath.Join(root, filepath.FromSlash(spec.ContainerFile)))
+	if spec.Container.File != "" {
+		pin, err := c.fs.ReadFile(filepath.Join(root, filepath.FromSlash(spec.Container.File)))
 		if err != nil {
 			return citypes.DeclareOutput{}, fmt.Errorf(
-				"reading spec.containerFile %s: %w (the workspace sync writes it; sync first)",
-				spec.ContainerFile, err)
+				"reading spec.container.file %s: %w (the workspace sync writes it; sync first)",
+				spec.Container.File, err)
 		}
 
-		spec.Container = strings.TrimSpace(string(pin))
-		if spec.Container == "" {
+		spec.image = strings.TrimSpace(string(pin))
+		if spec.image == "" {
 			return citypes.DeclareOutput{}, fmt.Errorf(
-				"spec.containerFile %s is empty: it must hold one image reference, tag included",
-				spec.ContainerFile)
+				"spec.container.file %s is empty: it must hold one image reference, tag included",
+				spec.Container.File)
 		}
 	}
 

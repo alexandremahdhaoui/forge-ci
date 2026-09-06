@@ -27,6 +27,13 @@ type NotifySpec struct {
 	FromEnv   string `json:"fromEnv,omitempty"`
 	Workflow  string `json:"workflow,omitempty"`
 	Branch    string `json:"branch,omitempty"`
+	// RunsOn is the runner label the dispatch job runs on. Absent means
+	// ubuntu-latest, which is what every notify workflow rendered before
+	// the key existed.
+	RunsOn string `json:"runsOn,omitempty"`
+	// APIBaseURL is where the rendered workflow sends the dispatch. It runs
+	// on GitHub, so absent means the public API.
+	APIBaseURL string `json:"apiBaseURL,omitempty"`
 }
 
 type declareSpec struct {
@@ -73,6 +80,14 @@ func parseNotify(raw map[string]any) (*NotifySpec, error) {
 
 	if n.Branch == "" {
 		n.Branch = "main"
+	}
+
+	if n.RunsOn == "" {
+		n.RunsOn = "ubuntu-latest"
+	}
+
+	if n.APIBaseURL == "" {
+		n.APIBaseURL = "https://api.github.com"
 	}
 
 	if n.FromEnv == "" {
@@ -143,7 +158,7 @@ func renderNotify(repo string, n *NotifySpec) string {
 	b.WriteString("\n")
 	b.WriteString("jobs:\n")
 	b.WriteString("  dispatch:\n")
-	b.WriteString("    runs-on: ubuntu-latest\n")
+	b.WriteString("    runs-on: " + n.RunsOn + "\n")
 	b.WriteString("    steps:\n")
 	// curl, and not a CLI. This file lands in a member repo, which carries no
 	// toolchain of its own and never will - the whole point of the workflow
@@ -159,7 +174,7 @@ func renderNotify(repo string, n *NotifySpec) string {
 	b.WriteString("          curl -fsS -X POST \\\n")
 	b.WriteString("            -H \"Authorization: Bearer ${{ secrets." + n.Secret + " }}\" \\\n")
 	b.WriteString("            -H \"Accept: application/vnd.github+json\" \\\n")
-	b.WriteString("            \"https://api.github.com/repos/" + n.Owner + "/" + n.Factory + "/dispatches\" \\\n")
+	b.WriteString("            \"" + n.APIBaseURL + "/repos/" + n.Owner + "/" + n.Factory + "/dispatches\" \\\n")
 	b.WriteString("            -d '{\"event_type\":\"" + n.EventType +
 		"\",\"client_payload\":{\"repo\":\"${{ github.repository }}\",\"sha\":\"${{ github.sha }}\"}}'\n")
 

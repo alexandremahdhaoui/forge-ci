@@ -57,7 +57,7 @@ echo "$HOME/go/bin" >> "$GITHUB_PATH"
 # to this repo - because the pipeline builds the whole playground
 # workspace around this checkout.
 `,
-				Cron: "17 5 * * *", Job: "apply", StepName: "Run the register pipeline",
+				On: workflowcontroller.OnSpec{Cron: "17 5 * * *"}, Job: "apply", StepName: "Run the register pipeline",
 				Secret: "FORGE_CI_GITHUB_TOKEN", Push: true, ReportFailure: true,
 				Command: "cd golden-register\ntouch .envrc\nforge-ci apply --config forge-ci.yaml --root ..\n",
 			},
@@ -74,7 +74,7 @@ echo "$HOME/go/bin" >> "$GITHUB_PATH"
 #   forge-register add go:github.com/x/pkg --reason "..." \
 #     --dispatch <owner>/golden-register
 `,
-				Events: []string{"admission-request"}, Job: "file", StepName: "File the request",
+				On: workflowcontroller.OnSpec{Events: []string{"admission-request"}}, Job: "file", StepName: "File the request",
 				Secret: "FORGE_CI_GITHUB_TOKEN", ReportFailure: true,
 				PayloadEnv: []string{"ecosystem", "package", "track", "version", "requester", "reason"},
 				Command: `cd golden-register
@@ -148,7 +148,7 @@ func TestAContainerReplacesTheToolchainInstallAndNotTheCheckout(t *testing.T) {
 	t.Parallel()
 
 	spec := registerSpec()
-	spec.Container = "ghcr.io/an-owner/a-toolchain:v1.2.3"
+	spec.Container = workflowcontroller.ContainerSpec{Ref: "ghcr.io/an-owner/a-toolchain:v1.2.3"}
 	spec.Workspace.ToolchainScript = ""
 
 	files, err := workflowcontroller.RenderAll(spec)
@@ -183,7 +183,7 @@ func TestAContainerReplacesTheToolchainInstallAndNotTheCheckout(t *testing.T) {
 		"a fan-out only curls a dispatch, so it needs no toolchain image")
 }
 
-// A containerFile keeps the version out of the pipeline file entirely: the
+// A container file keeps the version out of the pipeline file entirely: the
 // workspace sync resolves the pin into a generated file, and declare reads
 // it from there, so a register-advanced pin reaches the rendered workflows
 // on the next reconcile with nobody editing yaml.
@@ -198,7 +198,7 @@ func TestAContainerFileResolvesThePinFromTheWorkspace(t *testing.T) {
 	c := workflowcontroller.New(nil, nil, nil)
 
 	spec := specMap(t)
-	spec["containerFile"] = ".forge/toolchain-image"
+	spec["container"] = map[string]any{"file": ".forge/toolchain-image"}
 	spec["workspace"] = map[string]any{"bootstrapCommand": "true"}
 
 	out, err := c.Declare(spec, root, nil, nil)
@@ -222,7 +222,7 @@ func TestAMissingContainerFileNamesTheSyncThatWritesIt(t *testing.T) {
 	c := workflowcontroller.New(nil, nil, nil)
 
 	spec := specMap(t)
-	spec["containerFile"] = ".forge/toolchain-image"
+	spec["container"] = map[string]any{"file": ".forge/toolchain-image"}
 
 	_, err := c.Declare(spec, t.TempDir(), nil, nil)
 	require.ErrorContains(t, err, "sync first")
@@ -239,7 +239,7 @@ func TestAnEmptyContainerFileIsRefused(t *testing.T) {
 	c := workflowcontroller.New(nil, nil, nil)
 
 	spec := specMap(t)
-	spec["containerFile"] = ".forge/toolchain-image"
+	spec["container"] = map[string]any{"file": ".forge/toolchain-image"}
 
 	_, err := c.Declare(spec, root, nil, nil)
 	require.ErrorContains(t, err, "is empty")
@@ -249,11 +249,10 @@ func TestContainerAndContainerFileRefuseEachOther(t *testing.T) {
 	t.Parallel()
 
 	spec := specMap(t)
-	spec["container"] = "an-image:v1"
-	spec["containerFile"] = ".forge/toolchain-image"
+	spec["container"] = map[string]any{"ref": "an-image:v1", "file": ".forge/toolchain-image"}
 
 	_, err := workflowcontroller.ParseSpec(spec)
-	require.ErrorContains(t, err, "exactly one of spec.container or spec.containerFile")
+	require.ErrorContains(t, err, "exactly one of spec.container.ref or spec.container.file")
 }
 
 func TestRenderHonorsAVerbatimOverride(t *testing.T) {
@@ -296,7 +295,7 @@ func TestParseSpecDefaultsAndRefusals(t *testing.T) {
 			"name": "x", "kind": "command", "command": "true", "secret": "S",
 		}},
 	})
-	require.ErrorContains(t, err, "needs a cron or events")
+	require.ErrorContains(t, err, "needs on.cron, on.events or on.push")
 
 	base := specMap(t)
 	base["workspace"] = map[string]any{}
@@ -306,7 +305,7 @@ func TestParseSpecDefaultsAndRefusals(t *testing.T) {
 	// A container carries tools, not a checked-out workspace, so the
 	// bootstrap stays required however the job gets its toolchain.
 	noBootstrap := specMap(t)
-	noBootstrap["container"] = "an-image:v1"
+	noBootstrap["container"] = map[string]any{"ref": "an-image:v1"}
 	noBootstrap["workspace"] = map[string]any{"toolchainScript": "true\n"}
 	_, err = workflowcontroller.ParseSpec(noBootstrap)
 	require.ErrorContains(t, err, "workspace.bootstrapCommand is required")
@@ -542,7 +541,7 @@ func TestRenderCommandDefaultsJobAndStep(t *testing.T) {
 	files, err := workflowcontroller.RenderAll(workflowcontroller.Spec{
 		Workflows: []workflowcontroller.WorkflowSpec{{
 			Name: "chore", Kind: workflowcontroller.KindCommand,
-			Cron: "0 0 * * *", Secret: "S", Command: "true\n",
+			On: workflowcontroller.OnSpec{Cron: "0 0 * * *"}, Secret: "S", Command: "true\n",
 		}},
 	})
 	require.NoError(t, err)
@@ -856,7 +855,7 @@ func TestAPublishingWorkflowGetsACredentialAndThePermissionToUseIt(t *testing.T)
 		Workflows: []workflowcontroller.WorkflowSpec{{
 			Name:     "pipeline",
 			Kind:     "command",
-			Cron:     "0 * * * *",
+			On:     workflowcontroller.OnSpec{Cron: "0 * * * *"},
 			Command:  "forge-ci apply --config forge-ci.yaml --root .",
 			Token:    true,
 			Packages: true,
@@ -885,7 +884,7 @@ func TestAWorkflowThatPublishesNothingCarriesNoToken(t *testing.T) {
 		Workflows: []workflowcontroller.WorkflowSpec{{
 			Name:    "check",
 			Kind:    "command",
-			Cron:    "0 * * * *",
+			On:    workflowcontroller.OnSpec{Cron: "0 * * * *"},
 			Command: "forge test-all",
 		}},
 	})
@@ -916,7 +915,7 @@ func TestTheWorkflowSecretReachesTheCommandAndNotOnlyTheCheckout(t *testing.T) {
 		Workflows: []workflowcontroller.WorkflowSpec{{
 			Name:    "pipeline",
 			Kind:    "command",
-			Events:  []string{"member-pushed"},
+			On:  workflowcontroller.OnSpec{Events: []string{"member-pushed"}},
 			Secret:  "FORGE_CI_GITHUB_TOKEN",
 			Command: "forge-ci apply --config forge-ci.yaml --root .",
 		}},
@@ -942,7 +941,7 @@ func TestAWorkflowWithNoSecretCarriesNoSecretEnv(t *testing.T) {
 		Workflows: []workflowcontroller.WorkflowSpec{{
 			Name:    "check",
 			Kind:    "command",
-			Cron:    "0 * * * *",
+			On:    workflowcontroller.OnSpec{Cron: "0 * * * *"},
 			Command: "forge test-all",
 		}},
 	})
@@ -965,8 +964,10 @@ func TestAPipelineCanRunOnItsOwnPushAndOnlyOneAtATime(t *testing.T) {
 		Workspace: workflowcontroller.Workspace{BootstrapCommand: "true", ToolchainScript: "true\n"},
 		Workflows: []workflowcontroller.WorkflowSpec{{
 			Name: "pipeline", Kind: "command", Command: "true\n", Secret: "S",
-			Events:       []string{"member-pushed"},
-			PushBranches: []string{"main"},
+			On: workflowcontroller.OnSpec{
+				Events: []string{"member-pushed"},
+				Push:   &workflowcontroller.PushSpec{Branches: []string{"main"}},
+			},
 		}},
 	}
 

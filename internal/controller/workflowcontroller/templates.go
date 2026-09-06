@@ -1,6 +1,7 @@
 package workflowcontroller
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -18,6 +19,15 @@ type File struct {
 // RenderAll renders every owned workflow plus the runner, when one is
 // configured. Verbatim content wins over a kind's template.
 func RenderAll(spec Spec) ([]File, error) {
+	spec = spec.withDefaults()
+
+	// A cache keyed by repos hashes the pipeline's repos, and a pipeline
+	// that declares none has nothing to hash: refused rather than rendered
+	// as a key over nothing that every run shares.
+	if len(cachesKeyed(spec, CacheKeyRepos)) > 0 && len(spec.Repos) == 0 {
+		return nil, errors.New("a cache keyed by repos needs the pipeline to declare repos, and it declares none")
+	}
+
 	files := make([]File, 0, len(spec.Workflows)+1)
 
 	for _, w := range spec.Workflows {
@@ -63,32 +73,7 @@ func renderCommand(spec Spec, w WorkflowSpec) (string, error) {
 	b.WriteString(w.Header)
 	fmt.Fprintf(&b, "name: %s\n\non:\n", w.Name)
 
-	if w.Cron != "" {
-		fmt.Fprintf(&b, "  schedule:\n    - cron: \"%s\"\n  workflow_dispatch: {}\n", w.Cron)
-	}
-
-	if len(w.Events) > 0 {
-		// workflow_dispatch as well, always. A workflow only another repo
-		// can fire cannot be tested by the person who just changed it, and
-		// an untestable workflow is how one of these went eight days
-		// without completing a single run.
-		fmt.Fprintf(&b, "  repository_dispatch:\n    types: [%s]\n  workflow_dispatch: {}\n",
-			strings.Join(w.Events, ", "))
-	}
-
-	// A push to the repo the workflow lives on. Nothing dispatches when a
-	// factory's own workspace files change, so its pipeline asks for this or
-	// an edit to the pipeline never runs the pipeline.
-	if len(w.PushBranches) > 0 {
-		fmt.Fprintf(&b, "  push:\n    branches: [%s]\n", strings.Join(w.PushBranches, ", "))
-
-		// A push that touched only these paths never starts the run. This
-		// is the platform's own filter and it is blind to what a file is
-		// for, so the instance lists only what nothing embeds.
-		if len(w.PushPathsIgnore) > 0 {
-			fmt.Fprintf(&b, "    paths-ignore: [%s]\n", quoteList(w.PushPathsIgnore))
-		}
-	}
+	writeOn(&b, w.On)
 
 	job := w.Job
 	if job == "" {
@@ -117,9 +102,10 @@ func renderCommand(spec Spec, w WorkflowSpec) (string, error) {
 	// the platform's own name for this workflow; nothing is hand-typed.
 	// Cancelling mid-write is how a state repo ends up with a revision
 	// recorded and no run beside it, so a superseded start waits instead.
-	b.WriteString("\nconcurrency:\n  group: ${{ github.workflow }}\n  cancel-in-progress: false\n")
+	fmt.Fprintf(&b, "\nconcurrency:\n  group: %s\n  cancel-in-progress: %t\n",
+		spec.Concurrency.Group, spec.Concurrency.CancelInProgress)
 
-	if spec.Phases {
+	if spec.Jobs != JobsWhole {
 		jobs, err := phasedJobs(spec, w)
 		if err != nil {
 			return "", err
@@ -131,10 +117,7 @@ func renderCommand(spec Spec, w WorkflowSpec) (string, error) {
 	}
 
 	writeRunsOn(&b, spec, job)
-	writeSetup(&b, spec)
-	writeStoreRestore(&b)
-	writeWorkspaceCheckout(&b, spec, w.Secret)
-	writeToolchain(&b, spec)
+	writePrelude(&b, spec, w.Secret)
 
 	stepName := w.StepName
 	if stepName == "" {
@@ -184,10 +167,51 @@ func renderCommand(spec Spec, w WorkflowSpec) (string, error) {
 			spec.Dir, spec.Ref)
 	}
 
-	writeStoreSave(&b)
-	writeFailureReport(&b, w)
+	writeContentCachesSave(&b, spec)
+	writeFailureReport(&b, spec, w)
 
 	return b.String(), nil
+}
+
+// writeOn renders what starts a command workflow. A cron and a dispatch
+// event both take workflow_dispatch as well, always: a workflow only a
+// schedule or another repo can fire cannot be tested by the person who just
+// changed it, and an untestable workflow is how one of these went eight
+// days without completing a single run.
+func writeOn(b *strings.Builder, on OnSpec) {
+	if on.Cron != "" {
+		fmt.Fprintf(b, "  schedule:\n    - cron: \"%s\"\n  workflow_dispatch: {}\n", on.Cron)
+	}
+
+	if len(on.Events) > 0 {
+		fmt.Fprintf(b, "  repository_dispatch:\n    types: [%s]\n  workflow_dispatch: {}\n",
+			strings.Join(on.Events, ", "))
+	}
+
+	// A push to the repo the workflow lives on. Nothing dispatches when a
+	// factory's own workspace files change, so its pipeline asks for this or
+	// an edit to the pipeline never runs the pipeline. A push that touched
+	// only the ignored paths never starts the run: the platform's own
+	// filter, blind to what a file is for.
+	if on.Push != nil {
+		fmt.Fprintf(b, "  push:\n    branches: [%s]\n", strings.Join(on.Push.Branches, ", "))
+
+		if len(on.Push.IgnorePaths) > 0 {
+			fmt.Fprintf(b, "    paths-ignore: [%s]\n", quoteList(on.Push.IgnorePaths))
+		}
+	}
+}
+
+// writePrelude is what every job that builds a workspace does first: the
+// setup actions, the content-keyed caches, the checkout, and the toolchain
+// script with its repos-keyed caches around it. One function, so the whole
+// apply, the phased jobs, the release and the runner cannot drift into one
+// that works and one that does not.
+func writePrelude(b *strings.Builder, spec Spec, secret string) {
+	writeSetup(b, spec)
+	writeContentCachesRestore(b, spec)
+	writeWorkspaceCheckout(b, spec, secret)
+	writeToolchain(b, spec)
 }
 
 // The fixed jobs of one phased apply. Every job stands the workspace up on
@@ -488,18 +512,15 @@ func writePhasedJobs(b *strings.Builder, spec Spec, w WorkflowSpec, jobs []job) 
 			b.WriteString("      revision: ${{ steps.phase.outputs.revision }}\n")
 		}
 
-		b.WriteString("    runs-on: ubuntu-latest\n")
+		fmt.Fprintf(b, "    runs-on: %s\n", spec.RunsOn)
 
-		if spec.Container != "" {
-			fmt.Fprintf(b, "    container:\n      image: %s\n", spec.Container)
+		if spec.image != "" {
+			fmt.Fprintf(b, "    container:\n      image: %s\n", spec.image)
 		}
 
 		b.WriteString("    steps:\n")
 
-		writeSetup(b, spec)
-		writeStoreRestore(b)
-		writeWorkspaceCheckout(b, spec, w.Secret)
-		writeToolchain(b, spec)
+		writePrelude(b, spec, w.Secret)
 
 		if j.download {
 			// Every name this run has written so far, merged. A job early in
@@ -515,7 +536,7 @@ func writePhasedJobs(b *strings.Builder, spec Spec, w WorkflowSpec, jobs []job) 
 			// written. tar carries the bits, so a carried binary is still a
 			// binary a later stage can run.
 			if len(j.uses) == 0 {
-				fmt.Fprintf(b, "\n      - name: Bring back what the jobs before this one built\n        uses: actions/download-artifact@v8\n        with:\n          pattern: built-${{ github.run_id }}-*\n          merge-multiple: true\n          path: %s\n", carriedDir)
+				fmt.Fprintf(b, "\n      - name: Bring back what the jobs before this one built\n        uses: %s\n        with:\n          pattern: built-${{ github.run_id }}-*\n          merge-multiple: true\n          path: %s\n", spec.Actions.DownloadArtifact, carriedDir)
 			}
 
 			// A substage that declared what it reads brings back exactly
@@ -523,9 +544,10 @@ func writePhasedJobs(b *strings.Builder, spec Spec, w WorkflowSpec, jobs []job) 
 			// a job that built nothing and kept nothing is a no-op here
 			// rather than a missing artifact.
 			for _, used := range j.uses {
-				fmt.Fprintf(b, "\n      - name: Bring back what %s built\n        uses: actions/download-artifact@v8\n        with:\n          pattern: built-${{ github.run_id }}-%s\n          merge-multiple: true\n          path: %s\n", used, used, carriedDir)
+				fmt.Fprintf(b, "\n      - name: Bring back what %s built\n        uses: %s\n        with:\n          pattern: built-${{ github.run_id }}-%s\n          merge-multiple: true\n          path: %s\n", used, spec.Actions.DownloadArtifact, used, carriedDir)
 			}
-			fmt.Fprintf(b, "\n      - name: Unpack it\n        run: |\n          mkdir -p %s\n          for f in %s/*.tar.gz; do\n            [ -e \"$f\" ] || continue\n            tar -xzf \"$f\" -C %s\n          done\n", artifactDir, carriedDir, artifactDir)
+
+			fmt.Fprintf(b, "\n      - name: Unpack it\n        run: |\n          mkdir -p %s\n          for f in %s/*%s; do\n            [ -e \"$f\" ] || continue\n            tar -x%sf \"$f\" -C %s\n          done\n", artifactDir, carriedDir, tarExt(spec), tarZ(spec), artifactDir)
 		}
 
 		if j.upload {
@@ -581,15 +603,17 @@ func writePhasedJobs(b *strings.Builder, spec Spec, w WorkflowSpec, jobs []job) 
 			// It is a tarball rather than loose files because the platform's
 			// artifact format is a zip, and a zip does not carry a unix
 			// mode: a binary uploaded loose comes back unexecutable and the
-			// stage that has to run it dies on "permission denied". It is
-			// gzipped because these are binaries and the upload is billed by
-			// the byte on a private repo.
-			fmt.Fprintf(b, "\n      - name: Pack what this job built\n        id: pack\n        run: |\n          if [ -d %s ]; then\n            find %s -type f -newer %s -printf '%%P\\n' > %s\n          else\n            : > %s\n          fi\n          if [ -s %s ]; then\n            mkdir -p %s\n            tar -czf %s/built-%s.tar.gz -C %s -T %s\n            echo packed=true >> \"$GITHUB_OUTPUT\"\n          else\n            echo packed=false >> \"$GITHUB_OUTPUT\"\n          fi\n",
-				artifactDir, artifactDir, packMark, packList, packList, packList, carriedDir, carriedDir, j.id, artifactDir, packList)
+			// stage that has to run it dies on "permission denied".
+			// Whether it is gzipped is the spec's carry.compression:
+			// binaries compress and the upload is billed by the byte, while an
+			// image layout is blobs that are already gzip and spends a minute
+			// compressing nothing.
+			fmt.Fprintf(b, "\n      - name: Pack what this job built\n        id: pack\n        run: |\n          if [ -d %s ]; then\n            find %s -type f -newer %s -printf '%%P\\n' > %s\n          else\n            : > %s\n          fi\n          if [ -s %s ]; then\n            mkdir -p %s\n            tar -c%sf %s/built-%s%s -C %s -T %s\n            echo packed=true >> \"$GITHUB_OUTPUT\"\n          else\n            echo packed=false >> \"$GITHUB_OUTPUT\"\n          fi\n",
+				artifactDir, artifactDir, packMark, packList, packList, packList, carriedDir, tarZ(spec), carriedDir, j.id, tarExt(spec), artifactDir, packList)
 			// A job that built nothing skips the upload outright. Most jobs
 			// build nothing - a gate, a publish, a lint - and the step costs
 			// the same whether or not it finds a file.
-			fmt.Fprintf(b, "\n      - name: Keep what this job built for the jobs after it\n        if: steps.pack.outputs.packed == 'true'\n        uses: actions/upload-artifact@v7\n        with:\n          name: built-${{ github.run_id }}-%s\n          path: %s/built-%s.tar.gz\n          retention-days: 7\n", j.id, carriedDir, j.id)
+			fmt.Fprintf(b, "\n      - name: Keep what this job built for the jobs after it\n        if: steps.pack.outputs.packed == 'true'\n        uses: %s\n        with:\n          name: built-${{ github.run_id }}-%s\n          path: %s/built-%s%s\n          retention-days: %d\n", spec.Actions.UploadArtifact, j.id, carriedDir, j.id, tarExt(spec), spec.Carry.Retention)
 		}
 
 		if j.push {
@@ -597,9 +621,27 @@ func writePhasedJobs(b *strings.Builder, spec Spec, w WorkflowSpec, jobs []job) 
 				spec.Dir, spec.Ref)
 		}
 
-		writeStoreSave(b)
-		writeFailureReport(b, w)
+		writeContentCachesSave(b, spec)
+		writeFailureReport(b, spec, w)
 	}
+}
+
+// tarExt is the carried tarball's extension, and tarZ the tar flag that
+// makes it: gzip or nothing, as carry.compression says.
+func tarExt(spec Spec) string {
+	if spec.Carry.Compression == CompressionNone {
+		return ".tar"
+	}
+
+	return ".tar.gz"
+}
+
+func tarZ(spec Spec) string {
+	if spec.Carry.Compression == CompressionNone {
+		return ""
+	}
+
+	return "z"
 }
 
 // writeCommandEnv renders the env block the command step needs: the
@@ -653,10 +695,12 @@ func quoteList(items []string) string {
 // It dedupes on the exact title, so a job that fails daily leaves one issue
 // open rather than thirty. A closed one does not suppress a new issue,
 // because a failure that comes back after a green run is news again.
-func writeFailureReport(b *strings.Builder, w WorkflowSpec) {
+func writeFailureReport(b *strings.Builder, spec Spec, w WorkflowSpec) {
 	if !w.ReportFailure {
 		return
 	}
+
+	title := strings.ReplaceAll(spec.FailureReport.Title, "{{.Workflow}}", w.Name)
 
 	// Listing open issues rather than asking the search API: the search
 	// index is asynchronous, so two runs seconds apart can both find nothing
@@ -670,7 +714,7 @@ func writeFailureReport(b *strings.Builder, w WorkflowSpec) {
         if: failure()
         env:
           TOKEN: ${{ github.token }}
-          TITLE: "%s is failing"
+          TITLE: "%s"
         run: |
           open=$(curl -fsS \
             -H "Authorization: Bearer $TOKEN" \
@@ -684,13 +728,13 @@ func writeFailureReport(b *strings.Builder, w WorkflowSpec) {
             -H "Authorization: Bearer $TOKEN" \
             -H "Accept: application/vnd.github+json" \
             "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/issues" \
-            -d "{\"title\":\"$TITLE\",\"body\":\"$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID failed. Nothing else reports this run, so it reports itself. Close this once a run goes green; a failure after that files a new one.\"}"
-`, w.Name)
+            -d "{\"title\":\"$TITLE\",\"body\":\"%s\"}"
+`, title, spec.FailureReport.Body)
 }
 
 // renderFanOut tells every consumer about a new tag through a
 // repository_dispatch.
-func renderFanOut(_ Spec, w WorkflowSpec) string {
+func renderFanOut(spec Spec, w WorkflowSpec) string {
 	var b strings.Builder
 
 	b.WriteString(w.Header)
@@ -713,7 +757,7 @@ on:
 
 jobs:
   dispatch:
-    runs-on: ubuntu-latest
+    runs-on: %s
     strategy:
       matrix:
         consumer: [%s]
@@ -725,7 +769,7 @@ jobs:
             -H "Accept: application/vnd.github+json" \
             "%s/repos/${{ github.repository_owner }}/${{ matrix.consumer }}/dispatches" \
             -d '{"event_type":"%s","client_payload":{"tag":"${{ github.ref_name }}"}}'
-`, w.Name, tag, strings.Join(w.Consumers, ", "), w.Secret, apiBase, w.EventType)
+`, w.Name, tag, spec.RunsOn, strings.Join(w.Consumers, ", "), w.Secret, apiBase, w.EventType)
 
 	return b.String()
 }
@@ -769,10 +813,7 @@ permissions:
 `, w.Name)
 
 	writeRunsOn(&b, spec, "release")
-	writeSetup(&b, spec)
-	writeStoreRestore(&b)
-	writeWorkspaceCheckout(&b, spec, w.Secret)
-	writeToolchain(&b, spec)
+	writePrelude(&b, spec, w.Secret)
 
 	// --dir is this repo's checkout inside the workspace, not the workspace
 	// root, because the root is not a repo and the tag belongs on the repo
@@ -787,7 +828,7 @@ permissions:
           forge-ci release --repo "$GITHUB_REPOSITORY" --dir %s --tag "$TAG" --sha "$SHA"
 `, spec.Dir)
 
-	writeStoreSave(&b)
+	writeContentCachesSave(&b, spec)
 
 	return b.String()
 }
@@ -819,10 +860,7 @@ permissions:
   contents: write
 `, spec.Runner.Name)
 	writeRunsOn(&b, spec, "run")
-	writeSetup(&b, spec)
-	writeStoreRestore(&b)
-	writeWorkspaceCheckout(&b, spec, spec.Runner.Secret)
-	writeToolchain(&b, spec)
+	writePrelude(&b, spec, spec.Runner.Secret)
 	b.WriteString(`
       - name: Run the targets
         run: |
@@ -833,7 +871,7 @@ permissions:
 	}
 
 	b.WriteString("          ${{ inputs.script }}\n")
-	writeStoreSave(&b)
+	writeContentCachesSave(&b, spec)
 
 	return b.String()
 }
@@ -887,32 +925,48 @@ func writeSetup(b *strings.Builder, spec Spec) {
 // on a credential that was never there. ParseSpec refuses that config, and
 // this refuses to render it either way, because a half-written credential
 // line is worse than an absent one.
-// writeStoreRestore brings back the tool store a previous run saved, so
-// the bootstrap reuses installed runtimes and toolchain binaries instead
-// of downloading them again. The restore key is a prefix: the newest saved
-// store for this OS wins whatever it holds, because the store converges on
-// its own - an entry that no longer matches its description is rebuilt and
-// a missing one installs - so a stale cache costs one rebuild, never a lie.
-// This is the engine's own behavior, not a knob, for the same reason the
-// concurrency group is: every workspace-building job benefits identically
-// and a forgotten declaration would silently cost minutes per run.
-func writeStoreRestore(b *strings.Builder) {
-	b.WriteString(`
-      - name: Restore the tool store
-        id: tool-store
-        uses: actions/cache/restore@v6
-        with:
-          path: ~/.cache/forge
-          key: tool-store-${{ runner.os }}-${{ github.run_id }}
-          restore-keys: |
-            tool-store-${{ runner.os }}-
-`)
+// actionAt is one of a cache action's entry points: actions/cache@v6 with
+// "restore" is actions/cache/restore@v6.
+func actionAt(action, entry string) string {
+	if i := strings.LastIndex(action, "@"); i >= 0 {
+		return action[:i] + "/" + entry + action[i:]
+	}
+
+	return action + "/" + entry
 }
 
-// writeStoreSave saves the tool store under a key derived from its own
-// content, and only when this job's store is not the one the restore already
-// found. It runs whatever the pipeline concluded: the store a red run
-// installed is just as reusable as a green one's.
+// display is a cache's name as a person reads it in a step title.
+func display(name string) string {
+	return strings.ReplaceAll(name, "-", " ")
+}
+
+// writeContentCachesRestore brings back every content-keyed cache a
+// previous run saved, before the bootstrap, so it reuses what an earlier
+// run installed instead of downloading it again. The restore key is a
+// prefix: the newest saved cache for this OS wins whatever it holds, which
+// is right for a store that converges on its own - an entry that no longer
+// matches its description is rebuilt and a missing one installs - so a
+// stale cache costs one rebuild, never a lie.
+func writeContentCachesRestore(b *strings.Builder, spec Spec) {
+	for _, cache := range cachesKeyed(spec, CacheKeyContent) {
+		fmt.Fprintf(b, `
+      - name: Restore the %s
+        id: %s
+        uses: %s
+        with:
+          path: %s
+          key: %s-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            %s-${{ runner.os }}-
+`, display(cache.Name), cache.Name, actionAt(spec.Actions.Cache, "restore"),
+			pathList(cache.Paths), cache.Name, cache.Name)
+	}
+}
+
+// writeContentCachesSave saves every content-keyed cache under a key
+// derived from its own content, and only when this job's copy is not the
+// one the restore already found. It runs whatever the pipeline concluded:
+// the store a red run installed is just as reusable as a green one's.
 //
 // The condition is the whole point. A save whose key already exists is
 // rejected by the cache service, but only AFTER the action has archived the
@@ -921,22 +975,64 @@ func writeStoreRestore(b *strings.Builder) {
 // content key with the key the restore matched skips the archive as well as
 // the upload, and a job that did install something still saves, because its
 // key no longer matches what it started from.
-func writeStoreSave(b *strings.Builder) {
-	b.WriteString(`
-      - name: Name the tool store by its content
-        id: tool-store-key
+func writeContentCachesSave(b *strings.Builder, spec Spec) {
+	for _, cache := range cachesKeyed(spec, CacheKeyContent) {
+		first := cache.Paths[0]
+
+		fmt.Fprintf(b, `
+      - name: Name the %s by its content
+        id: %s-key
         if: always()
         run: |
-          echo "key=$(find ~/.cache/forge -mindepth 1 -maxdepth 4 2>/dev/null | sort | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
-          echo "present=$([ -d ~/.cache/forge ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          echo "key=$(find %s -mindepth 1 -maxdepth 4 2>/dev/null | sort | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+          echo "present=$([ -d %s ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
-      - name: Save the tool store
-        if: always() && steps.tool-store-key.outputs.present == 'true' && steps.tool-store.outputs.cache-matched-key != format('tool-store-{0}-{1}', runner.os, steps.tool-store-key.outputs.key)
-        uses: actions/cache/save@v6
+      - name: Save the %s
+        if: always() && steps.%s-key.outputs.present == 'true' && steps.%s.outputs.cache-matched-key != format('%s-{0}-{1}', runner.os, steps.%s-key.outputs.key)
+        uses: %s
         with:
-          path: ~/.cache/forge
-          key: tool-store-${{ runner.os }}-${{ steps.tool-store-key.outputs.key }}
-`)
+          path: %s
+          key: %s-${{ runner.os }}-${{ steps.%s-key.outputs.key }}
+`, display(cache.Name), cache.Name, strings.Join(cache.Paths, " "), first,
+			display(cache.Name), cache.Name, cache.Name, cache.Name, cache.Name,
+			actionAt(spec.Actions.Cache, "save"), pathList(cache.Paths), cache.Name, cache.Name)
+	}
+}
+
+// pathList renders a cache's paths as the action's path input: one path
+// inline, several as a block.
+func pathList(paths []string) string {
+	if len(paths) == 1 {
+		return paths[0]
+	}
+
+	var b strings.Builder
+
+	b.WriteString("|")
+
+	for _, p := range paths {
+		b.WriteString("\n            " + p)
+	}
+
+	return b.String()
+}
+
+// cachesKeyed is the spec's caches with one key kind, in the order
+// declared.
+func cachesKeyed(spec Spec, key string) []CacheSpec {
+	if spec.Caches == nil {
+		return nil
+	}
+
+	out := []CacheSpec{}
+
+	for _, cache := range *spec.Caches {
+		if cache.Key == key {
+			out = append(out, cache)
+		}
+	}
+
+	return out
 }
 
 func writeWorkspaceCheckout(b *strings.Builder, spec Spec, secret string) {
@@ -962,88 +1058,99 @@ func writeWorkspaceCheckout(b *strings.Builder, spec Spec, secret string) {
 // build a workspace take one; a fan-out only curls a dispatch, so it is
 // content with whatever the runner ships.
 func writeRunsOn(b *strings.Builder, spec Spec, job string) {
-	fmt.Fprintf(b, "\njobs:\n  %s:\n    runs-on: ubuntu-latest\n", job)
+	fmt.Fprintf(b, "\njobs:\n  %s:\n    runs-on: %s\n", job, spec.RunsOn)
 
-	if spec.Container != "" {
-		fmt.Fprintf(b, "    container:\n      image: %s\n", spec.Container)
+	if spec.image != "" {
+		fmt.Fprintf(b, "    container:\n      image: %s\n", spec.image)
 	}
 
 	b.WriteString("    steps:\n")
 }
 
-// writeToolchain renders the instance's verbatim toolchain script.
+// writeToolchain renders the instance's verbatim toolchain script, with the
+// repos-keyed caches restored before it and saved after it.
 // forge-ci names no toolchain; the words are the spec's.
 //
 // No script means the job's container already carries the toolchain, and the
 // step goes rather than being emitted empty: a `run: |` with nothing under it
-// is not valid YAML.
+// is not valid YAML. A repos-keyed cache still renders around the place the
+// script would be.
 func writeToolchain(b *strings.Builder, spec Spec) {
-	if spec.Workspace.ToolchainScript == "" {
-		return
+	caches := cachesKeyed(spec, CacheKeyRepos)
+
+	for _, cache := range caches {
+		writeReposCacheRestore(b, spec, cache)
 	}
 
-	cached := len(spec.Workspace.ToolchainCachePaths) > 0
-
-	if cached {
-		writeToolchainRestore(b, spec.Workspace.ToolchainCachePaths)
-	}
-
-	b.WriteString(`
+	if spec.Workspace.ToolchainScript != "" {
+		b.WriteString(`
       - name: Install the toolchain from the workspace
         run: |
 `)
-	writeIndented(b, spec.Workspace.ToolchainScript)
+		writeIndented(b, spec.Workspace.ToolchainScript)
+	}
 
-	if cached {
-		writeToolchainSave(b, spec.Workspace.ToolchainCachePaths)
+	for _, cache := range caches {
+		writeReposCacheSave(b, spec, cache)
 	}
 }
 
-// writeToolchainRestore brings back what the toolchain script installed on
-// an earlier job of the same checkout. The key is every member's HEAD,
+// writeReposCacheRestore brings back what an earlier job of the same
+// checkout saved. The key is the HEAD of every repo the pipeline declares,
 // hashed after the checkout, and it is exact: a toolchain built from the
 // members is a function of their shas, so a different set rebuilds and a
 // prefix match would hand a job the toolchain of some other commit. The
 // script still runs on a hit - it is the instance's own words and this
 // engine cannot split it - and finds its work already done.
-func writeToolchainRestore(b *strings.Builder, paths []string) {
-	b.WriteString(`
-      - name: Name the toolchain by the members it is built from
-        id: toolchain-key
-        run: |
-          echo "key=$(for d in */.git; do git -C "${d%/.git}" rev-parse HEAD; done | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+//
+// The repos are the ones the pipeline declares, handed in at declare time,
+// so every job of a run computes one key: a hash over every directory under
+// the root would move whenever a stage wrote into a repo the revision does
+// not cover, and the jobs after it would each save a copy.
+func writeReposCacheRestore(b *strings.Builder, spec Spec, cache CacheSpec) {
+	names := make([]string, 0, len(spec.Repos))
+	for _, r := range spec.Repos {
+		names = append(names, r.Name)
+	}
 
-      - name: Restore the toolchain
-        id: toolchain-cache
-        uses: actions/cache/restore@v6
+	fmt.Fprintf(b, `
+      - name: Name the %s by the members it is built from
+        id: %s-key
+        run: |
+          echo "key=$(for d in %s; do git -C "$d" rev-parse HEAD; done | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the %s
+        id: %s-cache
+        uses: %s
         with:
           path: |
-`)
+`, display(cache.Name), cache.Name, strings.Join(names, " "), display(cache.Name), cache.Name,
+		actionAt(spec.Actions.Cache, "restore"))
 
-	for _, p := range paths {
+	for _, p := range cache.Paths {
 		b.WriteString("            " + p + "\n")
 	}
 
-	b.WriteString("          key: toolchain-${{ runner.os }}-${{ steps.toolchain-key.outputs.key }}\n")
+	fmt.Fprintf(b, "          key: %s-${{ runner.os }}-${{ steps.%s-key.outputs.key }}\n", cache.Name, cache.Name)
 }
 
-// writeToolchainSave keeps what the script installed, only on a miss: a
+// writeReposCacheSave keeps what the script installed, only on a miss: a
 // hit already holds these bytes under this key, and archiving them again
 // costs the tar for nothing.
-func writeToolchainSave(b *strings.Builder, paths []string) {
-	b.WriteString(`
-      - name: Save the toolchain
-        if: steps.toolchain-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v6
+func writeReposCacheSave(b *strings.Builder, spec Spec, cache CacheSpec) {
+	fmt.Fprintf(b, `
+      - name: Save the %s
+        if: steps.%s-cache.outputs.cache-hit != 'true'
+        uses: %s
         with:
           path: |
-`)
+`, display(cache.Name), cache.Name, actionAt(spec.Actions.Cache, "save"))
 
-	for _, p := range paths {
+	for _, p := range cache.Paths {
 		b.WriteString("            " + p + "\n")
 	}
 
-	b.WriteString("          key: toolchain-${{ runner.os }}-${{ steps.toolchain-key.outputs.key }}\n")
+	fmt.Fprintf(b, "          key: %s-${{ runner.os }}-${{ steps.%s-key.outputs.key }}\n", cache.Name, cache.Name)
 }
 
 // writeIndented writes a command block at run-block indentation, one

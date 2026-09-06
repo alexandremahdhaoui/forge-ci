@@ -145,7 +145,7 @@ they cannot see:
 workflows:
   - name: pipeline
     kind: command
-    events: [member-pushed]
+    on: {events: [member-pushed]}
     reportFailure: true      # renders the step and issues: write
 ```
 
