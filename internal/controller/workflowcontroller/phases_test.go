@@ -469,7 +469,7 @@ func TestAnUnknownOrRetiredKeyIsRefusedByName(t *testing.T) {
 	w["true"] = w["on"]
 	delete(w, "on")
 	_, err = workflowcontroller.ParseSpec(spec)
-	require.ErrorContains(t, err, `write it quoted, "on":`)
+	require.ErrorContains(t, err, `so quote it as "on"`)
 
 	// on.push needs branches: a push block with nothing to match starts
 	// nothing, silently.
