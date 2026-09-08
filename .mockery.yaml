@@ -41,6 +41,13 @@ packages:
     interfaces:
       FS:
 
+  github.com/alexandremahdhaoui/forge-ci/internal/controller/managercontroller:
+    config:
+      dir: internal/mocks/managercontrollermock
+      pkgname: managercontrollermock
+    interfaces:
+      Talos:
+
   github.com/alexandremahdhaoui/forge-ci/internal/driver/clidriver:
     config:
       dir: internal/mocks/clidrivermock

@@ -1,0 +1,50 @@
+name: ci-manager-talos
+port: manager
+version: v0.1.0
+tagline: Converge the machine config of a declared node, and record what it changed.
+why: |
+  A cluster host is declared, never clicked. The engine that owns the cluster
+  declares one machine config per node and this manager makes the node hold it,
+  so a wiped box rebuilds from the same declaration and a second run finds
+  nothing left to do.
+tools:
+  - name: reconcile
+    does: Converge every declared node to its machine config and return who owns it.
+example:
+  tool: reconcile
+  input: '{"manager":"talos","resources":[{"kind":"machine-config","name":"t0-controlplane","spec":{"node":"192.168.1.10","talosconfigEnv":"TALOSCONFIG","config":"version: v1alpha1\n"}}]}'
+notes: |
+  It knows one kind, `machine-config`. The resource name is the node's name in
+  the declaration and `spec.node` is the address the manager reaches.
+  `spec.config` is the machine config document, one document or several
+  separated by a document marker. The client configuration comes from
+  `spec.talosconfig` as a path, or from the variable `spec.talosconfigEnv`
+  names, or from the variable the manager spec names, which defaults to
+  TALOSCONFIG.
+
+  Kept means the node already holds this config. The manager reads the config
+  the node is running before it writes anything and compares it document by
+  document after decoding, so a reordered key or a reflowed line is not a
+  change. Did means the node held something else and the manager applied the
+  declared document. A read failure, a decode failure or an apply failure is an
+  error naming the action and the node.
+
+  A dry run reads the node exactly as a real run does and answers Kept either
+  way, with the text saying what it would apply. It writes nothing.
+
+  There is no delete path. A node dropped from a declaration stays as it is.
+  It refuses a resource recorded as owned by a different manager.
+
+  The client configuration path is read from the environment at realize time
+  and never written to state, actions or logs.
+spec:
+  - key: statePath
+    type: string
+    required: false
+    means: Where to record what was converged. Omit it and nothing is recorded.
+  - key: talosconfigEnv
+    type: string
+    required: false
+    means: >-
+      The environment variable holding the client configuration path a resource
+      falls back to. Defaults to TALOSCONFIG.

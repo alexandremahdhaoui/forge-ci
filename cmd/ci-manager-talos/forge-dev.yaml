@@ -1,0 +1,18 @@
+name: ci-manager-talos
+kind: mcp-server
+version: 0.1.0
+description: Converge the machine config of a declared node from one client configuration.
+openapi:
+  specPath: ../../.forge/spec-cache/engines.v1.yaml
+generate:
+  packageName: main
+  docsBaseURL: https://raw.githubusercontent.com/alexandremahdhaoui/forge-ci/refs/heads/main
+runtime:
+  env:
+    - TALOSCONFIG
+layout:
+  tools:
+    - name: reconcile
+      description: Make every declared node hold its machine config, and record what was converged.
+      input: ReconcileInput
+      output: ReconcileOutput
