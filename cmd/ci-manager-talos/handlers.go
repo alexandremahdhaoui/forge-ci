@@ -15,13 +15,23 @@ func NewHandlers() Handlers {
 
 	return Handlers{
 		Reconcile: func(ctx context.Context, in ReconcileInput) (*ReconcileOutput, error) {
-			node, err := talosadapter.New(applyMode(in.Spec))
+			mode, err := applyMode(in.Spec)
+			if err != nil {
+				return nil, fmt.Errorf("reading the spec of manager %s: %w", in.Manager, err)
+			}
+
+			variable, err := talosconfigEnv(in.Spec)
+			if err != nil {
+				return nil, fmt.Errorf("reading the spec of manager %s: %w", in.Manager, err)
+			}
+
+			node, err := talosadapter.New(mode)
 			if err != nil {
 				return nil, fmt.Errorf("building the node client of manager %s: %w", in.Manager, err)
 			}
 
 			ctrl := managercontroller.New(
-				managercontroller.NewTalosRealizer(ctx, node, talosconfigEnv(in.Spec)), fs)
+				managercontroller.NewTalosRealizer(ctx, node, variable), fs)
 
 			out, err := ctrl.Reconcile(toReconcileInput(in))
 			if err != nil {
@@ -33,19 +43,35 @@ func NewHandlers() Handlers {
 	}
 }
 
-func talosconfigEnv(spec map[string]interface{}) string {
-	name, _ := spec["talosconfigEnv"].(string)
-	if name == "" {
-		name = "TALOSCONFIG"
+func talosconfigEnv(spec map[string]interface{}) (string, error) {
+	name, err := stringField(spec, "talosconfigEnv")
+	if err != nil {
+		return "", err
 	}
 
-	return name
+	if name == "" {
+		return "TALOSCONFIG", nil
+	}
+
+	return name, nil
 }
 
-func applyMode(spec map[string]interface{}) string {
-	mode, _ := spec["applyMode"].(string)
+func applyMode(spec map[string]interface{}) (string, error) {
+	return stringField(spec, "applyMode")
+}
 
-	return mode
+func stringField(spec map[string]interface{}, key string) (string, error) {
+	value, declared := spec[key]
+	if !declared || value == nil {
+		return "", nil
+	}
+
+	text, isString := value.(string)
+	if !isString {
+		return "", fmt.Errorf("reading spec.%s: a string is required, the spec holds a %T", key, value)
+	}
+
+	return text, nil
 }
 
 func toReconcileInput(in ReconcileInput) citypes.ReconcileInput {

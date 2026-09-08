@@ -55,6 +55,19 @@ provisioning:
 	controlplaneWithATrailingCommentOnlyDocument = controlplane + `---
 # nothing lives in this document
 `
+	theVolume = `apiVersion: v1alpha1
+kind: VolumeConfig
+name: EPHEMERAL
+provisioning:
+  maxSize: 20GiB
+`
+	theIngressRule = `apiVersion: v1alpha1
+kind: NetworkDefaultActionConfig
+ingress: block
+`
+	controlplaneThenTheVolumeThenTheIngressRule = controlplane + "---\n" + theVolume + "---\n" + theIngressRule
+	controlplaneThenTheIngressRuleThenTheVolume = controlplane + "---\n" + theIngressRule + "---\n" + theVolume
+	theVolumeThenTheControlplane                = theVolume + "---\n" + controlplane
 )
 
 const talosconfigVariable = "FORGE_CI_TEST_CLIENT_CONFIG"
@@ -109,6 +122,28 @@ func TestTheTalosRealizerKeepsAMultiDocumentMachineConfigTheNodeAlreadyHolds(t *
 	r, talos := talosRealizer(t)
 	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything, mock.Anything).
 		Return(controlplaneWithAVolume, nil)
+
+	action, err := r.Realize(machineConfig(controlplaneWithAVolume), plain)
+	require.NoError(t, err)
+	assert.Equal(t, "kept machine config on node 192.168.1.10", action.Text)
+	assert.False(t, action.Changed)
+}
+
+func TestTheTalosRealizerKeepsAMachineConfigWhoseDocumentsAreInADifferentOrder(t *testing.T) {
+	r, talos := talosRealizer(t)
+	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything, mock.Anything).
+		Return(controlplaneThenTheIngressRuleThenTheVolume, nil)
+
+	action, err := r.Realize(machineConfig(controlplaneThenTheVolumeThenTheIngressRule), plain)
+	require.NoError(t, err)
+	assert.Equal(t, "kept machine config on node 192.168.1.10", action.Text)
+	assert.False(t, action.Changed)
+}
+
+func TestTheTalosRealizerKeepsAMachineConfigWhoseVersionDocumentIsWrittenLast(t *testing.T) {
+	r, talos := talosRealizer(t)
+	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything, mock.Anything).
+		Return(theVolumeThenTheControlplane, nil)
 
 	action, err := r.Realize(machineConfig(controlplaneWithAVolume), plain)
 	require.NoError(t, err)
@@ -215,7 +250,8 @@ func TestADryRunKeepsAndWritesNothingWhenTheNodeAlreadyHoldsTheConfig(t *testing
 	require.NoError(t, err)
 	assert.Equal(t, "kept machine config on node 192.168.1.10", action.Text)
 	assert.False(t, action.Changed)
-	talos.AssertNotCalled(t, "ApplyMachineConfig")
+	talos.AssertNotCalled(t, "ApplyMachineConfig",
+		mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 }
 
 func TestADryRunKeepsAndWritesNothingWhenTheConfigDiffers(t *testing.T) {
@@ -228,7 +264,8 @@ func TestADryRunKeepsAndWritesNothingWhenTheConfigDiffers(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "would apply machine config to node 192.168.1.10", action.Text)
 	assert.False(t, action.Changed)
-	talos.AssertNotCalled(t, "ApplyMachineConfig")
+	talos.AssertNotCalled(t, "ApplyMachineConfig",
+		mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 }
 
 func TestTheTalosRealizerRefusesAnUnknownKindByName(t *testing.T) {
@@ -303,7 +340,7 @@ func TestTheTalosRealizerReadsTheClientConfigurationPathFromTheVariableTheResour
 	assert.False(t, action.Changed)
 }
 
-func TestTheTalosRealizerReportsTheDocumentThatWillNotDecode(t *testing.T) {
+func TestTheTalosRealizerReportsLoadingTheConfigTheNodeHoldsWhenADocumentWillNotDecode(t *testing.T) {
 	r, talos := talosRealizer(t)
 	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything, mock.Anything).
 		Return(controlplane+"---\n\tnot: yaml\n", nil)
@@ -314,7 +351,7 @@ func TestTheTalosRealizerReportsTheDocumentThatWillNotDecode(t *testing.T) {
 	assert.Contains(t, err.Error(), "loading the machine config the node holds")
 }
 
-func TestTheTalosRealizerReportsTheDeclaredDocumentThatWillNotDecode(t *testing.T) {
+func TestTheTalosRealizerReportsLoadingTheDeclaredConfigWhenADocumentWillNotDecode(t *testing.T) {
 	r, talos := talosRealizer(t)
 	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything, mock.Anything).
 		Return(controlplane, nil)

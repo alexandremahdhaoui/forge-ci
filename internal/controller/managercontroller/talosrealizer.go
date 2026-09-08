@@ -122,12 +122,12 @@ func sameMachineConfig(running, declared string) (bool, error) {
 		return false, err
 	}
 
-	difference, err := configdiff.DiffConfigs(have, want)
+	patches, err := configdiff.Patch(have, want)
 	if err != nil {
-		return false, fmt.Errorf("diffing the two machine configs: %w", err)
+		return false, fmt.Errorf("patching the machine config the node holds: %w", err)
 	}
 
-	return difference == "", nil
+	return len(patches) == 0, nil
 }
 
 func loadMachineConfig(text, what string) (config.Provider, error) {

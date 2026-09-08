@@ -51,13 +51,25 @@ names, or from the variable the manager spec names, which defaults to
 TALOSCONFIG.
 
 Kept means the node already holds this config. The manager reads the config
-the node is running before it writes anything, loads both configs through
-the Talos config loader and compares them with the vendor's own diff, so a
-reordered key, a reflowed line, a comment, a comment on a document separator
-and a defaulted field are not changes. Did means the node held something else
-and the manager applied the declared document. A read failure, a load failure
-or an apply failure is an error naming the action and the node. A document
-Talos does not know is a load failure, because a node would refuse it too.
+the node is running before it writes anything, loads both configs through the
+Talos config loader and asks the vendor for the patches that would carry the
+node's config to the declared one. No patch means Kept. The vendor keys every
+document by its apiVersion, kind and name, so the order of the documents
+never matters and the `version: v1alpha1` document may sit anywhere in the
+file. A reordered key, a reflowed line, a comment, a comment on a document
+separator and a defaulted field are not changes either. Two documents on the
+node that carry the same apiVersion, kind and name collapse into the last one,
+so a node holding a document twice answers Kept against a file holding it once.
+Did means the node held something else and the manager applied it. A read
+failure, a load failure or a patch failure is an error naming the action and
+the node. A document Talos does not know is a load failure, because a node
+would refuse it too.
+
+The loader runs with validation off, so it hands back a readonly unvalidated
+container. Such a container answers nil from `Machine` and `Cluster` and false
+from `CompleteForBoot`, because it never builds the v1alpha1 view. Only
+`Documents` is honest on it. Read a field off one of those providers and the
+answer is nil, not an error.
 
 A dry run reads the node exactly as a real run does and answers Kept either
 way, with the text saying what it would apply. It writes nothing.
