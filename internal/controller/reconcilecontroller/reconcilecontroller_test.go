@@ -542,23 +542,6 @@ func TestTheRunOutputIsRecordedSoAFailureCanBeRead(t *testing.T) {
 	require.Equal(t, "two tests failed\n", report.Stages[0].Runs[0].Output)
 }
 
-func TestALongOutputIsTruncatedFromTheFront(t *testing.T) {
-	f := newFakeEngines(t)
-	f.runOutputs["build/default"] = citypes.RunOutput{
-		Status: citypes.StatusFailed,
-		Output: strings.Repeat("x", 20000) + "THE INTERESTING PART",
-	}
-
-	report, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(),
-		pipeline(stage("build", substage("default", []string{"build"}))), "/work", plain)
-	require.NoError(t, err)
-
-	got := report.Stages[0].Runs[0].Output
-	require.Less(t, len(got), 20000)
-	require.Contains(t, got, "THE INTERESTING PART")
-	require.Contains(t, got, "earlier output dropped")
-}
-
 func TestAnUncommittedChangeIsANewRevisionAndReruns(t *testing.T) {
 	f := newFakeEngines(t)
 	p := pipeline(stage("build", substage("default", []string{"build"})))

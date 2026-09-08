@@ -1,10 +1,47 @@
 package citypes
 
 import (
+	"regexp"
 	"time"
 
 	"github.com/alexandremahdhaoui/forge/pkg/forge"
 )
+
+const (
+	// DirtySuffix marks a revision id that covers uncommitted changes. The
+	// revision hashes each repo's HEAD plus its worktree, and a tree that
+	// was edited is named as such wherever the id travels: the release and
+	// the container publish refuse it, a remote run refuses it, and the
+	// contract in forge-revision-spec publishes the same suffix. One
+	// definition, so no reader spells it differently.
+	DirtySuffix = "-dirty"
+
+	// DefaultBranch is the branch a repo is on when nothing says otherwise:
+	// the ref a workflow checks out, the branch a notify dispatches for,
+	// the branch a fresh state repo is initialised on.
+	DefaultBranch = "main"
+
+	// ArtifactDir is where a compute engine's put keeps what a run built,
+	// under the factory root, keyed by revision. The GitHub renderer packs
+	// and unpacks the same directory between jobs, so a stage reads what
+	// the stages before it built on a runner that built none of it.
+	ArtifactDir = ".forge-ci/artifacts"
+	// CarriedDir holds the tarballs that cross between jobs, kept apart
+	// from the artifacts themselves so that unpacking one never packs it.
+	CarriedDir = ".forge-ci/carried"
+	// PackMark is the file whose modification time separates what a job
+	// inherited from what it built; PackList is where the second of those
+	// is written for tar to read.
+	PackMark = ".forge-ci/pack-mark"
+	PackList = ".forge-ci/pack-list"
+)
+
+// SemverTag is the tag shape every version rule reads: strict
+// vMAJOR.MINOR.PATCH with an optional prerelease. A tag is what a consumer
+// pins, so a release that invents its own format is one nobody can depend
+// on, and a tag this does not match cannot become the next version. One
+// expression, read by the git adapter and both release controllers.
+var SemverTag = regexp.MustCompile(`^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z.-]+)?$`)
 
 type Status string
 

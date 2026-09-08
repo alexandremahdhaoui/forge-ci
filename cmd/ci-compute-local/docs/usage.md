@@ -50,3 +50,7 @@ every past run, so without that filter a run of three stages reports seventy.
 
 `params` are templated in as `{{.Params.name}}`. A missing key is an error,
 never an empty string.
+
+`spec.outputLimit` is how many bytes of a run's output the run record
+keeps, from the end; the default is 16384. It is this engine's number,
+declared on the engine, because the record is what this engine answered.

@@ -6,7 +6,6 @@ package containercontroller
 import (
 	"errors"
 	"fmt"
-	"regexp"
 	"sort"
 	"strings"
 
@@ -33,11 +32,6 @@ var (
 	// the two sides disagree about what was built.
 	ErrLocation = errors.New("a container artifact must carry a local layout path")
 )
-
-// semver is the same strictness the binary release uses: a tag is what a
-// consumer pins, so a release that invents its own format is one nobody can
-// depend on.
-var semver = regexp.MustCompile(`^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z.-]+)?$`)
 
 // Plan is what a container release would do. It computes no version and reads
 // no tag line: the version arrives decided, because two authorities over one
@@ -77,11 +71,11 @@ func (c *Controller) Plan(in citypes.ArtifactInput) (Plan, error) {
 		return Plan{}, ErrRevision
 	}
 
-	if strings.HasSuffix(in.Revision, "-dirty") {
+	if strings.HasSuffix(in.Revision, citypes.DirtySuffix) {
 		return Plan{}, fmt.Errorf("%w: %s", ErrDirty, in.Revision)
 	}
 
-	if !semver.MatchString(in.Version) {
+	if !citypes.SemverTag.MatchString(in.Version) {
 		return Plan{}, fmt.Errorf("%w: %q", ErrVersion, in.Version)
 	}
 

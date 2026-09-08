@@ -49,6 +49,11 @@ func (c *Controller) Run(ctx context.Context, in citypes.RunInput) (citypes.RunO
 	started := c.now()
 	out := citypes.RunOutput{Status: citypes.StatusPassed}
 
+	// How much of a run's output the record keeps is this engine's spec, not
+	// a number in the core: `outputLimit` bytes from the end, the default
+	// when the spec names none.
+	limit := outputLimit(in.Spec)
+
 	// The revision and the version both reach every target as environment
 	// variables. The revision is the tuple a build was proven with, and the
 	// release side keys the distribution on the same id. The version is the
@@ -78,7 +83,7 @@ func (c *Controller) Run(ctx context.Context, in citypes.RunInput) (citypes.RunO
 			if res.ExitCode != 0 {
 				out.Status = citypes.StatusFailed
 				out.Message = fmt.Sprintf("forge-factory %s exited %d in %s", verb, res.ExitCode, in.Root)
-				out.Output = log.String()
+				out.Output = tail(log.String(), limit)
 
 				return out, nil
 			}
@@ -181,7 +186,7 @@ func (c *Controller) Run(ctx context.Context, in citypes.RunInput) (citypes.RunO
 		}
 	}
 
-	out.Output = log.String()
+	out.Output = tail(log.String(), limit)
 
 	return out, nil
 }
@@ -293,4 +298,35 @@ func merge(into, from *citypes.ForgeResult) *citypes.ForgeResult {
 	into.TestReports = append(into.TestReports, from.TestReports...)
 
 	return into
+}
+
+// DefaultOutputLimit is how many bytes of a run's output the record keeps
+// when the engine's spec names no `outputLimit`.
+const DefaultOutputLimit = 16384
+
+// outputLimit reads `outputLimit` from the engine's spec: a JSON number
+// arrives as float64, an integer written by a Go caller as int. Anything
+// else, or nothing, is the default.
+func outputLimit(spec map[string]any) int {
+	switch v := spec["outputLimit"].(type) {
+	case float64:
+		if v > 0 {
+			return int(v)
+		}
+	case int:
+		if v > 0 {
+			return v
+		}
+	}
+
+	return DefaultOutputLimit
+}
+
+// tail keeps the last limit bytes of s and says that the rest was dropped.
+func tail(s string, limit int) string {
+	if len(s) <= limit {
+		return s
+	}
+
+	return "... earlier output dropped ...\n" + s[len(s)-limit:]
 }

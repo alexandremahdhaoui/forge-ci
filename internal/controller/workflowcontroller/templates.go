@@ -237,23 +237,17 @@ const (
 	JobsPerSubstage = "substage"
 )
 
-// artifactDir is where a compute engine's put keeps what a run built, under
-// the factory root. Every job that runs targets uploads it under a name of
-// its own and downloads every name this run has written so far, so a stage
-// reads what the stages before it built - the stage that publishes included -
-// on a runner that built none of it.
-const artifactDir = ".forge-ci/artifacts"
-
-// carriedDir holds the tarballs that cross between jobs, kept apart from
-// the artifacts themselves so that unpacking one never packs it again.
-const carriedDir = ".forge-ci/carried"
-
-// packMark is the file whose modification time separates what a job
-// inherited from what it built, and packList is where the second of those
-// is written for tar to read.
+// The paths a job packs and unpacks are the compute engine's own, read
+// from citypes so the renderer and the local put cannot disagree: every
+// job that runs targets uploads the artifact directory under a name of its
+// own and downloads every name this run has written so far, so a stage
+// reads what the stages before it built - the stage that publishes
+// included - on a runner that built none of it.
 const (
-	packMark = ".forge-ci/pack-mark"
-	packList = ".forge-ci/pack-list"
+	artifactDir = citypes.ArtifactDir
+	carriedDir  = citypes.CarriedDir
+	packMark    = citypes.PackMark
+	packList    = citypes.PackList
 )
 
 // job is one rendered job of a phased workflow: its id, the step name a
@@ -746,7 +740,7 @@ func renderFanOut(spec Spec, w WorkflowSpec) string {
 
 	apiBase := w.APIBaseURL
 	if apiBase == "" {
-		apiBase = "https://api.github.com"
+		apiBase = defaultAPIBaseURL
 	}
 
 	fmt.Fprintf(&b, `name: %s
@@ -925,8 +919,8 @@ func writeSetup(b *strings.Builder, spec Spec) {
 // on a credential that was never there. ParseSpec refuses that config, and
 // this refuses to render it either way, because a half-written credential
 // line is worse than an absent one.
-// actionAt is one of a cache action's entry points: actions/cache@v6 with
-// "restore" is actions/cache/restore@v6.
+// actionAt is one of a cache action's entry points: the pinned action with
+// "restore" is the same pin under its restore path.
 func actionAt(action, entry string) string {
 	if i := strings.LastIndex(action, "@"); i >= 0 {
 		return action[:i] + "/" + entry + action[i:]

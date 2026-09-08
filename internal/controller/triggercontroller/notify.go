@@ -79,7 +79,7 @@ func parseNotify(raw map[string]any) (*NotifySpec, error) {
 	}
 
 	if n.Branch == "" {
-		n.Branch = "main"
+		n.Branch = citypes.DefaultBranch
 	}
 
 	if n.RunsOn == "" {

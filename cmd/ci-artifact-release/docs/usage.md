@@ -22,7 +22,7 @@ and attaches the binaries forge already built.
 ## By hand
 
 ```sh
-echo '{"revision":"3dd48e96ed7e","version":"v0.2.0","repos":{"golden-rust":"a5b26c6a"},"spec":{"root":".."}}' \
+echo '{"revision":"3dd48e96ed7e","version":"v0.2.0","repos":{"my-repo":"a5b26c6a"},"spec":{"root":".."}}' \
   | ci-artifact-release publish
 ```
 

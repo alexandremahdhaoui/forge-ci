@@ -29,8 +29,9 @@ import (
 const (
 	// ArtifactScheme prefixes every location a put answers.
 	ArtifactScheme = "forge-ci-artifact://"
-	// ArtifactDir is where put keeps the files, under the root.
-	ArtifactDir = ".forge-ci/artifacts"
+	// ArtifactDir is where put keeps the files, under the root. Declared
+	// in citypes, because the GitHub renderer packs the same directory.
+	ArtifactDir = citypes.ArtifactDir
 )
 
 var (

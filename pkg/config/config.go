@@ -41,15 +41,14 @@ type Pipeline struct {
 	// There is no field to type a version into, on purpose: a version is
 	// derived or it is nothing, so it can never be re-typed onto a release
 	// that already exists.
-	Versioning        Versioning `json:"versioning,omitempty"`
-	ArtifactStorePath string     `json:"artifactStorePath,omitempty"`
-	Repos             []Repo     `json:"repos,omitempty"`
-	Managers          []Manager  `json:"managers,omitempty"`
-	Engines           []Engine   `json:"engines"`
-	State             string     `json:"state"`
-	Triggers          []string   `json:"triggers,omitempty"`
-	Targets           []Target   `json:"targets,omitempty"`
-	Stages            []Stage    `json:"stages"`
+	Versioning Versioning `json:"versioning,omitempty"`
+	Repos      []Repo     `json:"repos,omitempty"`
+	Managers   []Manager  `json:"managers,omitempty"`
+	Engines    []Engine   `json:"engines"`
+	State      string     `json:"state"`
+	Triggers   []string   `json:"triggers,omitempty"`
+	Targets    []Target   `json:"targets,omitempty"`
+	Stages     []Stage    `json:"stages"`
 }
 
 // Versioning is how one release number is derived for a whole factory. Every
@@ -244,11 +243,24 @@ func (s Stage) SubstageNeeds() map[string][]string {
 	return needs
 }
 
+// retiredKeyHint rewrites a strict-parse refusal of a key this schema no
+// longer carries into the reason it left, so the fix is readable from the
+// error alone. artifactStorePath was declared for two months and read by
+// nothing: the store path is forge's, in forge.yaml, and forge-ci harvests
+// whatever forge recorded.
+func retiredKeyHint(err error) error {
+	if strings.Contains(err.Error(), `unknown field "artifactStorePath"`) {
+		return fmt.Errorf("%w; artifactStorePath is retired: the store path is forge's, declared in each repo's forge.yaml, and forge-ci reads no store path of its own", err)
+	}
+
+	return err
+}
+
 func Parse(data []byte) (Pipeline, error) {
 	var p Pipeline
 
 	if err := yaml.UnmarshalStrict(data, &p); err != nil {
-		return Pipeline{}, fmt.Errorf("reading pipeline: %w", err)
+		return Pipeline{}, fmt.Errorf("reading pipeline: %w", retiredKeyHint(err))
 	}
 
 	if err := p.Validate(); err != nil {

@@ -6,8 +6,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 	"path"
-	"regexp"
 	"strings"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/execadapter"
@@ -83,12 +83,6 @@ type CLI struct {
 
 var _ Git = (*CLI)(nil)
 
-// semverTag is the tag shape the version rule reads: strict vMAJOR.MINOR.PATCH
-// with an optional prerelease. It is the same expression artifactcontroller
-// parses with, because a tag this does not match is a tag that cannot become
-// the next version.
-var semverTag = regexp.MustCompile(`^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z.-]+)?$`)
-
 func New(runner execadapter.Runner) *CLI {
 	return &CLI{runner: runner}
 }
@@ -107,7 +101,7 @@ func (g *CLI) run(ctx context.Context, dir, what string, args ...string) (execad
 }
 
 func (g *CLI) Init(ctx context.Context, dir string) error {
-	_, err := g.run(ctx, dir, "initialising "+dir, "init", "-b", "main")
+	_, err := g.run(ctx, dir, "initialising "+dir, "init", "-b", citypes.DefaultBranch)
 
 	return err
 }
@@ -197,7 +191,7 @@ func (g *CLI) HeadSHA(ctx context.Context, dir string) (string, error) {
 
 func (g *CLI) RemoteSHA(ctx context.Context, url, ref string) (string, error) {
 	if ref == "" {
-		ref = "main"
+		ref = citypes.DefaultBranch
 	}
 
 	res, err := g.run(ctx, "", "reading "+ref+" of "+url, "ls-remote", url, "refs/heads/"+ref)
@@ -285,7 +279,7 @@ func (g *CLI) LatestTag(ctx context.Context, dir, prefix string) (string, error)
 		// release then failed on "not a semver tag", for every member.
 		// A repo that carries release history from before this pipeline
 		// existed is exactly the case this has to survive.
-		if semverTag.MatchString(tag) {
+		if citypes.SemverTag.MatchString(tag) {
 			return tag, nil
 		}
 	}

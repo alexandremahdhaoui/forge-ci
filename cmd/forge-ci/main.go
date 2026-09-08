@@ -54,8 +54,8 @@ func main() {
 //
 // The token is read here, from the variable a flag names, and nowhere else.
 // That is the whole difference from shelling out to a CLI: gh takes whatever
-// GH_TOKEN or GITHUB_TOKEN the host carries and cannot be pointed at the one
-// the pipeline declared.
+// token variable the host carries and cannot be pointed at the one the
+// pipeline declared.
 func githubFor(git gitadapter.Git) clidriver.GitHubFor {
 	return func(tokenEnv, apiBaseURL string) clidriver.Publisher {
 		return releasecontroller.New(git, githubadapter.New(nil, apiBaseURL, os.Getenv(tokenEnv)))

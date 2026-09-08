@@ -14,7 +14,7 @@ tools:
   does: Tag every repo of the revision and create the release.
 example:
   tool: publish
-  input: '{"revision":"3dd48e96ed7e","version":"v0.2.0","repos":{"golden-rust":"a5b26c6a"},"spec":{"root":".."}}'
+  input: '{"revision":"3dd48e96ed7e","version":"v0.2.0","repos":{"my-repo":"a5b26c6a"},"spec":{"root":".."}}'
 notes: 'A dirty revision is refused. It was never proven, so releasing it publishes
 
   something nobody can reproduce.

@@ -218,7 +218,10 @@ const (
 // The defaults, each equal to what every workflow rendered before its key
 // existed, so a spec that says nothing renders byte for byte what it did.
 const (
-	defaultRunsOn           = "ubuntu-latest"
+	defaultRunsOn = "ubuntu-latest"
+	// defaultAPIBaseURL is where a rendered workflow talks to the platform
+	// when its spec names no apiBaseURL; a test points it at a fake.
+	defaultAPIBaseURL       = "https://api.github.com"
 	defaultConcurrencyGroup = "${{ github.workflow }}"
 	defaultCarryRetention   = 7
 	defaultFailureTitle     = "{{.Workflow}} is failing"
@@ -359,7 +362,7 @@ func ParseSpec(raw map[string]any) (Spec, error) {
 	}
 
 	if s.Ref == "" {
-		s.Ref = "main"
+		s.Ref = citypes.DefaultBranch
 	}
 
 	for i, step := range s.Setup {
@@ -714,7 +717,7 @@ func (c *Controller) Run(ctx context.Context, in citypes.RunInput) (citypes.RunO
 		return citypes.RunOutput{}, errors.New("running: no targets given")
 	}
 
-	if strings.HasSuffix(in.Revision, "-dirty") {
+	if strings.HasSuffix(in.Revision, citypes.DirtySuffix) {
 		return citypes.RunOutput{}, fmt.Errorf(
 			"revision %s covers uncommitted changes; a remote run cannot execute what was never pushed", in.Revision)
 	}

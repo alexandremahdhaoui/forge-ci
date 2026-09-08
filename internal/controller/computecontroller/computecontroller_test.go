@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -521,4 +522,37 @@ func TestAnArgumentHoldingASpaceStaysOneArgument(t *testing.T) {
 		Targets: []citypes.Target{{Alias: "say", Binary: "sh", Args: []string{"-c", "echo one two"}}},
 	})
 	require.NoError(t, err)
+}
+
+// How much output a run record keeps is the engine's spec: `outputLimit`
+// bytes from the end, 16 KiB when the spec names none. The core keeps
+// whatever the engine answered and cuts nothing itself.
+func TestALongOutputIsTruncatedFromTheFrontByTheSpec(t *testing.T) {
+	long := strings.Repeat("x", 20000) + "THE INTERESTING PART\n"
+
+	for _, tc := range []struct {
+		name  string
+		spec  map[string]any
+		limit int
+	}{
+		{name: "default", spec: nil, limit: computecontroller.DefaultOutputLimit},
+		{name: "declared", spec: map[string]any{"outputLimit": float64(2048)}, limit: 2048},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := execadaptermock.NewMockRunner(t)
+			runner.EXPECT().
+				RunEnv(mock.Anything, "/work/repo", mock.Anything, "forge", "test-all").
+				Return(execadapter.Result{Stdout: long, ExitCode: 1}, nil)
+
+			out, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
+				Revision: "abc", Root: "/work", Spec: tc.spec,
+				Targets: []citypes.Target{{Alias: "t", Binary: "forge", Args: []string{"test-all"}, In: []string{"repo"}}},
+			})
+			require.NoError(t, err)
+
+			require.LessOrEqual(t, len(out.Output), tc.limit+len("... earlier output dropped ...\n"))
+			require.Contains(t, out.Output, "THE INTERESTING PART")
+			require.Contains(t, out.Output, "earlier output dropped")
+		})
+	}
 }

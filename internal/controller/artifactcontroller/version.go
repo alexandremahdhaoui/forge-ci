@@ -2,6 +2,7 @@ package artifactcontroller
 
 import (
 	"fmt"
+	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 	"strconv"
 	"strings"
 
@@ -151,7 +152,7 @@ func Bump(previous string, level Level, capTo string) (string, error) {
 		return "v0.1.0", nil
 	}
 
-	m := semver.FindStringSubmatch(previous)
+	m := citypes.SemverTag.FindStringSubmatch(previous)
 	if m == nil {
 		return "", fmt.Errorf("%w: %q", ErrPrevious, previous)
 	}

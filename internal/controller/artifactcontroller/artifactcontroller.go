@@ -3,7 +3,6 @@ package artifactcontroller
 import (
 	"errors"
 	"fmt"
-	"regexp"
 	"sort"
 	"strings"
 
@@ -20,10 +19,6 @@ var (
 	// release would overwrite one with the other.
 	ErrCollision = errors.New("two artifacts claim the same asset name")
 )
-
-// semver is deliberately strict. A tag is what a consumer pins, so a release
-// that invents its own format is one nobody can depend on.
-var semver = regexp.MustCompile(`^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z.-]+)?$`)
 
 // Plan is what a release would do. It is computed without touching anything, so
 // the decision is testable and the engine only has to carry it out.
@@ -83,11 +78,11 @@ func (c *Controller) Plan(in citypes.ArtifactInput) (Plan, error) {
 		return Plan{}, ErrRevision
 	}
 
-	if strings.HasSuffix(in.Revision, "-dirty") {
+	if strings.HasSuffix(in.Revision, citypes.DirtySuffix) {
 		return Plan{}, fmt.Errorf("%w: %s", ErrDirty, in.Revision)
 	}
 
-	if !semver.MatchString(in.Version) {
+	if !citypes.SemverTag.MatchString(in.Version) {
 		return Plan{}, fmt.Errorf("%w: %q", ErrVersion, in.Version)
 	}
 

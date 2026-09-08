@@ -3,6 +3,7 @@ package engineadapter
 import (
 	"errors"
 	"fmt"
+	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -82,7 +83,7 @@ func (r *Resolver) Resolve(uri string) (Command, error) {
 	// The go-run fallback is always pinned: the URI's own version, else the
 	// running binary's. Latest is never a fallback.
 	if version == "" {
-		version = strings.TrimSuffix(strings.TrimSuffix(r.Version, "-dirty"), "+dirty")
+		version = strings.TrimSuffix(strings.TrimSuffix(r.Version, citypes.DirtySuffix), "+dirty")
 	}
 
 	if version == "" || version == "dev" {
