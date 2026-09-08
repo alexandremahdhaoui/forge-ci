@@ -10,7 +10,7 @@ require (
 	github.com/google/go-containerregistry v0.22.0
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/stretchr/testify v1.12.1
-	golang.org/x/crypto v0.56.0
+	golang.org/x/crypto v0.55.0
 	sigs.k8s.io/yaml v1.6.0
 )
 
