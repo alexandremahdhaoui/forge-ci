@@ -6,8 +6,8 @@ github.com/ProtonMail/gopenpgp/v3 v3.4.1 h1:K7uUhSHSJxORZ+RuHpilTT6S4MA2whCRlXNw
 github.com/ProtonMail/gopenpgp/v3 v3.4.1/go.mod h1:bGdV9f6edhmd581wzXsQCTKdH8bXBbyhkgDKPjwPc6U=
 github.com/adrg/xdg v0.5.3 h1:xRnxJXne7+oWDatRhR1JLnvuccuIeCoBu2rtuLqQB78=
 github.com/adrg/xdg v0.5.3/go.mod h1:nlTsY+NNiCBGCK2tpm09vRqfVzrc2fLmXGpBLF0zlTQ=
-github.com/alexandremahdhaoui/forge v0.48.1 h1:rn0yPw999Xo0BmLUlY376ibGfE9/oYxrDQ6giwWD0EU=
-github.com/alexandremahdhaoui/forge v0.48.1/go.mod h1:ocFJEGSm8Xp4CQC4n5IURCYPJZnOyWeboUrJDEbn8E8=
+github.com/alexandremahdhaoui/forge v0.48.4-0.20260908124737-adb6bbeb455e h1:4Yee6Kwcr2sRfLchNnxAQV8V+cl1XeTX1WdHiKSqPco=
+github.com/alexandremahdhaoui/forge v0.48.4-0.20260908124737-adb6bbeb455e/go.mod h1:ocFJEGSm8Xp4CQC4n5IURCYPJZnOyWeboUrJDEbn8E8=
 github.com/alexandremahdhaoui/forge-revision-spec v0.48.1 h1:rq1QbLPO/5EazokWuQyIpnDcWHBptzYUH58qqkvlGHg=
 github.com/alexandremahdhaoui/forge-revision-spec v0.48.1/go.mod h1:C8BKLmitpU8UEd0EvQGFIkbiHEiGFvvox1RyfzuwjXc=
 github.com/antlr4-go/antlr/v4 v4.13.1 h1:SqQKkuVZ+zWkMMNkjy5FZe5mr5WURWnlpmOuzYWrPrQ=
