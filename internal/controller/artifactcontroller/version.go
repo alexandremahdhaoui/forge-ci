@@ -2,9 +2,10 @@ package artifactcontroller
 
 import (
 	"fmt"
-	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 	"strconv"
 	"strings"
+
+	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 
 	"github.com/alexandremahdhaoui/forge-ci/pkg/config"
 )

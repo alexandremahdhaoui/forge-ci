@@ -3,11 +3,12 @@ package engineadapter
 import (
 	"errors"
 	"fmt"
-	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 )
 
 const (

@@ -6,9 +6,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 	"path"
 	"strings"
+
+	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/execadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/gitident"
