@@ -5,8 +5,8 @@ module github.com/alexandremahdhaoui/forge-ci
 go 1.26.5
 
 require (
-	github.com/alexandremahdhaoui/forge v0.48.4-0.20260908124737-adb6bbeb455e
-	github.com/alexandremahdhaoui/forge-revision-spec v0.48.1
+	github.com/alexandremahdhaoui/forge v0.49.0
+	github.com/alexandremahdhaoui/forge-revision-spec v0.49.0
 	github.com/cosi-project/runtime v1.16.3
 	github.com/google/go-containerregistry v0.22.0
 	github.com/modelcontextprotocol/go-sdk v1.7.0
