@@ -15,8 +15,7 @@ The question an engine answers. The list is closed.
 | Term | Means |
 |---|---|
 | `alias` | Lowercase kebab-case identifier. |
-| `args` | Its arguments, one per element, passed verbatim - an argument holding a space stays one argument. {{.Params.x}} is templated from the substage's params. For example ["test-all"] or ["build", "--frozen"]. |
-| `artifactStorePath` | Where forge-ci records its own artifacts. |
+| `args` | Its arguments, one per element, passed verbatim - an argument holding a space stays one argument. {{.Params.x}} is templated from the substage's params. For example ["test-all"] or ["build"]. |
 | `binary` | The executable to run, found on PATH. For example "forge" or "forge-ci". |
 | `cap` | The ceiling the bump may not cross, inclusive. "v0" holds the major at 0; "v0.50" holds major and minor. A bump that would cross it drops one level and retries, so a factory that is not ready for v1 keeps releasing rather than stopping. A full semver is refused: a cap on the patch would stop the only bump that always works. |
 | `displayName` | What to call this stage where a person reads it - a job title in a rendered pipeline, a heading in a report. Absent means a title is derived from the name, so a pipeline that says nothing still reads as words. |
