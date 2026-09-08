@@ -1,7 +1,7 @@
-github.com/alexandremahdhaoui/forge v0.47.1 h1:m8G9+Zm4TjLB6jBAfX0lyqwhhcHrXN/pBrMjcz7zW6g=
-github.com/alexandremahdhaoui/forge v0.47.1/go.mod h1:ocFJEGSm8Xp4CQC4n5IURCYPJZnOyWeboUrJDEbn8E8=
-github.com/alexandremahdhaoui/forge-revision-spec v0.47.1 h1:DktGw4wtyJxL7gNqZM/lX1nO1Vrr3cTPy+TJZGMZwOw=
-github.com/alexandremahdhaoui/forge-revision-spec v0.47.1/go.mod h1:C8BKLmitpU8UEd0EvQGFIkbiHEiGFvvox1RyfzuwjXc=
+github.com/alexandremahdhaoui/forge v0.48.0 h1:80xJAosJr2hC2tcRDSMBEnEozQiafGsC/2bVZ+iwaKk=
+github.com/alexandremahdhaoui/forge v0.48.0/go.mod h1:ocFJEGSm8Xp4CQC4n5IURCYPJZnOyWeboUrJDEbn8E8=
+github.com/alexandremahdhaoui/forge-revision-spec v0.48.0 h1:IzUxK3v2dIoEIZ6D1fzi6c7tJD93xJHioKZ6pqC23Yc=
+github.com/alexandremahdhaoui/forge-revision-spec v0.48.0/go.mod h1:C8BKLmitpU8UEd0EvQGFIkbiHEiGFvvox1RyfzuwjXc=
 github.com/docker/cli v29.7.2+incompatible h1:dlkwallR8XqfeVnA2ELEhdwvb4lsSwuB4IgsG8Q9cLY=
 github.com/docker/cli v29.7.2+incompatible/go.mod h1:JLrzqnKDaYBop7H2jaqPtU4hHvMKP+vjCwu2uszcLI8=
 github.com/docker/docker-credential-helpers v0.9.3 h1:gAm/VtF9wgqJMoxzT3Gj5p4AqIjCBS4wrsOh9yRqcz8=
