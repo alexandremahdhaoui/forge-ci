@@ -45,6 +45,16 @@ name: EPHEMERAL
 provisioning:
   maxSize: 20GiB
 `
+	controlplaneWithACommentedSeparatorAndABiggerVolume = controlplane + `--- # the volume
+apiVersion: v1alpha1
+kind: VolumeConfig
+name: EPHEMERAL
+provisioning:
+  maxSize: 40GiB
+`
+	controlplaneWithATrailingCommentOnlyDocument = controlplane + `---
+# nothing lives in this document
+`
 )
 
 const talosconfigVariable = "FORGE_CI_TEST_CLIENT_CONFIG"
@@ -117,6 +127,33 @@ func TestTheTalosRealizerKeepsAMachineConfigWrappedInEmptyDocuments(t *testing.T
 	assert.False(t, action.Changed)
 }
 
+func TestTheTalosRealizerAppliesWhenADocumentBehindACommentedSeparatorDiffers(t *testing.T) {
+	r, talos := talosRealizer(t)
+	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything, mock.Anything).
+		Return(controlplaneWithAVolume, nil)
+	talos.EXPECT().
+		ApplyMachineConfig(mock.Anything, mock.Anything, mock.Anything,
+			controlplaneWithACommentedSeparatorAndABiggerVolume).
+		Return(nil)
+
+	action, err := r.Realize(
+		machineConfig(controlplaneWithACommentedSeparatorAndABiggerVolume), plain)
+	require.NoError(t, err)
+	assert.Equal(t, "applied machine config to node 192.168.1.10", action.Text)
+	assert.True(t, action.Changed)
+}
+
+func TestTheTalosRealizerKeepsAMachineConfigThatEndsInACommentOnlyDocument(t *testing.T) {
+	r, talos := talosRealizer(t)
+	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything, mock.Anything).
+		Return(controlplaneWithATrailingCommentOnlyDocument, nil)
+
+	action, err := r.Realize(machineConfig(controlplane), plain)
+	require.NoError(t, err)
+	assert.Equal(t, "kept machine config on node 192.168.1.10", action.Text)
+	assert.False(t, action.Changed)
+}
+
 func TestTheTalosRealizerAppliesAMachineConfigThatDiffersFromTheNode(t *testing.T) {
 	r, talos := talosRealizer(t)
 	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything, mock.Anything).
@@ -178,6 +215,7 @@ func TestADryRunKeepsAndWritesNothingWhenTheNodeAlreadyHoldsTheConfig(t *testing
 	require.NoError(t, err)
 	assert.Equal(t, "kept machine config on node 192.168.1.10", action.Text)
 	assert.False(t, action.Changed)
+	talos.AssertNotCalled(t, "ApplyMachineConfig")
 }
 
 func TestADryRunKeepsAndWritesNothingWhenTheConfigDiffers(t *testing.T) {
@@ -190,6 +228,7 @@ func TestADryRunKeepsAndWritesNothingWhenTheConfigDiffers(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "would apply machine config to node 192.168.1.10", action.Text)
 	assert.False(t, action.Changed)
+	talos.AssertNotCalled(t, "ApplyMachineConfig")
 }
 
 func TestTheTalosRealizerRefusesAnUnknownKindByName(t *testing.T) {
@@ -272,7 +311,7 @@ func TestTheTalosRealizerReportsTheDocumentThatWillNotDecode(t *testing.T) {
 	_, err := r.Realize(machineConfig(controlplane), plain)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "comparing the machine config of node 192.168.1.10")
-	assert.Contains(t, err.Error(), "decoding document 2 of the machine config the node holds")
+	assert.Contains(t, err.Error(), "loading the machine config the node holds")
 }
 
 func TestTheTalosRealizerReportsTheDeclaredDocumentThatWillNotDecode(t *testing.T) {
@@ -282,7 +321,7 @@ func TestTheTalosRealizerReportsTheDeclaredDocumentThatWillNotDecode(t *testing.
 
 	_, err := r.Realize(machineConfig("\tnot: yaml\n"), plain)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "decoding document 1 of the declared machine config")
+	assert.Contains(t, err.Error(), "loading the declared machine config")
 }
 
 func TestTheTalosRealizerRefusesToReachANodeWithNoClientWired(t *testing.T) {

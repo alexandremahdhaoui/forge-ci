@@ -37,6 +37,7 @@ engines:
     spec:
       statePath: <string>
       talosconfigEnv: <string>
+      applyMode: <string>
 ```
 
 ## Worth knowing
@@ -50,11 +51,13 @@ names, or from the variable the manager spec names, which defaults to
 TALOSCONFIG.
 
 Kept means the node already holds this config. The manager reads the config
-the node is running before it writes anything and compares it document by
-document after decoding, so a reordered key or a reflowed line is not a
-change. Did means the node held something else and the manager applied the
-declared document. A read failure, a decode failure or an apply failure is an
-error naming the action and the node.
+the node is running before it writes anything, loads both configs through
+the Talos config loader and compares them with the vendor's own diff, so a
+reordered key, a reflowed line, a comment, a comment on a document separator
+and a defaulted field are not changes. Did means the node held something else
+and the manager applied the declared document. A read failure, a load failure
+or an apply failure is an error naming the action and the node. A document
+Talos does not know is a load failure, because a node would refuse it too.
 
 A dry run reads the node exactly as a real run does and answers Kept either
 way, with the text saying what it would apply. It writes nothing.

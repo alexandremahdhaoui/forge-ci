@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/fsadapter"
+	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/talosadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/managercontroller"
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 )
@@ -13,8 +15,13 @@ func NewHandlers() Handlers {
 
 	return Handlers{
 		Reconcile: func(ctx context.Context, in ReconcileInput) (*ReconcileOutput, error) {
+			node, err := talosadapter.New(applyMode(in.Spec))
+			if err != nil {
+				return nil, fmt.Errorf("building the node client of manager %s: %w", in.Manager, err)
+			}
+
 			ctrl := managercontroller.New(
-				managercontroller.NewTalosRealizer(ctx, nil, talosconfigEnv(in.Spec)), fs)
+				managercontroller.NewTalosRealizer(ctx, node, talosconfigEnv(in.Spec)), fs)
 
 			out, err := ctrl.Reconcile(toReconcileInput(in))
 			if err != nil {
@@ -33,6 +40,12 @@ func talosconfigEnv(spec map[string]interface{}) string {
 	}
 
 	return name
+}
+
+func applyMode(spec map[string]interface{}) string {
+	mode, _ := spec["applyMode"].(string)
+
+	return mode
 }
 
 func toReconcileInput(in ReconcileInput) citypes.ReconcileInput {

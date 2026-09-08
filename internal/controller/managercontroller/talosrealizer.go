@@ -5,10 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"reflect"
-	"strings"
 
-	"sigs.k8s.io/yaml"
+	"github.com/siderolabs/talos/pkg/machinery/config"
+	"github.com/siderolabs/talos/pkg/machinery/config/configdiff"
+	"github.com/siderolabs/talos/pkg/machinery/config/configloader"
 
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 )
@@ -112,52 +112,29 @@ func (r TalosRealizer) talosconfigFor(spec map[string]any) (string, error) {
 }
 
 func sameMachineConfig(running, declared string) (bool, error) {
-	have, err := machineConfigDocuments(running, "the machine config the node holds")
+	have, err := loadMachineConfig(running, "the machine config the node holds")
 	if err != nil {
 		return false, err
 	}
 
-	want, err := machineConfigDocuments(declared, "the declared machine config")
+	want, err := loadMachineConfig(declared, "the declared machine config")
 	if err != nil {
 		return false, err
 	}
 
-	return reflect.DeepEqual(have, want), nil
-}
-
-func machineConfigDocuments(text, what string) ([]any, error) {
-	out := []any{}
-
-	for i, raw := range splitDocuments(text) {
-		if strings.TrimSpace(raw) == "" {
-			continue
-		}
-
-		var doc any
-		if err := yaml.Unmarshal([]byte(raw), &doc); err != nil {
-			return nil, fmt.Errorf("decoding document %d of %s: %w", i+1, what, err)
-		}
-
-		out = append(out, doc)
+	difference, err := configdiff.DiffConfigs(have, want)
+	if err != nil {
+		return false, fmt.Errorf("diffing the two machine configs: %w", err)
 	}
 
-	return out, nil
+	return difference == "", nil
 }
 
-func splitDocuments(text string) []string {
-	out := []string{}
-	current := []string{}
-
-	for _, line := range strings.Split(text, "\n") {
-		if strings.TrimRight(line, " \t") == "---" {
-			out = append(out, strings.Join(current, "\n"))
-			current = nil
-
-			continue
-		}
-
-		current = append(current, line)
+func loadMachineConfig(text, what string) (config.Provider, error) {
+	provider, err := configloader.NewFromBytes([]byte(text), configloader.WithNoValidation())
+	if err != nil {
+		return nil, fmt.Errorf("loading %s: %w", what, err)
 	}
 
-	return append(out, strings.Join(current, "\n"))
+	return provider, nil
 }

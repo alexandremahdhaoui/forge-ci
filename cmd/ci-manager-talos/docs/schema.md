@@ -8,5 +8,6 @@ The `spec` block on this engine's entry in `forge-ci.yaml`.
 |---|---|---|---|
 | `statePath` | string | no | Where to record what was converged. Omit it and nothing is recorded. |
 | `talosconfigEnv` | string | no | The environment variable holding the client configuration path a resource falls back to. Defaults to TALOSCONFIG. |
+| `applyMode` | string | no | How the node takes an applied config. `auto` reboots when the change needs it and compares against the config the node is running. `staged` writes the config for the next boot and compares against the config the node saved, because the running one is still the old one. Defaults to auto. |
 
 forge-ci never validates a spec. This engine does, because only it knows what the keys mean.
