@@ -44,7 +44,7 @@ func NewHandlers() Handlers {
 }
 
 func talosconfigEnv(spec map[string]interface{}) (string, error) {
-	name, err := stringField(spec, "talosconfigEnv")
+	name, err := citypes.SpecString(spec, "talosconfigEnv")
 	if err != nil {
 		return "", err
 	}
@@ -57,21 +57,7 @@ func talosconfigEnv(spec map[string]interface{}) (string, error) {
 }
 
 func applyMode(spec map[string]interface{}) (string, error) {
-	return stringField(spec, "applyMode")
-}
-
-func stringField(spec map[string]interface{}, key string) (string, error) {
-	value, declared := spec[key]
-	if !declared || value == nil {
-		return "", nil
-	}
-
-	text, isString := value.(string)
-	if !isString {
-		return "", fmt.Errorf("reading spec.%s: a string is required, the spec holds a %T", key, value)
-	}
-
-	return text, nil
+	return citypes.SpecString(spec, "applyMode")
 }
 
 func toReconcileInput(in ReconcileInput) citypes.ReconcileInput {

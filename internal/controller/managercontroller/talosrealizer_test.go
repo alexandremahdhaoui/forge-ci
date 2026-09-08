@@ -68,6 +68,8 @@ ingress: block
 	controlplaneThenTheVolumeThenTheIngressRule = controlplane + "---\n" + theVolume + "---\n" + theIngressRule
 	controlplaneThenTheIngressRuleThenTheVolume = controlplane + "---\n" + theIngressRule + "---\n" + theVolume
 	theVolumeThenTheControlplane                = theVolume + "---\n" + controlplane
+	controlplaneWithTheVolumeTwice              = controlplane + "---\n" + theVolume + "---\n" + theVolume
+	controlplaneTwice                           = controlplane + "---\n" + controlplane
 )
 
 const talosconfigVariable = "FORGE_CI_TEST_CLIENT_CONFIG"
@@ -359,6 +361,58 @@ func TestTheTalosRealizerReportsLoadingTheDeclaredConfigWhenADocumentWillNotDeco
 	_, err := r.Realize(machineConfig("\tnot: yaml\n"), plain)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "loading the declared machine config")
+}
+
+func TestTheTalosRealizerRefusesADeclaredConfigThatRepeatsAVolumeDocument(t *testing.T) {
+	r, talos := talosRealizer(t)
+	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything, mock.Anything).
+		Return(controlplane, nil)
+
+	_, err := r.Realize(machineConfig(controlplaneWithTheVolumeTwice), plain)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "loading the declared machine config")
+	assert.Contains(t, err.Error(), "duplicate document v1alpha1/VolumeConfig/EPHEMERAL")
+	assert.Contains(t, err.Error(), "line")
+}
+
+func TestTheTalosRealizerRefusesADeclaredConfigThatRepeatsTheVersionDocument(t *testing.T) {
+	r, talos := talosRealizer(t)
+	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything, mock.Anything).
+		Return(controlplane, nil)
+
+	_, err := r.Realize(machineConfig(controlplaneTwice), plain)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "loading the declared machine config")
+	assert.Contains(t, err.Error(), "v1alpha1")
+	assert.Contains(t, err.Error(), "line")
+}
+
+func TestTheTalosRealizerReportsTheNodeWhenTheDeclaredConfigCarriesNoVersionDocument(t *testing.T) {
+	r, talos := talosRealizer(t)
+	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything, mock.Anything).
+		Return(controlplane, nil)
+
+	_, err := r.Realize(machineConfig(theVolume), plain)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "comparing the machine config of node 192.168.1.10")
+	assert.Contains(t, err.Error(), "patching the machine config the node holds")
+}
+
+func TestTheTalosRealizerRefusesASpecFieldThatHoldsSomethingOtherThanAString(t *testing.T) {
+	for _, key := range []string{"node", "config", "talosconfig", "talosconfigEnv"} {
+		t.Run(key, func(t *testing.T) {
+			r, _ := talosRealizer(t)
+
+			res := machineConfig(controlplane)
+			res.Spec[key] = 7
+
+			_, err := r.Realize(res, plain)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "reading spec."+key)
+			assert.Contains(t, err.Error(), "a string is required")
+			assert.Contains(t, err.Error(), "int")
+		})
+	}
 }
 
 func TestTheTalosRealizerRefusesToReachANodeWithNoClientWired(t *testing.T) {

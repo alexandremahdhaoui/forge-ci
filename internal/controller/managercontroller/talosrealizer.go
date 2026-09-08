@@ -47,8 +47,15 @@ func (r TalosRealizer) Realize(res citypes.Resource, opts Options) (Action, erro
 }
 
 func (r TalosRealizer) realizeMachineConfig(res citypes.Resource, opts Options) (Action, error) {
-	node, _ := res.Spec["node"].(string)
-	declared, _ := res.Spec["config"].(string)
+	node, err := citypes.SpecString(res.Spec, "node")
+	if err != nil {
+		return Action{}, err
+	}
+
+	declared, err := citypes.SpecString(res.Spec, "config")
+	if err != nil {
+		return Action{}, err
+	}
 
 	if node == "" || declared == "" {
 		return Action{}, errors.New("spec.node and spec.config are required")
@@ -90,11 +97,20 @@ func (r TalosRealizer) realizeMachineConfig(res citypes.Resource, opts Options) 
 }
 
 func (r TalosRealizer) talosconfigFor(spec map[string]any) (string, error) {
-	if path, _ := spec["talosconfig"].(string); path != "" {
+	path, err := citypes.SpecString(spec, "talosconfig")
+	if err != nil {
+		return "", err
+	}
+
+	if path != "" {
 		return path, nil
 	}
 
-	name, _ := spec["talosconfigEnv"].(string)
+	name, err := citypes.SpecString(spec, "talosconfigEnv")
+	if err != nil {
+		return "", err
+	}
+
 	if name == "" {
 		name = r.talosconfigEnv
 	}
@@ -103,7 +119,7 @@ func (r TalosRealizer) talosconfigFor(spec map[string]any) (string, error) {
 		return "", errors.New("spec.talosconfig or spec.talosconfigEnv is required")
 	}
 
-	path := os.Getenv(name)
+	path = os.Getenv(name)
 	if path == "" {
 		return "", fmt.Errorf("reading %s for the client configuration path: the variable is empty", name)
 	}
@@ -131,7 +147,7 @@ func sameMachineConfig(running, declared string) (bool, error) {
 }
 
 func loadMachineConfig(text, what string) (config.Provider, error) {
-	provider, err := configloader.NewFromBytes([]byte(text), configloader.WithNoValidation())
+	provider, err := configloader.NewFromBytes([]byte(text))
 	if err != nil {
 		return nil, fmt.Errorf("loading %s: %w", what, err)
 	}
