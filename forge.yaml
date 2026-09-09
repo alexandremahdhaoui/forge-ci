@@ -48,6 +48,10 @@ build:
     src: ./cmd/ci-manager-github
     engine: forge://forge-dev
 
+  - name: gen-ci-manager-kubernetes
+    src: ./cmd/ci-manager-kubernetes
+    engine: forge://forge-dev
+
   - name: gen-ci-manager-talos
     src: ./cmd/ci-manager-talos
     engine: forge://forge-dev
@@ -121,6 +125,12 @@ build:
 
   - name: ci-manager-github
     src: ./cmd/ci-manager-github
+    dest: ./build/bin
+    engine: forge://go-build
+    platforms: [linux/amd64, linux/arm64]
+
+  - name: ci-manager-kubernetes
+    src: ./cmd/ci-manager-kubernetes
     dest: ./build/bin
     engine: forge://go-build
     platforms: [linux/amd64, linux/arm64]

@@ -46,6 +46,7 @@ packages:
       dir: internal/mocks/managercontrollermock
       pkgname: managercontrollermock
     interfaces:
+      Kubernetes:
       Talos:
       Terraform:
 

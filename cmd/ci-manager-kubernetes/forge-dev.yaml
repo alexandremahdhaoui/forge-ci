@@ -1,0 +1,15 @@
+name: ci-manager-kubernetes
+kind: mcp-server
+version: 0.1.0
+description: Converge a declared secret in a cluster from the environment of one run.
+openapi:
+  specPath: ../../.forge/spec-cache/engines.v1.yaml
+generate:
+  packageName: main
+  docsBaseURL: https://raw.githubusercontent.com/alexandremahdhaoui/forge-ci/refs/heads/main
+layout:
+  tools:
+    - name: reconcile
+      description: Make every declared secret hold what its declaration names, and record what was converged.
+      input: ReconcileInput
+      output: ReconcileOutput

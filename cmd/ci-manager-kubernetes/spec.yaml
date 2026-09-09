@@ -1,0 +1,61 @@
+name: ci-manager-kubernetes
+port: manager
+version: v0.1.0
+tagline: Converge a declared secret in a cluster, and record what it changed.
+why: |
+  A run time credential is declared, never pasted. The declaration names the
+  environment variable that carries each value and nothing else, so git holds
+  no secret and a vault edit plus a rerun is the whole rotation. The manager
+  reads the live secret first, so a rerun that changes nothing answers Kept.
+tools:
+  - name: reconcile
+    does: Converge every declared secret and return who owns it.
+example:
+  tool: reconcile
+  input: '{"manager":"kubernetes","resources":[{"kind":"secret","name":"flux-deploy-key","spec":{"namespace":"flux-system","name":"flux-deploy-key","data":{"identity":"FLUX_DEPLOY_KEY"}}}]}'
+notes: |
+  It knows one kind, `secret`. The resource name is the secret's name in the
+  declaration. `spec.namespace` and `spec.name` are the namespace and the name
+  in the cluster. `spec.data` maps each key of the secret to the name of the
+  environment variable holding its value, never to the value itself, so a
+  declaration is safe to commit and the values enter through the environment of
+  one run.
+
+  A key whose variable is unset or empty is an error naming the variable and
+  the key. A declaration carrying no `spec.data`, an empty map, a key with no
+  name, and a key naming no variable are each an error naming what was seen.
+
+  Kept or Did comes from one truncated hash. The manager takes SHA-256 over
+  every key and its value, both length prefixed and in sorted order, keeps the
+  first 12 characters, and writes it to the live secret under the annotation
+  `forge-ci-secret-hash` in the same write that carries the data. The key set
+  is hashed alongside the values, so dropping a key answers a different hash
+  even when that key held nothing.
+
+  Kept means the live secret carries that annotation already. Did on create
+  means the cluster held no secret of that name. Did on update means the
+  annotation named something else, and the write replaces the whole data map,
+  so a key dropped from the declaration is gone from the secret. Nothing is
+  merged, because a merge cannot prune. Every other field of the live secret
+  is kept, so a label or an annotation someone else wrote survives.
+
+  A dry run reads the live secret exactly as a real run does and answers Kept
+  either way, with the text saying what it would write and which keys it would
+  carry. It writes nothing. The key names travel into an action line and the
+  values never do.
+
+  Force writes even when the annotation matches. Only a human asks for it, and
+  it is the way to restore a secret someone edited in the cluster.
+
+  There is no delete path. A secret dropped from a declaration stays as it is.
+  It refuses a resource recorded as owned by a different manager, and it
+  refuses a kind it does not know by name.
+
+  The cluster it reaches comes from the standard client configuration
+  resolution, so `KUBECONFIG`, the user's default configuration file and an
+  in-cluster service account each work with nothing declared here.
+spec:
+  - key: statePath
+    type: string
+    required: false
+    means: Where to record what was converged. Omit it and nothing is recorded.
