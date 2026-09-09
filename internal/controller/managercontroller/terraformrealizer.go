@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
+	"strings"
 
 	tfjson "github.com/hashicorp/terraform-json"
 
@@ -14,7 +16,7 @@ const KindRootModule = "root-module"
 
 type Terraform interface {
 	Init(ctx context.Context, dir string) error
-	Plan(ctx context.Context, dir string) (*tfjson.Plan, error)
+	Plan(ctx context.Context, dir string) (reportsChanges bool, document *tfjson.Plan, err error)
 	Apply(ctx context.Context, dir string) error
 }
 
@@ -62,22 +64,15 @@ func (r TerraformRealizer) realizeRootModule(res citypes.Resource, opts Options)
 		return Action{}, fmt.Errorf("initializing the root module at %s: %w", dir, err)
 	}
 
-	plan, err := r.terraform.Plan(r.ctx, dir)
+	reportsChanges, document, err := r.terraform.Plan(r.ctx, dir)
 	if err != nil {
 		return Action{}, fmt.Errorf("planning the root module at %s: %w", dir, err)
 	}
 
-	if plan == nil {
-		return Action{}, fmt.Errorf("planning the root module at %s: terraform answered no plan", dir)
+	changes, err := plannedWork(reportsChanges, document)
+	if err != nil {
+		return Action{}, fmt.Errorf("planning the root module at %s: %w", dir, err)
 	}
-
-	if plan.Complete != nil && !*plan.Complete {
-		return Action{}, fmt.Errorf(
-			"planning the root module at %s: terraform answered an incomplete plan holding %d deferred changes",
-			dir, len(plan.DeferredChanges))
-	}
-
-	changes := plannedChanges(plan)
 
 	if changes == 0 && !opts.Force {
 		return Kept("kept the root module at " + dir), nil
@@ -94,6 +89,82 @@ func (r TerraformRealizer) realizeRootModule(res citypes.Resource, opts Options)
 	}
 
 	return Did(fmt.Sprintf("applied %d planned changes to the root module at %s", changes, dir)), nil
+}
+
+func plannedWork(reportsChanges bool, document *tfjson.Plan) (int, error) {
+	if document == nil {
+		return 0, errors.New("terraform answered no plan document")
+	}
+
+	if document.Complete != nil && !*document.Complete {
+		return 0, fmt.Errorf(
+			"terraform answered an incomplete plan holding %d deferred changes",
+			len(document.DeferredChanges))
+	}
+
+	changes := plannedChanges(document)
+
+	if reportsChanges != (changes > 0) {
+		return 0, fmt.Errorf(
+			"terraform reported %s and the plan document counts %d, naming %s. this manager refuses a plan its two answers do not agree on rather than guess which one is right",
+			reportedAs(reportsChanges), changes, actionsSeen(document))
+	}
+
+	return changes, nil
+}
+
+func reportedAs(reportsChanges bool) string {
+	if reportsChanges {
+		return "changes"
+	}
+
+	return "no changes"
+}
+
+func actionsSeen(document *tfjson.Plan) string {
+	seen := map[string]bool{}
+
+	for _, resource := range document.ResourceChanges {
+		if resource != nil && resource.Change != nil {
+			seen[actionsOf(resource.Change)] = true
+		}
+	}
+
+	for _, output := range document.OutputChanges {
+		if output != nil {
+			seen[actionsOf(output)] = true
+		}
+	}
+
+	if len(seen) == 0 {
+		return "no change at all"
+	}
+
+	names := make([]string, 0, len(seen))
+	for name := range seen {
+		names = append(names, name)
+	}
+
+	sort.Strings(names)
+
+	return strings.Join(names, " and ")
+}
+
+func actionsOf(change *tfjson.Change) string {
+	parts := make([]string, 0, len(change.Actions))
+	for _, action := range change.Actions {
+		parts = append(parts, string(action))
+	}
+
+	if change.Importing != nil {
+		parts = append(parts, "import")
+	}
+
+	if len(parts) == 0 {
+		return "nothing"
+	}
+
+	return strings.Join(parts, "+")
 }
 
 func plannedChanges(plan *tfjson.Plan) int {

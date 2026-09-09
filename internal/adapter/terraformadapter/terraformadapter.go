@@ -39,31 +39,33 @@ func (r Root) Init(ctx context.Context, dir string) error {
 	return nil
 }
 
-func (r Root) Plan(ctx context.Context, dir string) (*tfjson.Plan, error) {
+func (r Root) Plan(ctx context.Context, dir string) (bool, *tfjson.Plan, error) {
 	tf, err := r.open(dir)
 	if err != nil {
-		return nil, err
+		return false, nil, err
 	}
 
 	held, err := os.MkdirTemp("", "forge-ci-plan")
 	if err != nil {
-		return nil, fmt.Errorf("making a directory for the plan of the root module at %s: %w", dir, err)
+		return false, nil, fmt.Errorf(
+			"making a directory for the plan of the root module at %s: %w", dir, err)
 	}
 
 	defer func() { _ = os.RemoveAll(held) }()
 
 	path := filepath.Join(held, "plan")
 
-	if _, err := tf.Plan(ctx, tfexec.Out(path)); err != nil {
-		return nil, fmt.Errorf("planning the root module at %s: %w", dir, err)
-	}
-
-	plan, err := tf.ShowPlanFile(ctx, path)
+	reportsChanges, err := tf.Plan(ctx, tfexec.Out(path))
 	if err != nil {
-		return nil, fmt.Errorf("reading the plan of the root module at %s: %w", dir, err)
+		return false, nil, fmt.Errorf("planning the root module at %s: %w", dir, err)
 	}
 
-	return plan, nil
+	document, err := tf.ShowPlanFile(ctx, path)
+	if err != nil {
+		return false, nil, fmt.Errorf("reading the plan of the root module at %s: %w", dir, err)
+	}
+
+	return reportsChanges, document, nil
 }
 
 func (r Root) Apply(ctx context.Context, dir string) error {

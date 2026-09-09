@@ -153,31 +153,37 @@ func (_c *MockTerraform_Init_Call) RunAndReturn(run func(ctx context.Context, di
 }
 
 // Plan provides a mock function for the type MockTerraform
-func (_mock *MockTerraform) Plan(ctx context.Context, dir string) (*tfjson.Plan, error) {
+func (_mock *MockTerraform) Plan(ctx context.Context, dir string) (bool, *tfjson.Plan, error) {
 	ret := _mock.Called(ctx, dir)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Plan")
 	}
 
-	var r0 *tfjson.Plan
-	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (*tfjson.Plan, error)); ok {
+	var r0 bool
+	var r1 *tfjson.Plan
+	var r2 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (bool, *tfjson.Plan, error)); ok {
 		return returnFunc(ctx, dir)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string) *tfjson.Plan); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) bool); ok {
 		r0 = returnFunc(ctx, dir)
 	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*tfjson.Plan)
-		}
+		r0 = ret.Get(0).(bool)
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string) *tfjson.Plan); ok {
 		r1 = returnFunc(ctx, dir)
 	} else {
-		r1 = ret.Error(1)
+		if ret.Get(1) != nil {
+			r1 = ret.Get(1).(*tfjson.Plan)
+		}
 	}
-	return r0, r1
+	if returnFunc, ok := ret.Get(2).(func(context.Context, string) error); ok {
+		r2 = returnFunc(ctx, dir)
+	} else {
+		r2 = ret.Error(2)
+	}
+	return r0, r1, r2
 }
 
 // MockTerraform_Plan_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Plan'
@@ -210,12 +216,12 @@ func (_c *MockTerraform_Plan_Call) Run(run func(ctx context.Context, dir string)
 	return _c
 }
 
-func (_c *MockTerraform_Plan_Call) Return(plan *tfjson.Plan, err error) *MockTerraform_Plan_Call {
-	_c.Call.Return(plan, err)
+func (_c *MockTerraform_Plan_Call) Return(reportsChanges bool, document *tfjson.Plan, err error) *MockTerraform_Plan_Call {
+	_c.Call.Return(reportsChanges, document, err)
 	return _c
 }
 
-func (_c *MockTerraform_Plan_Call) RunAndReturn(run func(ctx context.Context, dir string) (*tfjson.Plan, error)) *MockTerraform_Plan_Call {
+func (_c *MockTerraform_Plan_Call) RunAndReturn(run func(ctx context.Context, dir string) (bool, *tfjson.Plan, error)) *MockTerraform_Plan_Call {
 	_c.Call.Return(run)
 	return _c
 }

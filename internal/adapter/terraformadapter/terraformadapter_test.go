@@ -14,8 +14,12 @@ const versionAnswer = `{"terraform_version":"1.16.1","platform":"linux_amd64"}`
 const planAnswer = `{"format_version":"1.2","resource_changes":[` +
 	`{"address":"aws_route53_record.home","change":{"actions":["create"]}}]}`
 
+const noChangePlanAnswer = `{"format_version":"1.2","resource_changes":[` +
+	`{"address":"aws_route53_record.home","change":{"actions":["no-op"]}}]}`
+
 var (
 	answersEverything string
+	answersNoChange   string
 	failsEveryCommand string
 	answersANonPlan   string
 )
@@ -27,7 +31,9 @@ func TestMain(m *testing.M) {
 	}
 
 	answersEverything = writeStub(dir, "everything",
-		"show) echo '"+planAnswer+"' ;;\n*) exit 0 ;;")
+		"plan) exit 2 ;;\nshow) echo '"+planAnswer+"' ;;\n*) exit 0 ;;")
+	answersNoChange = writeStub(dir, "no-change",
+		"show) echo '"+noChangePlanAnswer+"' ;;\n*) exit 0 ;;")
 	failsEveryCommand = writeStub(dir, "failure",
 		"*) echo 'the state is locked' >&2; exit 1 ;;")
 	answersANonPlan = writeStub(dir, "non-plan",
@@ -84,7 +90,7 @@ func TestInitReportsTheDirectoryItCouldNotOpen(t *testing.T) {
 func TestPlanReportsTheDirectoryItCouldNotOpen(t *testing.T) {
 	t.Parallel()
 
-	_, err := Root{execPath: "/nowhere/terraform"}.Plan(t.Context(), "/nowhere/module")
+	_, _, err := Root{execPath: "/nowhere/terraform"}.Plan(t.Context(), "/nowhere/module")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "opening the root module at /nowhere/module")
 }
@@ -112,7 +118,7 @@ func TestPlanReportsTheDirectoryOfATerraformThatFailed(t *testing.T) {
 
 	dir := t.TempDir()
 
-	_, err := Root{execPath: failsEveryCommand}.Plan(t.Context(), dir)
+	_, _, err := Root{execPath: failsEveryCommand}.Plan(t.Context(), dir)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "planning the root module at "+dir)
 }
@@ -139,14 +145,25 @@ func TestApplyRunsAgainstADirectoryThatHoldsARootModule(t *testing.T) {
 	require.NoError(t, Root{execPath: answersEverything}.Apply(t.Context(), t.TempDir()))
 }
 
-func TestPlanAnswersThePlanTerraformWroteAsJSON(t *testing.T) {
+func TestPlanAnswersBothTheExitCodeAndTheDocumentWhenTerraformReportsChanges(t *testing.T) {
 	t.Parallel()
 
-	plan, err := Root{execPath: answersEverything}.Plan(t.Context(), t.TempDir())
+	reportsChanges, document, err := Root{execPath: answersEverything}.Plan(t.Context(), t.TempDir())
 	require.NoError(t, err)
-	require.Len(t, plan.ResourceChanges, 1)
-	assert.Equal(t, "aws_route53_record.home", plan.ResourceChanges[0].Address)
-	assert.False(t, plan.ResourceChanges[0].Change.Actions.NoOp())
+	assert.True(t, reportsChanges)
+	require.Len(t, document.ResourceChanges, 1)
+	assert.Equal(t, "aws_route53_record.home", document.ResourceChanges[0].Address)
+	assert.False(t, document.ResourceChanges[0].Change.Actions.NoOp())
+}
+
+func TestPlanAnswersBothTheExitCodeAndTheDocumentWhenTerraformReportsNoChange(t *testing.T) {
+	t.Parallel()
+
+	reportsChanges, document, err := Root{execPath: answersNoChange}.Plan(t.Context(), t.TempDir())
+	require.NoError(t, err)
+	assert.False(t, reportsChanges)
+	require.Len(t, document.ResourceChanges, 1)
+	assert.True(t, document.ResourceChanges[0].Change.Actions.NoOp())
 }
 
 func TestPlanReportsTheDirectoryOfAPlanItCouldNotRead(t *testing.T) {
@@ -154,7 +171,7 @@ func TestPlanReportsTheDirectoryOfAPlanItCouldNotRead(t *testing.T) {
 
 	dir := t.TempDir()
 
-	_, err := Root{execPath: answersANonPlan}.Plan(t.Context(), dir)
+	_, _, err := Root{execPath: answersANonPlan}.Plan(t.Context(), dir)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "reading the plan of the root module at "+dir)
 }
