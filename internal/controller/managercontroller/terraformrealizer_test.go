@@ -378,6 +378,20 @@ func TestTheTerraformRealizerRefusesAResourceEntryTerraformLeftEmpty(t *testing.
 	terraform.AssertNotCalled(t, "Apply", mock.Anything, mock.Anything)
 }
 
+func TestForceStillRefusesAResourceCarryingNoChangeBlock(t *testing.T) {
+	r, terraform := terraformRealizer(t)
+
+	var noChange *tfjson.Change
+
+	terraform.EXPECT().Init(mock.Anything, theModuleDir).Return(nil)
+	terraform.EXPECT().Plan(mock.Anything, theModuleDir).Return(reportsNone, planOfChanges(noChange), nil)
+
+	_, err := r.Realize(rootModule(), managercontroller.Options{Force: true})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), addressOf(0)+" holds no change block")
+	terraform.AssertNotCalled(t, "Apply", mock.Anything, mock.Anything)
+}
+
 func TestTheTerraformRealizerRefusesAnUnknownActionOnAnOutputByName(t *testing.T) {
 	r, terraform := terraformRealizer(t)
 	plan := &tfjson.Plan{OutputChanges: map[string]*tfjson.Change{
@@ -463,6 +477,26 @@ func TestAnIncompletePlanIsRefusedBeforeTheTwoAnswersAreCompared(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "incomplete plan holding 0 deferred changes, naming no reason")
 	assert.NotContains(t, err.Error(), "do not agree")
+}
+
+func TestAnIncompletePlanIsRefusedBeforeAnUnreadableChangeIsNamed(t *testing.T) {
+	r, terraform := terraformRealizer(t)
+
+	var noChange *tfjson.Change
+
+	incomplete := false
+	plan := planOfChanges(noChange)
+	plan.Complete = &incomplete
+	plan.DeferredChanges = []*tfjson.DeferredResourceChange{{Reason: "provider_config_unknown"}}
+	terraform.EXPECT().Init(mock.Anything, theModuleDir).Return(nil)
+	terraform.EXPECT().Plan(mock.Anything, theModuleDir).Return(reportsNone, plan, nil)
+
+	_, err := r.Realize(rootModule(), plain)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "incomplete plan holding 1 deferred changes")
+	assert.Contains(t, err.Error(), "naming provider_config_unknown")
+	assert.NotContains(t, err.Error(), "holds no change block")
+	terraform.AssertNotCalled(t, "Apply", mock.Anything, mock.Anything)
 }
 
 func TestTheTerraformRealizerReadsAPlanTerraformCompleted(t *testing.T) {

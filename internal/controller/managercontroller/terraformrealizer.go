@@ -251,15 +251,11 @@ func actionsSeen(document *tfjson.Plan) string {
 	seen := map[string]bool{}
 
 	for _, resource := range document.ResourceChanges {
-		if resource != nil && resource.Change != nil {
-			seen[actionsOf(resource.Change)] = true
-		}
+		seen[actionsOf(resource.Change)] = true
 	}
 
 	for _, output := range document.OutputChanges {
-		if output != nil {
-			seen[actionsOf(output)] = true
-		}
+		seen[actionsOf(output)] = true
 	}
 
 	if len(seen) == 0 {
@@ -279,10 +275,6 @@ func actionsOf(change *tfjson.Change) string {
 		parts = append(parts, "import")
 	}
 
-	if len(parts) == 0 {
-		return "nothing"
-	}
-
 	return strings.Join(parts, "+")
 }
 
@@ -290,7 +282,7 @@ func plannedChanges(plan *tfjson.Plan) int {
 	count := 0
 
 	for _, resource := range plan.ResourceChanges {
-		if resource != nil && moves(resource.Change) {
+		if moves(resource.Change) {
 			count++
 		}
 	}
