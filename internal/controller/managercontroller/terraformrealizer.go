@@ -180,7 +180,9 @@ func unknownActions(document *tfjson.Plan) []string {
 	seen := map[string]bool{}
 
 	for _, resource := range document.ResourceChanges {
-		if resource == nil || resource.Change == nil {
+		if resource == nil {
+			seen[unknownActionsOf("", nil)] = true
+
 			continue
 		}
 
@@ -190,10 +192,6 @@ func unknownActions(document *tfjson.Plan) []string {
 	}
 
 	for address, output := range document.OutputChanges {
-		if output == nil {
-			continue
-		}
-
 		if named := unknownActionsOf("output "+address, output); named != "" {
 			seen[named] = true
 		}
@@ -205,6 +203,10 @@ func unknownActions(document *tfjson.Plan) []string {
 func unknownActionsOf(address string, change *tfjson.Change) string {
 	if address == "" {
 		address = "a change terraform gave no address"
+	}
+
+	if change == nil {
+		return address + " holds no change block"
 	}
 
 	if len(change.Actions) == 0 {
@@ -303,10 +305,6 @@ func plannedChanges(plan *tfjson.Plan) int {
 }
 
 func moves(change *tfjson.Change) bool {
-	if change == nil {
-		return false
-	}
-
 	if change.Importing != nil {
 		return true
 	}
