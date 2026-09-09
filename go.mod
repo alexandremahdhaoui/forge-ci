@@ -9,6 +9,8 @@ require (
 	github.com/alexandremahdhaoui/forge-revision-spec v0.49.0
 	github.com/cosi-project/runtime v1.16.3
 	github.com/google/go-containerregistry v0.22.0
+	github.com/hashicorp/terraform-exec v0.25.3
+	github.com/hashicorp/terraform-json v0.28.0
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/siderolabs/talos/pkg/machinery v1.14.0
 	github.com/stretchr/testify v1.12.1
@@ -22,6 +24,7 @@ require (
 	github.com/ProtonMail/gopenpgp/v3 v3.4.1 // indirect
 	github.com/adrg/xdg v0.5.3 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
+	github.com/apparentlymart/go-textseg/v15 v15.0.0 // indirect
 	github.com/blang/semver/v4 v4.0.0 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cloudflare/circl v1.6.4 // indirect
@@ -39,6 +42,7 @@ require (
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.30.0 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
+	github.com/hashicorp/go-version v1.9.0 // indirect
 	github.com/jsimonetti/rtnetlink/v2 v2.2.1-0.20260802200809-43bafec815b3 // indirect
 	github.com/klauspost/compress v1.19.2 // indirect
 	github.com/mdlayher/ethtool v0.6.1 // indirect
@@ -65,6 +69,7 @@ require (
 	github.com/sirupsen/logrus v1.9.4 // indirect
 	github.com/stretchr/objx v0.5.3 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
+	github.com/zclconf/go-cty v1.18.1 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.28.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.4 // indirect

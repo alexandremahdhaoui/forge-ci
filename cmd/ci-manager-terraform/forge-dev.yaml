@@ -1,0 +1,21 @@
+name: ci-manager-terraform
+kind: mcp-server
+version: 0.1.0
+description: Converge a declared terraform root module and record what it changed.
+openapi:
+  specPath: ../../.forge/spec-cache/engines.v1.yaml
+generate:
+  packageName: main
+  docsBaseURL: https://raw.githubusercontent.com/alexandremahdhaoui/forge-ci/refs/heads/main
+runtime:
+  env:
+    - AWS_ACCESS_KEY_ID
+    - AWS_SECRET_ACCESS_KEY
+    - AWS_SESSION_TOKEN
+    - AWS_REGION
+layout:
+  tools:
+    - name: reconcile
+      description: Make every declared root module hold what it declares, and record what was converged.
+      input: ReconcileInput
+      output: ReconcileOutput
