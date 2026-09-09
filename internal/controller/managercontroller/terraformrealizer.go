@@ -181,18 +181,18 @@ func unknownActions(document *tfjson.Plan) []string {
 
 	for _, resource := range document.ResourceChanges {
 		if resource == nil {
-			seen[unknownActionsOf("", nil)] = true
+			seen[unknownActionsOf(resourceAddress(""), nil)] = true
 
 			continue
 		}
 
-		if named := unknownActionsOf(resource.Address, resource.Change); named != "" {
+		if named := unknownActionsOf(resourceAddress(resource.Address), resource.Change); named != "" {
 			seen[named] = true
 		}
 	}
 
-	for address, output := range document.OutputChanges {
-		if named := unknownActionsOf("output "+address, output); named != "" {
+	for name, output := range document.OutputChanges {
+		if named := unknownActionsOf(outputAddress(name), output); named != "" {
 			seen[named] = true
 		}
 	}
@@ -200,11 +200,23 @@ func unknownActions(document *tfjson.Plan) []string {
 	return sortedNames(seen)
 }
 
-func unknownActionsOf(address string, change *tfjson.Change) string {
+func resourceAddress(address string) string {
 	if address == "" {
-		address = "a change terraform gave no address"
+		return "a change terraform gave no address"
 	}
 
+	return address
+}
+
+func outputAddress(name string) string {
+	if name == "" {
+		return "an output terraform gave no name"
+	}
+
+	return "output " + name
+}
+
+func unknownActionsOf(address string, change *tfjson.Change) string {
 	if change == nil {
 		return address + " holds no change block"
 	}

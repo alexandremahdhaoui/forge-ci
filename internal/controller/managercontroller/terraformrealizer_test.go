@@ -366,6 +366,33 @@ func TestTheTerraformRealizerRefusesAnOutputCarryingNoChangeBlock(t *testing.T) 
 	terraform.AssertNotCalled(t, "Apply", mock.Anything, mock.Anything)
 }
 
+func TestTheTerraformRealizerNamesAnOutputTerraformGaveNoNameFor(t *testing.T) {
+	r, terraform := terraformRealizer(t)
+	plan := &tfjson.Plan{OutputChanges: map[string]*tfjson.Change{"": nil}}
+	terraform.EXPECT().Init(mock.Anything, theModuleDir).Return(nil)
+	terraform.EXPECT().Plan(mock.Anything, theModuleDir).Return(reportsNone, plan, nil)
+
+	_, err := r.Realize(rootModule(), plain)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "an output terraform gave no name holds no change block")
+	terraform.AssertNotCalled(t, "Apply", mock.Anything, mock.Anything)
+}
+
+func TestARefusedPlanNamesTheActionCarriedByAnOutputChange(t *testing.T) {
+	r, terraform := terraformRealizer(t)
+	plan := &tfjson.Plan{OutputChanges: map[string]*tfjson.Change{
+		"address": {Actions: tfjson.Actions{tfjson.ActionUpdate}},
+	}}
+	terraform.EXPECT().Init(mock.Anything, theModuleDir).Return(nil)
+	terraform.EXPECT().Plan(mock.Anything, theModuleDir).Return(reportsNone, plan, nil)
+
+	_, err := r.Realize(rootModule(), plain)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "terraform reported no changes and the plan document counts 1")
+	assert.Contains(t, err.Error(), "naming update")
+	terraform.AssertNotCalled(t, "Apply", mock.Anything, mock.Anything)
+}
+
 func TestTheTerraformRealizerRefusesAResourceEntryTerraformLeftEmpty(t *testing.T) {
 	r, terraform := terraformRealizer(t)
 	plan := &tfjson.Plan{ResourceChanges: []*tfjson.ResourceChange{nil}}
