@@ -44,16 +44,7 @@ func NewHandlers() Handlers {
 }
 
 func talosconfigEnv(spec map[string]interface{}) (string, error) {
-	name, err := citypes.SpecString(spec, "talosconfigEnv")
-	if err != nil {
-		return "", err
-	}
-
-	if name == "" {
-		return "TALOSCONFIG", nil
-	}
-
-	return name, nil
+	return citypes.SpecString(spec, "talosconfigEnv")
 }
 
 func applyMode(spec map[string]interface{}) (string, error) {

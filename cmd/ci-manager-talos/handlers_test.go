@@ -42,7 +42,7 @@ func TestApplyModeRefusesASpecThatHoldsSomethingOtherThanAString(t *testing.T) {
 	assert.Contains(t, err.Error(), "[]string")
 }
 
-func TestTalosconfigEnvFallsBackToTalosconfigWhenTheManagerSpecNamesNone(t *testing.T) {
+func TestTalosconfigEnvIsEmptyWhenTheManagerSpecNamesNoneSoTheRealizerNamesTheVariableItReads(t *testing.T) {
 	t.Parallel()
 
 	for name, spec := range map[string]map[string]interface{}{
@@ -54,7 +54,7 @@ func TestTalosconfigEnvFallsBackToTalosconfigWhenTheManagerSpecNamesNone(t *test
 
 			variable, err := talosconfigEnv(spec)
 			require.NoError(t, err)
-			assert.Equal(t, "TALOSCONFIG", variable)
+			assert.Empty(t, variable)
 		})
 	}
 }

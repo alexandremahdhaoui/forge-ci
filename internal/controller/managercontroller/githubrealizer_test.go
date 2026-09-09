@@ -181,8 +181,8 @@ func TestGitHubRealizerRefusesAnEmptySecretSource(t *testing.T) {
 		Spec: map[string]any{"repo": "o/r", "secret": "S", "fromEnv": "EMPTY_SOURCE"},
 	}, plain)
 	require.ErrorContains(t, err,
-		"reading secret S on o/r: spec.fromEnv must hold the name of an environment variable, "+
-			"and no variable of that name is set")
+		"reading secret S on o/r: nothing is set in the variable spec.fromEnv names. "+
+			"export it in .envrc before bootstrapping")
 }
 
 func TestTheGitHubRealizerNeverEchoesASecretPastedIntoSpecFromEnvBackOutOfItsRefusal(t *testing.T) {
@@ -265,7 +265,25 @@ func TestGitHubRealizerSecretDefaultsToGithubToken(t *testing.T) {
 		Spec: map[string]any{"repo": "o/r", "secret": "S"},
 	}, plain)
 	require.NoError(t, err)
-	assert.Equal(t, "sealed secret S on o/r from the variable spec.fromEnv names", action.Text)
+	assert.Equal(t,
+		"sealed secret S on o/r from GITHUB_TOKEN, which is read when spec.fromEnv is not declared",
+		action.Text)
+}
+
+func TestTheGitHubRealizerNamesTheVariableItReadWhenTheDeclarationNamesNone(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "")
+
+	r, api := githubRealizer(t)
+	api.EXPECT().SecretExists(mock.Anything, "o/r", "S").Return(false, nil)
+
+	_, err := r.Realize(citypes.Resource{
+		Kind: managercontroller.KindActionsSecret,
+		Name: "o/r/S",
+		Spec: map[string]any{"repo": "o/r", "secret": "S"},
+	}, plain)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "GITHUB_TOKEN")
+	assert.Contains(t, err.Error(), "reading secret S on o/r")
 }
 
 func TestGitHubRealizerEnablesAWorkflow(t *testing.T) {

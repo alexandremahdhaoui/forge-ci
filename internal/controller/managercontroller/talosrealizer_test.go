@@ -294,12 +294,18 @@ func TestTheTalosRealizerRefusesAResourceWithoutANodeOrAConfig(t *testing.T) {
 	}
 }
 
-func TestTheTalosRealizerRefusesAResourceThatNamesNoClientConfiguration(t *testing.T) {
+func TestTheTalosRealizerNamesTheVariableItReadWhenNothingDeclaresOne(t *testing.T) {
+	t.Setenv("TALOSCONFIG", "")
+
 	r := managercontroller.NewTalosRealizer(t.Context(), managercontrollermock.NewMockTalos(t), "")
 
 	_, err := r.Realize(machineConfig(controlplane), plain)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "spec.talosconfig or spec.talosconfigEnv is required")
+	assert.Equal(t,
+		"reading the client configuration path: nothing is set in TALOSCONFIG, which is read when "+
+			"neither spec.talosconfigEnv nor the manager's talosconfigEnv is declared. "+
+			"export it before bootstrapping",
+		err.Error())
 }
 
 func TestTheTalosRealizerRefusesAnEmptyClientConfigurationVariable(t *testing.T) {
@@ -311,10 +317,44 @@ func TestTheTalosRealizerRefusesAnEmptyClientConfigurationVariable(t *testing.T)
 	_, err := r.Realize(machineConfig(controlplane), plain)
 	require.Error(t, err)
 	assert.Equal(t,
-		"reading the client configuration path: spec.talosconfigEnv or the manager's talosconfigEnv "+
-			"must hold the name of an environment variable, and no variable of that name is set",
+		"reading the client configuration path: nothing is set in the variable the manager's "+
+			"talosconfigEnv names. export it before bootstrapping",
 		err.Error())
 	assert.NotContains(t, err.Error(), talosconfigVariable)
+}
+
+func TestTheTalosRealizerNamesTheSlotThatFedTheClientConfigurationWhenTheNodeCannotBeRead(t *testing.T) {
+	r, talos := talosRealizer(t)
+	talos.EXPECT().MachineConfig(mock.Anything, "192.168.1.10", "/etc/t0/declared.yaml").
+		Return("", errors.New("no route to host"))
+
+	res := machineConfig(controlplane)
+	res.Spec["talosconfig"] = "/etc/t0/declared.yaml"
+
+	_, err := r.Realize(res, plain)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(),
+		"reading the machine config of node 192.168.1.10 using the client configuration from spec.talosconfig")
+}
+
+func TestTheTalosRealizerNamesTheSlotThatFedTheClientConfigurationWhenTheApplyFails(t *testing.T) {
+	t.Setenv("FORGE_CI_TEST_OTHER_CLIENT_CONFIG", "/etc/t0/other.yaml")
+
+	r, talos := talosRealizer(t)
+	talos.EXPECT().MachineConfig(mock.Anything, "192.168.1.10", "/etc/t0/other.yaml").
+		Return(controlplane, nil)
+	talos.EXPECT().
+		ApplyMachineConfig(mock.Anything, "192.168.1.10", "/etc/t0/other.yaml", controlplaneWithABiggerDisk).
+		Return(errors.New("no route to host"))
+
+	res := machineConfig(controlplaneWithABiggerDisk)
+	res.Spec["talosconfigEnv"] = "FORGE_CI_TEST_OTHER_CLIENT_CONFIG"
+
+	_, err := r.Realize(res, plain)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(),
+		"applying the machine config to node 192.168.1.10 using the client configuration from "+
+			"the variable spec.talosconfigEnv names")
 }
 
 func TestTheTalosRealizerNeverEchoesASecretPastedIntoTheClientConfigurationVariableSlot(t *testing.T) {

@@ -13,7 +13,11 @@ import (
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 )
 
-const KindMachineConfig = "machine-config"
+const (
+	KindMachineConfig = "machine-config"
+
+	defaultTalosconfigVariable = "TALOSCONFIG"
+)
 
 type Talos interface {
 	MachineConfig(ctx context.Context, node, talosconfig string) (string, error)
@@ -61,7 +65,7 @@ func (r TalosRealizer) realizeMachineConfig(res citypes.Resource, opts Options) 
 		return Action{}, errors.New("spec.node and spec.config are required")
 	}
 
-	talosconfig, err := r.talosconfigFor(res.Spec)
+	talosconfig, source, err := r.talosconfigFor(res.Spec)
 	if err != nil {
 		return Action{}, err
 	}
@@ -73,7 +77,9 @@ func (r TalosRealizer) realizeMachineConfig(res citypes.Resource, opts Options) 
 
 	running, err := r.talos.MachineConfig(r.ctx, node, talosconfig)
 	if err != nil {
-		return Action{}, fmt.Errorf("reading the machine config of node %s: %w", node, err)
+		return Action{}, fmt.Errorf(
+			"reading the machine config of node %s using the client configuration from %s: %w",
+			node, source, err)
 	}
 
 	same, err := sameMachineConfig(running, declared)
@@ -90,43 +96,50 @@ func (r TalosRealizer) realizeMachineConfig(res citypes.Resource, opts Options) 
 	}
 
 	if err := r.talos.ApplyMachineConfig(r.ctx, node, talosconfig, declared); err != nil {
-		return Action{}, fmt.Errorf("applying the machine config to node %s: %w", node, err)
+		return Action{}, fmt.Errorf(
+			"applying the machine config to node %s using the client configuration from %s: %w",
+			node, source, err)
 	}
 
 	return Did("applied machine config to node " + node), nil
 }
 
-func (r TalosRealizer) talosconfigFor(spec map[string]any) (string, error) {
+func (r TalosRealizer) talosconfigFor(spec map[string]any) (string, string, error) {
 	path, err := citypes.SpecString(spec, "talosconfig")
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	if path != "" {
-		return path, nil
+		return path, "spec.talosconfig", nil
 	}
 
 	name, err := citypes.SpecString(spec, "talosconfigEnv")
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
+
+	source := "the variable spec.talosconfigEnv names"
 
 	if name == "" {
 		name = r.talosconfigEnv
+		source = "the variable the manager's talosconfigEnv names"
 	}
 
 	if name == "" {
-		return "", errors.New("spec.talosconfig or spec.talosconfigEnv is required")
+		name = defaultTalosconfigVariable
+		source = defaultTalosconfigVariable + ", which is read when neither spec.talosconfigEnv " +
+			"nor the manager's talosconfigEnv is declared"
 	}
 
 	path = os.Getenv(name)
 	if path == "" {
-		return "", errors.New(
-			"reading the client configuration path: spec.talosconfigEnv or the manager's talosconfigEnv " +
-				"must hold the name of an environment variable, and no variable of that name is set")
+		return "", "", fmt.Errorf(
+			"reading the client configuration path: nothing is set in %s. export it before bootstrapping",
+			source)
 	}
 
-	return path, nil
+	return path, source, nil
 }
 
 func sameMachineConfig(running, declared string) (bool, error) {

@@ -96,7 +96,9 @@ func (n Node) ApplyMachineConfig(ctx context.Context, node, talosconfig, machine
 func (n Node) dial(ctx context.Context, node, talosconfig string) (*client.Client, error) {
 	nodeClient, err := client.New(ctx, client.WithConfigFromFile(talosconfig))
 	if err != nil {
-		return nil, fmt.Errorf("dialing node %s with the client configuration %s: %w", node, talosconfig, err)
+		return nil, fmt.Errorf(
+			"dialing node %s with the client configuration the manager resolved, "+
+				"which must name a talosconfig file: %w", node, err)
 	}
 
 	return nodeClient, nil

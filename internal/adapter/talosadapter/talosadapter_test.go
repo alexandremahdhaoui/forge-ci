@@ -46,26 +46,35 @@ func TestAnUnknownApplyModeIsRefusedByName(t *testing.T) {
 	assert.Contains(t, err.Error(), "staged")
 }
 
-func TestReadingAMachineConfigReportsTheNodeAndTheClientConfigurationItCouldNotDial(t *testing.T) {
-	t.Parallel()
+const thePastedClientConfiguration = "-----BEGIN OPENSSH PRIVATE KEY-----\n" +
+	"ZZZTOPSECRETZZZclientprivatekey\n" +
+	"-----END OPENSSH PRIVATE KEY-----\n"
+
+func TestReadingAMachineConfigNamesTheNodeAndNeverEchoesTheClientConfigurationSlot(t *testing.T) {
+	t.Chdir(t.TempDir())
 
 	node, err := New(ApplyModeAuto)
 	require.NoError(t, err)
 
-	_, err = node.MachineConfig(t.Context(), "192.168.1.10", "/nowhere/t0.yaml")
+	_, err = node.MachineConfig(t.Context(), "192.168.1.10", thePastedClientConfiguration)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "dialing node 192.168.1.10")
-	assert.Contains(t, err.Error(), "/nowhere/t0.yaml")
+	assert.Contains(t, err.Error(), "must name a talosconfig file")
+	assert.NotContains(t, err.Error(), "ZZZTOPSECRETZZZclientprivatekey")
+	assert.NotContains(t, err.Error(), "BEGIN OPENSSH PRIVATE KEY")
 }
 
-func TestApplyingAMachineConfigReportsTheNodeAndTheClientConfigurationItCouldNotDial(t *testing.T) {
-	t.Parallel()
+func TestApplyingAMachineConfigNamesTheNodeAndNeverEchoesTheClientConfigurationSlot(t *testing.T) {
+	t.Chdir(t.TempDir())
 
 	node, err := New(ApplyModeAuto)
 	require.NoError(t, err)
 
-	err = node.ApplyMachineConfig(t.Context(), "192.168.1.10", "/nowhere/t0.yaml", "version: v1alpha1\n")
+	err = node.ApplyMachineConfig(
+		t.Context(), "192.168.1.10", thePastedClientConfiguration, "version: v1alpha1\n")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "dialing node 192.168.1.10")
-	assert.Contains(t, err.Error(), "/nowhere/t0.yaml")
+	assert.Contains(t, err.Error(), "must name a talosconfig file")
+	assert.NotContains(t, err.Error(), "ZZZTOPSECRETZZZclientprivatekey")
+	assert.NotContains(t, err.Error(), "BEGIN OPENSSH PRIVATE KEY")
 }

@@ -30,7 +30,15 @@ const (
 	KindWorkflowEnabled = "workflow-enabled"
 )
 
-const fromDeclaredVariable = " from the variable spec.fromEnv names"
+const defaultSecretVariable = "GITHUB_TOKEN"
+
+func secretVariableSource(declared bool) string {
+	if declared {
+		return "the variable spec.fromEnv names"
+	}
+
+	return defaultSecretVariable + ", which is read when spec.fromEnv is not declared"
+}
 
 // GitHubRealizer realizes the GitHub-side kinds: converged files on the
 // local checkout, sealed Actions secrets and workflow enablement through
@@ -138,8 +146,10 @@ func (r GitHubRealizer) realizeSecret(res citypes.Resource, opts Options) (Actio
 	}
 
 	fromEnv, _ := res.Spec["fromEnv"].(string)
+	source := secretVariableSource(fromEnv != "")
+
 	if fromEnv == "" {
-		fromEnv = "GITHUB_TOKEN"
+		fromEnv = defaultSecretVariable
 	}
 
 	// Actual state first. A secret that already exists is kept without a
@@ -160,12 +170,11 @@ func (r GitHubRealizer) realizeSecret(res citypes.Resource, opts Options) (Actio
 	value := os.Getenv(fromEnv)
 	if value == "" {
 		return Action{}, fmt.Errorf(
-			"reading secret %s on %s: spec.fromEnv must hold the name of an environment variable, "+
-				"and no variable of that name is set. export it in .envrc before bootstrapping",
-			secret, repo)
+			"reading secret %s on %s: nothing is set in %s. export it in .envrc before bootstrapping",
+			secret, repo, source)
 	}
 
-	text := "seal secret " + secret + " on " + repo + fromDeclaredVariable
+	text := "seal secret " + secret + " on " + repo + " from " + source
 	if opts.DryRun {
 		return Did(opts.would(text)), nil
 	}
@@ -185,10 +194,10 @@ func (r GitHubRealizer) realizeSecret(res citypes.Resource, opts Options) (Actio
 	}
 
 	if existed {
-		return Did("rotated secret " + secret + " on " + repo + fromDeclaredVariable), nil
+		return Did("rotated secret " + secret + " on " + repo + " from " + source), nil
 	}
 
-	return Did("sealed secret " + secret + " on " + repo + fromDeclaredVariable), nil
+	return Did("sealed secret " + secret + " on " + repo + " from " + source), nil
 }
 
 // explainSecretsDenial names the one failure of the secrets API worth
