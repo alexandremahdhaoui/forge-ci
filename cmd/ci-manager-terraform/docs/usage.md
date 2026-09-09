@@ -47,12 +47,18 @@ or a credential travels through this manager.
 
 A plan answers twice and both answers decide. The exit code says whether
 terraform found anything to do. The plan document says what, and the manager
-counts every resource change and every output change that is not a no-op and
-not a read. A change terraform reads rather than writes is nothing to apply,
-so a data source terraform could not resolve at plan time is Kept and never
-an endless Did. A pending import is a change even when the resource already
-matches the module, because the state gains it and a second run would
-otherwise read the same import forever.
+counts every resource change and every output change that is not a no-op. A
+pending import is a change even when the resource already matches the module,
+because the state gains it and a second run would otherwise read the same
+import forever.
+
+The manager knows the six actions terraform emits today, `no-op`, `create`,
+`read`, `update`, `delete` and `forget`. Any other action string, and an
+empty action list, is an error naming every unrecognised action and the
+resource or output address that carried it. It refuses rather than counting
+what it cannot read, because an unknown action counted as nothing answers
+Kept over real work and an unknown action counted as work answers Did over a
+plan that never clears.
 
 The two answers explain different failures, so the manager refuses whenever
 they disagree. An exit code saying there is work over a document counting
@@ -67,10 +73,11 @@ is, and the apply closed it. A failed init, a failed plan or a failed apply
 is an error naming the action and the directory.
 
 A plan terraform could not complete is refused before the two answers are
-compared, with the number of deferred changes named. Terraform reports the
-completeness of a plan since 1.8, and a plan that defers work carries real
-work in a list this manager does not apply, so answering Kept over it would
-report a converged module that is not converged.
+compared, with the number of deferred changes and every reason terraform
+gave for deferring one named. Terraform reports the completeness of a plan
+since 1.8, and a plan that defers work carries real work in a list this
+manager does not apply, so answering Kept over it would report a converged
+module that is not converged.
 
 A dry run initializes and plans exactly as a real run does and answers Kept
 either way, with the text saying how many changes it would apply. It applies
@@ -88,8 +95,12 @@ the environment. This engine names none of them, so a module of any provider
 runs through it unchanged. Terraform reads them at plan time and this manager
 never writes them to state, actions or logs.
 
-Two honest limits. The apply plans again rather than applying the plan the
+Three honest limits. The apply plans again rather than applying the plan the
 manager read, so the count in a Did line comes from the earlier plan and a
-change landing between the two is applied without being counted. And a forced
+change landing between the two is applied without being counted. A forced
 run over a plan holding nothing to change says it applied zero planned
-changes, which counts the plan rather than naming what the apply did.
+changes, which counts the plan rather than naming what the apply did. And the
+count is one per planned change, so a replace counts once where terraform's
+own summary counts one add plus one destroy. The Did line and the dry run
+line both say so, because the two numbers sit side by side in a log and a
+reader would otherwise read the difference as a bug.

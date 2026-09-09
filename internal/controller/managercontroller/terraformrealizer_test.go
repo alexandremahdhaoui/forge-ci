@@ -2,6 +2,7 @@ package managercontroller_test
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	tfjson "github.com/hashicorp/terraform-json"
@@ -47,6 +48,18 @@ func planOf(actions ...tfjson.Actions) *tfjson.Plan {
 	}
 
 	return plan
+}
+
+const countedNote = ", counted one per planned change where terraform's own summary counts a replace as two"
+
+func appliedText(changes int) string {
+	return fmt.Sprintf(
+		"applied %d planned changes to the root module at %s%s", changes, theModuleDir, countedNote)
+}
+
+func wouldApplyText(changes int) string {
+	return fmt.Sprintf(
+		"would apply %d planned changes to the root module at %s%s", changes, theModuleDir, countedNote)
 }
 
 func planOfChanges(changes ...*tfjson.Change) *tfjson.Plan {
@@ -110,7 +123,7 @@ func TestTheTerraformRealizerRefusesToWorkWithNoTerraformBehindIt(t *testing.T) 
 
 	_, err := r.Realize(rootModule(), plain)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "planning the root module at "+theModuleDir)
+	assert.Contains(t, err.Error(), "initializing the root module at "+theModuleDir)
 	assert.Contains(t, err.Error(), "carries no terraform yet")
 }
 
@@ -148,7 +161,7 @@ func TestTheTerraformRealizerAppliesARootModuleWhosePlanHoldsARealChange(t *test
 
 	action, err := r.Realize(rootModule(), plain)
 	require.NoError(t, err)
-	assert.Equal(t, "applied 1 planned changes to the root module at "+theModuleDir, action.Text)
+	assert.Equal(t, appliedText(1), action.Text)
 	assert.True(t, action.Changed)
 }
 
@@ -161,7 +174,7 @@ func TestTheTerraformRealizerAppliesAResourceTerraformWillReplace(t *testing.T) 
 
 	action, err := r.Realize(rootModule(), plain)
 	require.NoError(t, err)
-	assert.Equal(t, "applied 1 planned changes to the root module at "+theModuleDir, action.Text)
+	assert.Equal(t, appliedText(1), action.Text)
 	assert.True(t, action.Changed)
 }
 
@@ -174,7 +187,7 @@ func TestTheTerraformRealizerAppliesAResourceTerraformWillDestroy(t *testing.T) 
 
 	action, err := r.Realize(rootModule(), plain)
 	require.NoError(t, err)
-	assert.Equal(t, "applied 1 planned changes to the root module at "+theModuleDir, action.Text)
+	assert.Equal(t, appliedText(1), action.Text)
 	assert.True(t, action.Changed)
 }
 
@@ -187,7 +200,7 @@ func TestTheTerraformRealizerAppliesAResourceTerraformWillForget(t *testing.T) {
 
 	action, err := r.Realize(rootModule(), plain)
 	require.NoError(t, err)
-	assert.Equal(t, "applied 1 planned changes to the root module at "+theModuleDir, action.Text)
+	assert.Equal(t, appliedText(1), action.Text)
 	assert.True(t, action.Changed)
 }
 
@@ -202,34 +215,34 @@ func TestTheTerraformRealizerAppliesAnImportOfAResourceThatAlreadyMatchesTheModu
 
 	action, err := r.Realize(rootModule(), plain)
 	require.NoError(t, err)
-	assert.Equal(t, "applied 1 planned changes to the root module at "+theModuleDir, action.Text)
+	assert.Equal(t, appliedText(1), action.Text)
 	assert.True(t, action.Changed)
 }
 
-func TestTheTerraformRealizerKeepsARootModuleWhosePlanOnlyReadsADataSource(t *testing.T) {
+func TestTheTerraformRealizerAppliesAPlanThatOnlyReadsADataSource(t *testing.T) {
 	r, terraform := terraformRealizer(t)
 	terraform.EXPECT().Init(mock.Anything, theModuleDir).Return(nil)
-	terraform.EXPECT().Plan(mock.Anything, theModuleDir).Return(reportsNone,
+	terraform.EXPECT().Plan(mock.Anything, theModuleDir).Return(reportsChanges,
 		planOf(tfjson.Actions{tfjson.ActionRead}, tfjson.Actions{tfjson.ActionNoop}), nil)
+	terraform.EXPECT().Apply(mock.Anything, theModuleDir).Return(nil)
 
 	action, err := r.Realize(rootModule(), plain)
 	require.NoError(t, err)
-	assert.Equal(t, "kept the root module at "+theModuleDir, action.Text)
-	assert.False(t, action.Changed)
-	terraform.AssertNotCalled(t, "Apply", mock.Anything, mock.Anything)
+	assert.Equal(t, appliedText(1), action.Text)
+	assert.True(t, action.Changed)
 }
 
 func TestTheTerraformRealizerRefusesAPlanWhoseExitCodeSaysThereIsWorkAndWhoseDocumentHoldsNone(t *testing.T) {
 	r, terraform := terraformRealizer(t)
 	terraform.EXPECT().Init(mock.Anything, theModuleDir).Return(nil)
 	terraform.EXPECT().Plan(mock.Anything, theModuleDir).Return(reportsChanges,
-		planOf(tfjson.Actions{tfjson.ActionNoop}, tfjson.Actions{tfjson.ActionRead}), nil)
+		planOf(tfjson.Actions{tfjson.ActionNoop}, tfjson.Actions{tfjson.ActionNoop}), nil)
 
 	_, err := r.Realize(rootModule(), plain)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "planning the root module at "+theModuleDir)
 	assert.Contains(t, err.Error(), "terraform reported changes and the plan document counts 0")
-	assert.Contains(t, err.Error(), "naming no-op and read")
+	assert.Contains(t, err.Error(), "naming no-op")
 	assert.Contains(t, err.Error(), "refuses a plan its two answers do not agree on")
 	terraform.AssertNotCalled(t, "Apply", mock.Anything, mock.Anything)
 }
@@ -271,6 +284,71 @@ func TestARefusedPlanHoldingNoChangeAtAllSaysSo(t *testing.T) {
 	assert.Contains(t, err.Error(), "naming no change at all")
 }
 
+func TestTheTerraformRealizerRefusesAnActionItDoesNotKnowByName(t *testing.T) {
+	r, terraform := terraformRealizer(t)
+	terraform.EXPECT().Init(mock.Anything, theModuleDir).Return(nil)
+	terraform.EXPECT().Plan(mock.Anything, theModuleDir).Return(reportsChanges,
+		planOf(tfjson.Actions{tfjson.Action("move")}), nil)
+
+	_, err := r.Realize(rootModule(), plain)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "planning the root module at "+theModuleDir)
+	assert.Contains(t, err.Error(), `terraform answered actions this manager does not know`)
+	assert.Contains(t, err.Error(), `aws_route53_record.home holds "move"`)
+	assert.Contains(t, err.Error(), "it knows no-op, create, read, update, delete, forget")
+	terraform.AssertNotCalled(t, "Apply", mock.Anything, mock.Anything)
+}
+
+func TestTheTerraformRealizerRefusesAChangeCarryingAnEmptyActionList(t *testing.T) {
+	r, terraform := terraformRealizer(t)
+	terraform.EXPECT().Init(mock.Anything, theModuleDir).Return(nil)
+	terraform.EXPECT().Plan(mock.Anything, theModuleDir).Return(reportsChanges,
+		planOf(tfjson.Actions{}), nil)
+
+	_, err := r.Realize(rootModule(), plain)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "aws_route53_record.home holds an empty action list")
+	terraform.AssertNotCalled(t, "Apply", mock.Anything, mock.Anything)
+}
+
+func TestTheTerraformRealizerRefusesAnUnknownActionOnAnOutputByName(t *testing.T) {
+	r, terraform := terraformRealizer(t)
+	plan := &tfjson.Plan{OutputChanges: map[string]*tfjson.Change{
+		"address": {Actions: tfjson.Actions{tfjson.Action("rename")}},
+	}}
+	terraform.EXPECT().Init(mock.Anything, theModuleDir).Return(nil)
+	terraform.EXPECT().Plan(mock.Anything, theModuleDir).Return(reportsChanges, plan, nil)
+
+	_, err := r.Realize(rootModule(), plain)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `output address holds "rename"`)
+	terraform.AssertNotCalled(t, "Apply", mock.Anything, mock.Anything)
+}
+
+func TestAnUnknownActionIsRefusedBeforeTheTwoAnswersAreCompared(t *testing.T) {
+	r, terraform := terraformRealizer(t)
+	terraform.EXPECT().Init(mock.Anything, theModuleDir).Return(nil)
+	terraform.EXPECT().Plan(mock.Anything, theModuleDir).Return(reportsNone,
+		planOf(tfjson.Actions{tfjson.Action("move")}), nil)
+
+	_, err := r.Realize(rootModule(), plain)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "does not know")
+	assert.NotContains(t, err.Error(), "do not agree")
+}
+
+func TestForceStillRefusesAnActionTheManagerDoesNotKnow(t *testing.T) {
+	r, terraform := terraformRealizer(t)
+	terraform.EXPECT().Init(mock.Anything, theModuleDir).Return(nil)
+	terraform.EXPECT().Plan(mock.Anything, theModuleDir).Return(reportsNone,
+		planOf(tfjson.Actions{}), nil)
+
+	_, err := r.Realize(rootModule(), managercontroller.Options{Force: true})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "does not know")
+	terraform.AssertNotCalled(t, "Apply", mock.Anything, mock.Anything)
+}
+
 func TestTheTerraformRealizerRefusesAPlanTerraformCouldNotComplete(t *testing.T) {
 	r, terraform := terraformRealizer(t)
 	incomplete := false
@@ -287,7 +365,23 @@ func TestTheTerraformRealizerRefusesAPlanTerraformCouldNotComplete(t *testing.T)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "planning the root module at "+theModuleDir)
 	assert.Contains(t, err.Error(), "incomplete plan holding 2 deferred changes")
+	assert.Contains(t, err.Error(), "naming provider_config_unknown and resource_config_unknown")
 	terraform.AssertNotCalled(t, "Apply", mock.Anything, mock.Anything)
+}
+
+func TestARefusedIncompletePlanNamesADeferredChangeThatCarriesNoReason(t *testing.T) {
+	r, terraform := terraformRealizer(t)
+	incomplete := false
+	plan := planOf(tfjson.Actions{tfjson.ActionNoop})
+	plan.Complete = &incomplete
+	plan.DeferredChanges = []*tfjson.DeferredResourceChange{{}}
+	terraform.EXPECT().Init(mock.Anything, theModuleDir).Return(nil)
+	terraform.EXPECT().Plan(mock.Anything, theModuleDir).Return(reportsChanges, plan, nil)
+
+	_, err := r.Realize(rootModule(), plain)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "incomplete plan holding 1 deferred changes")
+	assert.Contains(t, err.Error(), "naming an unnamed reason")
 }
 
 func TestAnIncompletePlanIsRefusedBeforeTheTwoAnswersAreCompared(t *testing.T) {
@@ -300,7 +394,7 @@ func TestAnIncompletePlanIsRefusedBeforeTheTwoAnswersAreCompared(t *testing.T) {
 
 	_, err := r.Realize(rootModule(), plain)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "incomplete plan holding 0 deferred changes")
+	assert.Contains(t, err.Error(), "incomplete plan holding 0 deferred changes, naming no reason")
 	assert.NotContains(t, err.Error(), "do not agree")
 }
 
@@ -330,7 +424,7 @@ func TestTheTerraformRealizerCountsAnOutputChangeAsARealChange(t *testing.T) {
 
 	action, err := r.Realize(rootModule(), plain)
 	require.NoError(t, err)
-	assert.Equal(t, "applied 1 planned changes to the root module at "+theModuleDir, action.Text)
+	assert.Equal(t, appliedText(1), action.Text)
 	assert.True(t, action.Changed)
 }
 
@@ -391,8 +485,7 @@ func TestADryRunPlansTheRootModuleAndAppliesNothing(t *testing.T) {
 
 	action, err := r.Realize(rootModule(), managercontroller.Options{DryRun: true})
 	require.NoError(t, err)
-	assert.Equal(t,
-		"would apply 1 planned changes to the root module at "+theModuleDir, action.Text)
+	assert.Equal(t, wouldApplyText(1), action.Text)
 	assert.False(t, action.Changed)
 	terraform.AssertNotCalled(t, "Apply", mock.Anything, mock.Anything)
 }
@@ -430,7 +523,7 @@ func TestForceAppliesARootModuleWhosePlanHoldsNothingToChange(t *testing.T) {
 
 	action, err := r.Realize(rootModule(), managercontroller.Options{Force: true})
 	require.NoError(t, err)
-	assert.Equal(t, "applied 0 planned changes to the root module at "+theModuleDir, action.Text)
+	assert.Equal(t, appliedText(0), action.Text)
 	assert.True(t, action.Changed)
 }
 
@@ -454,8 +547,7 @@ func TestForceInADryRunStillAppliesNothing(t *testing.T) {
 
 	action, err := r.Realize(rootModule(), managercontroller.Options{DryRun: true, Force: true})
 	require.NoError(t, err)
-	assert.Equal(t,
-		"would apply 0 planned changes to the root module at "+theModuleDir, action.Text)
+	assert.Equal(t, wouldApplyText(0), action.Text)
 	assert.False(t, action.Changed)
 	terraform.AssertNotCalled(t, "Apply", mock.Anything, mock.Anything)
 }
