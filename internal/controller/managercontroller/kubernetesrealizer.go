@@ -187,7 +187,8 @@ func declaredData(spec map[string]any, id string) (map[string][]byte, error) {
 
 		if value == "" {
 			return nil, fmt.Errorf(
-				"reading %s for key %q of secret %s: the variable is empty", variable, key, id)
+				"reading the data of secret %s: the environment variable named by key %q is unset or empty",
+				id, key)
 		}
 
 		data[key] = []byte(value)

@@ -24,6 +24,10 @@ const (
 	identityVariable  = "FORGE_CI_TEST_FLUX_IDENTITY"
 	knownHostVariable = "FORGE_CI_TEST_FLUX_KNOWN_HOSTS"
 
+	thePastedPrivateKey = "-----BEGIN OPENSSH PRIVATE KEY-----\n" +
+		"b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtz\n" +
+		"-----END OPENSSH PRIVATE KEY-----\n"
+
 	found    = true
 	notFound = false
 )
@@ -250,8 +254,23 @@ func TestTheKubernetesRealizerRefusesAKeyWhoseVariableIsEmpty(t *testing.T) {
 
 	_, err := r.Realize(oneKey(t, ""), plain)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(),
-		"reading "+identityVariable+` for key "identity" of secret `+theSecretID+": the variable is empty")
+	assert.Contains(t, err.Error(), "reading the data of secret "+theSecretID+
+		`: the environment variable named by key "identity" is unset or empty`)
+	assert.NotContains(t, err.Error(), identityVariable)
+}
+
+func TestTheKubernetesRealizerNeverEchoesAPastedSecretBackOutOfItsRefusal(t *testing.T) {
+	t.Parallel()
+
+	r := managercontroller.NewKubernetesRealizer(t.Context(), nil)
+
+	_, err := r.Realize(declaredSecret(map[string]any{"identity": thePastedPrivateKey}), plain)
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), thePastedPrivateKey)
+	assert.NotContains(t, err.Error(), "BEGIN OPENSSH PRIVATE KEY")
+	assert.NotContains(t, err.Error(), "b3BlbnNzaC1rZXktdjEAAAAABG5vbmU")
+	assert.Contains(t, err.Error(), "reading the data of secret "+theSecretID+
+		`: the environment variable named by key "identity" is unset or empty`)
 }
 
 func TestTheKubernetesRealizerRefusesToWorkWithNoClusterBehindIt(t *testing.T) {

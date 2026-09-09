@@ -47,9 +47,13 @@ environment variable holding its value, never to the value itself, so a
 declaration is safe to commit and the values enter through the environment of
 one run.
 
-A key whose variable is unset or empty is an error naming the variable and
-the key. A declaration carrying no `spec.data`, an empty map, a key with no
-name, and a key naming no variable are each an error naming what was seen.
+A key whose variable is unset or empty is an error naming the secret and the
+key. It never names the variable, because a person who pastes a value into
+`spec.data` by mistake pastes it where the variable name belongs, and echoing
+it would put the secret in the pipeline log. The key names the declaration, so
+it is enough to find the line to fix. A declaration carrying no `spec.data`, an
+empty map, a key with no name, and a key naming no variable are each an error
+naming the secret and the key.
 
 Kept or Did comes from one truncated hash. The manager takes SHA-256 over
 every key and its value, both length prefixed and in sorted order, keeps the
@@ -67,8 +71,9 @@ is kept, so a label or an annotation someone else wrote survives.
 
 A dry run reads the live secret exactly as a real run does and answers Kept
 either way, with the text saying what it would write and which keys it would
-carry. It writes nothing. The key names travel into an action line and the
-values never do.
+carry. It writes nothing. The key names travel into an action line and into
+every refusal. A declared value never travels into either one, whether it is
+the name of a variable or a secret somebody pasted where that name belongs.
 
 Force writes even when the annotation matches. Only a human asks for it, and
 it is the way to restore a secret someone edited in the cluster.
