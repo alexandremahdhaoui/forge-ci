@@ -121,7 +121,9 @@ func (r TalosRealizer) talosconfigFor(spec map[string]any) (string, error) {
 
 	path = os.Getenv(name)
 	if path == "" {
-		return "", fmt.Errorf("reading %s for the client configuration path: the variable is empty", name)
+		return "", errors.New(
+			"reading the client configuration path: spec.talosconfigEnv or the manager's talosconfigEnv " +
+				"must hold the name of an environment variable, and no variable of that name is set")
 	}
 
 	return path, nil

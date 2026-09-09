@@ -310,8 +310,24 @@ func TestTheTalosRealizerRefusesAnEmptyClientConfigurationVariable(t *testing.T)
 
 	_, err := r.Realize(machineConfig(controlplane), plain)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "reading "+talosconfigVariable)
-	assert.Contains(t, err.Error(), "the variable is empty")
+	assert.Equal(t,
+		"reading the client configuration path: spec.talosconfigEnv or the manager's talosconfigEnv "+
+			"must hold the name of an environment variable, and no variable of that name is set",
+		err.Error())
+	assert.NotContains(t, err.Error(), talosconfigVariable)
+}
+
+func TestTheTalosRealizerNeverEchoesASecretPastedIntoTheClientConfigurationVariableSlot(t *testing.T) {
+	r := managercontroller.NewTalosRealizer(t.Context(), managercontrollermock.NewMockTalos(t), "")
+
+	res := machineConfig(controlplane)
+	res.Spec["talosconfigEnv"] = thePastedPrivateKey
+
+	_, err := r.Realize(res, plain)
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), thePastedPrivateKey)
+	assert.NotContains(t, err.Error(), "BEGIN OPENSSH PRIVATE KEY")
+	assert.Contains(t, err.Error(), "spec.talosconfigEnv")
 }
 
 func TestTheTalosRealizerReadsTheClientConfigurationPathFromTheResource(t *testing.T) {

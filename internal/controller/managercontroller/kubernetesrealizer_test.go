@@ -255,8 +255,24 @@ func TestTheKubernetesRealizerRefusesAKeyWhoseVariableIsEmpty(t *testing.T) {
 	_, err := r.Realize(oneKey(t, ""), plain)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "reading the data of secret "+theSecretID+
-		`: the environment variable named by key "identity" is unset or empty`)
+		`: key "identity" must hold the name of an environment variable, `+
+		"and no variable of that name is set")
 	assert.NotContains(t, err.Error(), identityVariable)
+}
+
+func TestSayingTheKeyMustHoldAVariableNameSeparatesAPastedSecretFromAnUnsetVariable(t *testing.T) {
+	r := managercontroller.NewKubernetesRealizer(t.Context(), nil)
+
+	_, pasted := r.Realize(declaredSecret(map[string]any{"identity": thePastedPrivateKey}), plain)
+	require.Error(t, pasted)
+
+	_, unset := r.Realize(oneKey(t, ""), plain)
+	require.Error(t, unset)
+
+	assert.Equal(t, pasted.Error(), unset.Error(),
+		"one message serves both, so it must never send an operator hunting for a variable")
+	assert.Contains(t, pasted.Error(), "must hold the name of an environment variable",
+		"the message says the key is read as a name, which is how a pasted value is recognised")
 }
 
 func TestTheKubernetesRealizerNeverEchoesAPastedSecretBackOutOfItsRefusal(t *testing.T) {
@@ -270,7 +286,8 @@ func TestTheKubernetesRealizerNeverEchoesAPastedSecretBackOutOfItsRefusal(t *tes
 	assert.NotContains(t, err.Error(), "BEGIN OPENSSH PRIVATE KEY")
 	assert.NotContains(t, err.Error(), "b3BlbnNzaC1rZXktdjEAAAAABG5vbmU")
 	assert.Contains(t, err.Error(), "reading the data of secret "+theSecretID+
-		`: the environment variable named by key "identity" is unset or empty`)
+		`: key "identity" must hold the name of an environment variable, `+
+		"and no variable of that name is set")
 }
 
 func TestTheKubernetesRealizerRefusesToWorkWithNoClusterBehindIt(t *testing.T) {
@@ -324,6 +341,38 @@ func TestTheKubernetesRealizerCreatesASecretTheClusterDoesNotHold(t *testing.T) 
 		map[string][]byte{"identity": []byte("a key"), "known_hosts": []byte("a host")}, written.Data)
 	assert.NotEmpty(t, written.Annotations[managercontroller.SecretHashAnnotation])
 	cluster.AssertNotCalled(t, "ReplaceSecret", mock.Anything, mock.Anything)
+}
+
+func TestNoActionLineOfTheKubernetesRealizerEverCarriesADeclaredValue(t *testing.T) {
+	r, cluster := kubernetesRealizer(t)
+
+	cluster.EXPECT().Secret(mock.Anything, theNamespace, theSecretName).Return(nil, notFound, nil).Once()
+	cluster.EXPECT().CreateSecret(mock.Anything, mock.Anything).Return(nil).Once()
+
+	created, err := r.Realize(oneKey(t, thePastedPrivateKey), plain)
+	require.NoError(t, err)
+
+	live := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{
+		Namespace:   theNamespace,
+		Name:        theSecretName,
+		Annotations: map[string]string{managercontroller.SecretHashAnnotation: "something else"},
+	}}
+
+	cluster.EXPECT().Secret(mock.Anything, theNamespace, theSecretName).Return(live, found, nil).Twice()
+	cluster.EXPECT().ReplaceSecret(mock.Anything, mock.Anything).Return(nil).Once()
+
+	replaced, err := r.Realize(oneKey(t, thePastedPrivateKey), plain)
+	require.NoError(t, err)
+
+	dry, err := r.Realize(oneKey(t, thePastedPrivateKey), managercontroller.Options{DryRun: true})
+	require.NoError(t, err)
+
+	for _, text := range []string{created.Text, replaced.Text, dry.Text} {
+		assert.NotContains(t, text, thePastedPrivateKey)
+		assert.NotContains(t, text, "BEGIN OPENSSH PRIVATE KEY")
+		assert.NotContains(t, text, identityVariable)
+		assert.Contains(t, text, "identity")
+	}
 }
 
 func TestTheHashACreateWritesIsTwelveCharactersLong(t *testing.T) {

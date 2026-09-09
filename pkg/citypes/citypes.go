@@ -1,7 +1,10 @@
 package citypes
 
 import (
+	"maps"
 	"regexp"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/alexandremahdhaoui/forge/pkg/forge"
@@ -66,6 +69,24 @@ type Resource struct {
 
 func (r Resource) ID() string {
 	return r.Kind + "/" + r.Name
+}
+
+func (r Resource) String() string {
+	kind := r.Kind
+	if kind == "" {
+		kind = "<no kind>"
+	}
+
+	name := r.Name
+	if name == "" {
+		name = "<no name>"
+	}
+
+	if len(r.Spec) == 0 {
+		return kind + "/" + name + " holding no spec"
+	}
+
+	return kind + "/" + name + " holding spec keys " + strings.Join(slices.Sorted(maps.Keys(r.Spec)), ", ")
 }
 
 type Ownership struct {

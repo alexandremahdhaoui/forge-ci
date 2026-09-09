@@ -112,6 +112,27 @@ func TestResourceNeedsKindAndName(t *testing.T) {
 	require.Contains(t, err.Error(), "needs a kind and a name")
 }
 
+func TestTheRefusalOfAMalformedResourceNeverEchoesASpecValue(t *testing.T) {
+	_, err := local(t).Reconcile(citypes.ReconcileInput{
+		Manager: "local",
+		Resources: []citypes.Resource{{
+			Kind: "secret",
+			Spec: map[string]any{
+				"namespace": "flux-system",
+				"name":      "flux-deploy-key",
+				"data":      map[string]any{"identity": thePastedPrivateKey},
+			},
+		}},
+	})
+	require.Error(t, err)
+	require.NotContains(t, err.Error(), thePastedPrivateKey)
+	require.NotContains(t, err.Error(), "BEGIN OPENSSH PRIVATE KEY")
+	require.Equal(t,
+		"reconciling: resource needs a kind and a name, "+
+			"got secret/<no name> holding spec keys data, name, namespace",
+		err.Error())
+}
+
 func TestManagerAliasIsRequired(t *testing.T) {
 	_, err := local(t).Reconcile(citypes.ReconcileInput{})
 	require.Error(t, err)

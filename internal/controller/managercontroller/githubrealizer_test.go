@@ -109,7 +109,8 @@ func TestGitHubRealizerSealsASecret(t *testing.T) {
 		Spec: map[string]any{"repo": "o/r", "secret": "FORGE_CI_GITHUB_TOKEN", "fromEnv": "TEST_SECRET_SOURCE"},
 	}, plain)
 	require.NoError(t, err)
-	assert.Equal(t, "sealed secret FORGE_CI_GITHUB_TOKEN on o/r from $TEST_SECRET_SOURCE", action.Text)
+	assert.Equal(t,
+		"sealed secret FORGE_CI_GITHUB_TOKEN on o/r from the variable spec.fromEnv names", action.Text)
 	assert.True(t, action.Changed, "the secret did not exist, so this created one")
 }
 
@@ -179,7 +180,40 @@ func TestGitHubRealizerRefusesAnEmptySecretSource(t *testing.T) {
 		Name: "o/r/S",
 		Spec: map[string]any{"repo": "o/r", "secret": "S", "fromEnv": "EMPTY_SOURCE"},
 	}, plain)
-	require.ErrorContains(t, err, "EMPTY_SOURCE is empty")
+	require.ErrorContains(t, err,
+		"reading secret S on o/r: spec.fromEnv must hold the name of an environment variable, "+
+			"and no variable of that name is set")
+}
+
+func TestTheGitHubRealizerNeverEchoesASecretPastedIntoSpecFromEnvBackOutOfItsRefusal(t *testing.T) {
+	r, api := githubRealizer(t)
+	api.EXPECT().SecretExists(mock.Anything, "o/r", "S").Return(false, nil)
+
+	_, err := r.Realize(citypes.Resource{
+		Kind: managercontroller.KindActionsSecret,
+		Name: "o/r/S",
+		Spec: map[string]any{"repo": "o/r", "secret": "S", "fromEnv": thePastedPrivateKey},
+	}, plain)
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), thePastedPrivateKey)
+	assert.Contains(t, err.Error(), "spec.fromEnv")
+}
+
+func TestADryRunActionLineNeverEchoesASecretPastedIntoSpecFromEnv(t *testing.T) {
+	t.Setenv(thePastedPrivateKey, "whatever the variable holds")
+
+	r, api := githubRealizer(t)
+	api.EXPECT().SecretExists(mock.Anything, "o/r", "S").Return(false, nil)
+
+	action, err := r.Realize(citypes.Resource{
+		Kind: managercontroller.KindActionsSecret,
+		Name: "o/r/S",
+		Spec: map[string]any{"repo": "o/r", "secret": "S", "fromEnv": thePastedPrivateKey},
+	}, managercontroller.Options{DryRun: true})
+	require.NoError(t, err)
+	assert.NotContains(t, action.Text, thePastedPrivateKey)
+	assert.Equal(t,
+		"would seal secret S on o/r from the variable spec.fromEnv names", action.Text)
 }
 
 // Keeping an existing secret needs no value: the state is read first, and
@@ -203,7 +237,7 @@ func TestGitHubRealizerKeepsAnExistingSecretWithoutTheEnv(t *testing.T) {
 }
 
 func TestGitHubRealizerSecretDefaultsToGithubToken(t *testing.T) {
-	pub, _, err := box.GenerateKey(rand.Reader)
+	pub, priv, err := box.GenerateKey(rand.Reader)
 	require.NoError(t, err)
 
 	t.Setenv("GITHUB_TOKEN", "pat")
@@ -212,7 +246,18 @@ func TestGitHubRealizerSecretDefaultsToGithubToken(t *testing.T) {
 	api.EXPECT().SecretExists(mock.Anything, "o/r", "S").Return(false, nil)
 	api.EXPECT().PublicKey(mock.Anything, "o/r").
 		Return("k1", base64.StdEncoding.EncodeToString(pub[:]), nil)
-	api.EXPECT().PutSecret(mock.Anything, "o/r", "S", "k1", mock.Anything).Return(nil)
+	api.EXPECT().PutSecret(mock.Anything, "o/r", "S", "k1", mock.Anything).
+		RunAndReturn(func(_ context.Context, _, _, _ string, sealedB64 string) error {
+			raw, err := base64.StdEncoding.DecodeString(sealedB64)
+			require.NoError(t, err)
+
+			opened, ok := box.OpenAnonymous(nil, raw, pub, priv)
+			require.True(t, ok)
+			assert.Equal(t, "pat", string(opened),
+				"a declaration naming no variable reads GITHUB_TOKEN")
+
+			return nil
+		})
 
 	action, err := r.Realize(citypes.Resource{
 		Kind: managercontroller.KindActionsSecret,
@@ -220,7 +265,7 @@ func TestGitHubRealizerSecretDefaultsToGithubToken(t *testing.T) {
 		Spec: map[string]any{"repo": "o/r", "secret": "S"},
 	}, plain)
 	require.NoError(t, err)
-	assert.Contains(t, action.Text, "from $GITHUB_TOKEN")
+	assert.Equal(t, "sealed secret S on o/r from the variable spec.fromEnv names", action.Text)
 }
 
 func TestGitHubRealizerEnablesAWorkflow(t *testing.T) {

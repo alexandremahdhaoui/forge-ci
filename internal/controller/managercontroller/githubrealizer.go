@@ -30,6 +30,8 @@ const (
 	KindWorkflowEnabled = "workflow-enabled"
 )
 
+const fromDeclaredVariable = " from the variable spec.fromEnv names"
+
 // GitHubRealizer realizes the GitHub-side kinds: converged files on the
 // local checkout, sealed Actions secrets and workflow enablement through
 // the API.
@@ -158,10 +160,12 @@ func (r GitHubRealizer) realizeSecret(res citypes.Resource, opts Options) (Actio
 	value := os.Getenv(fromEnv)
 	if value == "" {
 		return Action{}, fmt.Errorf(
-			"environment variable %s is empty; export it (.envrc) before bootstrapping", fromEnv)
+			"reading secret %s on %s: spec.fromEnv must hold the name of an environment variable, "+
+				"and no variable of that name is set. export it in .envrc before bootstrapping",
+			secret, repo)
 	}
 
-	text := fmt.Sprintf("seal secret %s on %s from $%s", secret, repo, fromEnv)
+	text := "seal secret " + secret + " on " + repo + fromDeclaredVariable
 	if opts.DryRun {
 		return Did(opts.would(text)), nil
 	}
@@ -181,10 +185,10 @@ func (r GitHubRealizer) realizeSecret(res citypes.Resource, opts Options) (Actio
 	}
 
 	if existed {
-		return Did(fmt.Sprintf("rotated secret %s on %s from $%s", secret, repo, fromEnv)), nil
+		return Did("rotated secret " + secret + " on " + repo + fromDeclaredVariable), nil
 	}
 
-	return Did(fmt.Sprintf("sealed secret %s on %s from $%s", secret, repo, fromEnv)), nil
+	return Did("sealed secret " + secret + " on " + repo + fromDeclaredVariable), nil
 }
 
 // explainSecretsDenial names the one failure of the secrets API worth

@@ -53,7 +53,7 @@ key. It never names the variable, because a person who pastes a value into
 it would put the secret in the pipeline log. The key names the declaration, so
 it is enough to find the line to fix. A declaration carrying no `spec.data`, an
 empty map, a key with no name, and a key naming no variable are each an error
-naming the secret and the key.
+naming what was seen.
 
 Kept or Did comes from one truncated hash. The manager takes SHA-256 over
 every key and its value, both length prefixed and in sorted order, keeps the
