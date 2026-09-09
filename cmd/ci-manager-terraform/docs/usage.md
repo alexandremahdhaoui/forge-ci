@@ -49,9 +49,18 @@ Kept means the provider already holds what the module declares. The manager
 initializes the directory, plans it, and reads the plan as json. A plan whose
 every resource change and every output change is a no-op is Kept, which
 covers both the plan that reports no changes at all and the plan that reports
-changes and then holds none. Did means the plan held a real change and the
-apply closed it. A failed init, a failed plan or a failed apply is an error
-naming the action and the directory.
+changes and then holds none. A change terraform reads rather than writes is a
+no-op too, so a data source terraform could not resolve at plan time is Kept
+and never an endless Did. Did means the plan held a real change and the apply
+closed it. A pending import is a real change even when the resource already
+matches the module, because the state gains it and a second run then reads
+the same import again. A failed init, a failed plan or a failed apply is an
+error naming the action and the directory.
+
+A plan terraform could not complete is an error naming the number of deferred
+changes. Terraform reports the completeness of a plan since 1.8, and a plan
+that defers work carries real work in a list this manager does not apply, so
+answering Kept over it would report a converged module that is not converged.
 
 A dry run initializes and plans exactly as a real run does and answers Kept
 either way, with the text saying how many changes it would apply. It applies
@@ -64,5 +73,12 @@ There is no delete path. A module dropped from a declaration stays as it is.
 It refuses a resource recorded as owned by a different manager.
 
 The credential terraform needs is whatever the module's providers read from
-the environment. It is read by terraform at plan time and never written to
-state, actions or logs.
+the environment. This engine names none of them, so a module of any provider
+runs through it unchanged. Terraform reads them at plan time and this manager
+never writes them to state, actions or logs.
+
+Two honest limits. The apply plans again rather than applying the plan the
+manager read, so the count in a Did line comes from the earlier plan and a
+change landing between the two is applied without being counted. And a forced
+run over a plan holding nothing to change says it applied zero planned
+changes, which counts the plan rather than naming what the apply did.

@@ -44,6 +44,18 @@ func planOf(actions ...tfjson.Actions) *tfjson.Plan {
 	return plan
 }
 
+func planOfChanges(changes ...*tfjson.Change) *tfjson.Plan {
+	plan := &tfjson.Plan{}
+	for _, change := range changes {
+		plan.ResourceChanges = append(plan.ResourceChanges, &tfjson.ResourceChange{
+			Address: "aws_route53_record.home",
+			Change:  change,
+		})
+	}
+
+	return plan
+}
+
 func TestTheTerraformRealizerNamesItselfTerraform(t *testing.T) {
 	t.Parallel()
 
@@ -132,6 +144,93 @@ func TestTheTerraformRealizerAppliesARootModuleWhosePlanHoldsARealChange(t *test
 	action, err := r.Realize(rootModule(), plain)
 	require.NoError(t, err)
 	assert.Equal(t, "applied 1 planned changes to the root module at "+theModuleDir, action.Text)
+	assert.True(t, action.Changed)
+}
+
+func TestTheTerraformRealizerAppliesAResourceTerraformWillReplace(t *testing.T) {
+	r, terraform := terraformRealizer(t)
+	terraform.EXPECT().Init(mock.Anything, theModuleDir).Return(nil)
+	terraform.EXPECT().Plan(mock.Anything, theModuleDir).
+		Return(planOf(tfjson.Actions{tfjson.ActionDelete, tfjson.ActionCreate}), nil)
+	terraform.EXPECT().Apply(mock.Anything, theModuleDir).Return(nil)
+
+	action, err := r.Realize(rootModule(), plain)
+	require.NoError(t, err)
+	assert.Equal(t, "applied 1 planned changes to the root module at "+theModuleDir, action.Text)
+	assert.True(t, action.Changed)
+}
+
+func TestTheTerraformRealizerAppliesAResourceTerraformWillDestroy(t *testing.T) {
+	r, terraform := terraformRealizer(t)
+	terraform.EXPECT().Init(mock.Anything, theModuleDir).Return(nil)
+	terraform.EXPECT().Plan(mock.Anything, theModuleDir).
+		Return(planOf(tfjson.Actions{tfjson.ActionDelete}), nil)
+	terraform.EXPECT().Apply(mock.Anything, theModuleDir).Return(nil)
+
+	action, err := r.Realize(rootModule(), plain)
+	require.NoError(t, err)
+	assert.Equal(t, "applied 1 planned changes to the root module at "+theModuleDir, action.Text)
+	assert.True(t, action.Changed)
+}
+
+func TestTheTerraformRealizerAppliesAnImportOfAResourceThatAlreadyMatchesTheModule(t *testing.T) {
+	r, terraform := terraformRealizer(t)
+	terraform.EXPECT().Init(mock.Anything, theModuleDir).Return(nil)
+	terraform.EXPECT().Plan(mock.Anything, theModuleDir).Return(planOfChanges(&tfjson.Change{
+		Actions:   tfjson.Actions{tfjson.ActionNoop},
+		Importing: &tfjson.Importing{ID: "Z1234/home.songe.example/A"},
+	}), nil)
+	terraform.EXPECT().Apply(mock.Anything, theModuleDir).Return(nil)
+
+	action, err := r.Realize(rootModule(), plain)
+	require.NoError(t, err)
+	assert.Equal(t, "applied 1 planned changes to the root module at "+theModuleDir, action.Text)
+	assert.True(t, action.Changed)
+}
+
+func TestTheTerraformRealizerKeepsARootModuleWhosePlanOnlyReadsADataSource(t *testing.T) {
+	r, terraform := terraformRealizer(t)
+	terraform.EXPECT().Init(mock.Anything, theModuleDir).Return(nil)
+	terraform.EXPECT().Plan(mock.Anything, theModuleDir).
+		Return(planOf(tfjson.Actions{tfjson.ActionRead}, tfjson.Actions{tfjson.ActionNoop}), nil)
+
+	action, err := r.Realize(rootModule(), plain)
+	require.NoError(t, err)
+	assert.Equal(t, "kept the root module at "+theModuleDir, action.Text)
+	assert.False(t, action.Changed)
+	terraform.AssertNotCalled(t, "Apply", mock.Anything, mock.Anything)
+}
+
+func TestTheTerraformRealizerRefusesAPlanTerraformCouldNotComplete(t *testing.T) {
+	r, terraform := terraformRealizer(t)
+	incomplete := false
+	plan := planOf(tfjson.Actions{tfjson.ActionNoop})
+	plan.Complete = &incomplete
+	plan.DeferredChanges = []*tfjson.DeferredResourceChange{
+		{Reason: "provider_config_unknown"},
+		{Reason: "resource_config_unknown"},
+	}
+	terraform.EXPECT().Init(mock.Anything, theModuleDir).Return(nil)
+	terraform.EXPECT().Plan(mock.Anything, theModuleDir).Return(plan, nil)
+
+	_, err := r.Realize(rootModule(), plain)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "planning the root module at "+theModuleDir)
+	assert.Contains(t, err.Error(), "incomplete plan holding 2 deferred changes")
+	terraform.AssertNotCalled(t, "Apply", mock.Anything, mock.Anything)
+}
+
+func TestTheTerraformRealizerReadsAPlanTerraformCompleted(t *testing.T) {
+	r, terraform := terraformRealizer(t)
+	complete := true
+	plan := planOf(tfjson.Actions{tfjson.ActionCreate})
+	plan.Complete = &complete
+	terraform.EXPECT().Init(mock.Anything, theModuleDir).Return(nil)
+	terraform.EXPECT().Plan(mock.Anything, theModuleDir).Return(plan, nil)
+	terraform.EXPECT().Apply(mock.Anything, theModuleDir).Return(nil)
+
+	action, err := r.Realize(rootModule(), plain)
+	require.NoError(t, err)
 	assert.True(t, action.Changed)
 }
 

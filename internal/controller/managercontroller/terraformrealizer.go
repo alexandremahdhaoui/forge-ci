@@ -71,6 +71,12 @@ func (r TerraformRealizer) realizeRootModule(res citypes.Resource, opts Options)
 		return Action{}, fmt.Errorf("planning the root module at %s: terraform answered no plan", dir)
 	}
 
+	if plan.Complete != nil && !*plan.Complete {
+		return Action{}, fmt.Errorf(
+			"planning the root module at %s: terraform answered an incomplete plan holding %d deferred changes",
+			dir, len(plan.DeferredChanges))
+	}
+
 	changes := plannedChanges(plan)
 
 	if changes == 0 && !opts.Force {
@@ -94,16 +100,28 @@ func plannedChanges(plan *tfjson.Plan) int {
 	count := 0
 
 	for _, resource := range plan.ResourceChanges {
-		if resource != nil && resource.Change != nil && !resource.Change.Actions.NoOp() {
+		if resource != nil && moves(resource.Change) {
 			count++
 		}
 	}
 
 	for _, output := range plan.OutputChanges {
-		if output != nil && !output.Actions.NoOp() {
+		if moves(output) {
 			count++
 		}
 	}
 
 	return count
+}
+
+func moves(change *tfjson.Change) bool {
+	if change == nil {
+		return false
+	}
+
+	if change.Importing != nil {
+		return true
+	}
+
+	return !change.Actions.NoOp() && !change.Actions.Read()
 }
