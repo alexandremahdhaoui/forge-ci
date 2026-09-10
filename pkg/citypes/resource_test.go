@@ -2,6 +2,7 @@ package citypes_test
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -9,8 +10,10 @@ import (
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 )
 
-const thePastedPrivateKey = "-----BEGIN OPENSSH PRIVATE KEY-----\n" +
+var thePastedPrivateKey = "-----BEGIN OPENSSH PRIVATE KEY-----\n" +
 	"b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtz\n" +
+	theKeyMarker + "\n" +
+	strings.Repeat("cHJpdmF0ZWtleQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n", 24) +
 	"-----END OPENSSH PRIVATE KEY-----\n"
 
 func aDeclaredSecret() citypes.Resource {

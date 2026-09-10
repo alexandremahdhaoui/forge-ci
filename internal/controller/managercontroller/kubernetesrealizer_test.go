@@ -3,6 +3,7 @@ package managercontroller_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -24,13 +25,17 @@ const (
 	identityVariable  = "FORGE_CI_TEST_FLUX_IDENTITY"
 	knownHostVariable = "FORGE_CI_TEST_FLUX_KNOWN_HOSTS"
 
-	thePastedPrivateKey = "-----BEGIN OPENSSH PRIVATE KEY-----\n" +
-		"b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtz\n" +
-		"-----END OPENSSH PRIVATE KEY-----\n"
+	theKeyMarker = "ZZZTOPSECRETZZZclientprivatekey"
 
 	found    = true
 	notFound = false
 )
+
+var thePastedPrivateKey = "-----BEGIN OPENSSH PRIVATE KEY-----\n" +
+	"b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtz\n" +
+	theKeyMarker + "\n" +
+	strings.Repeat("cHJpdmF0ZWtleQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n", 24) +
+	"-----END OPENSSH PRIVATE KEY-----\n"
 
 func kubernetesRealizer(t *testing.T) (managercontroller.KubernetesRealizer, *managercontrollermock.MockKubernetes) {
 	t.Helper()

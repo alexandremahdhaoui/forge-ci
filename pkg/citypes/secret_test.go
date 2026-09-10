@@ -9,30 +9,6 @@ import (
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 )
 
-const aRealSizedPrivateKey = "-----BEGIN OPENSSH PRIVATE KEY-----\n" +
-	"b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAABlwAAAAdzc2gtcn\n" +
-	"NhAAAAAwEAAQAAAYEAZZZTOPSECRETZZZclientprivatekeyZZZTOPSECRETZZZclient\n" +
-	"cHJpdmF0ZWtleQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n" +
-	"cHJpdmF0ZWtleQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n" +
-	"cHJpdmF0ZWtleQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n" +
-	"cHJpdmF0ZWtleQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n" +
-	"cHJpdmF0ZWtleQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n" +
-	"cHJpdmF0ZWtleQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n" +
-	"cHJpdmF0ZWtleQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n" +
-	"cHJpdmF0ZWtleQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n" +
-	"cHJpdmF0ZWtleQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n" +
-	"cHJpdmF0ZWtleQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n" +
-	"cHJpdmF0ZWtleQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n" +
-	"cHJpdmF0ZWtleQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n" +
-	"cHJpdmF0ZWtleQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n" +
-	"cHJpdmF0ZWtleQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n" +
-	"cHJpdmF0ZWtleQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n" +
-	"cHJpdmF0ZWtleQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n" +
-	"cHJpdmF0ZWtleQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n" +
-	"cHJpdmF0ZWtleQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n" +
-	"cHJpdmF0ZWtleQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n" +
-	"-----END OPENSSH PRIVATE KEY-----\n"
-
 const theKeyMarker = "ZZZTOPSECRETZZZclientprivatekey"
 
 type theSlotHolder struct {
@@ -40,17 +16,17 @@ type theSlotHolder struct {
 	Value citypes.Secret
 }
 
-func TestTheFixtureIsAsLargeAsAnOpenSSHPrivateKeyAndOverThePathCeiling(t *testing.T) {
+func TestTheFixtureMatchesARealKeyInSizeAndClearsThePathCeiling(t *testing.T) {
 	t.Parallel()
 
-	assert.Greater(t, len(aRealSizedPrivateKey), 1400)
-	assert.Greater(t, len(aRealSizedPrivateKey), 255)
+	assert.Greater(t, len(thePastedPrivateKey), 1400)
+	assert.Greater(t, len(thePastedPrivateKey), 255)
 }
 
 func TestEveryFormattingVerbThatReachesAStringPrintsRedactedInsteadOfTheSecret(t *testing.T) {
 	t.Parallel()
 
-	held := citypes.Secret(aRealSizedPrivateKey)
+	held := citypes.Secret(thePastedPrivateKey)
 
 	for _, verb := range []string{"%v", "%+v", "%#v", "%+#v", "%#+v", "%s", "%q"} {
 		printed := fmt.Sprintf(verb, held)
@@ -67,7 +43,7 @@ func TestEveryFormattingVerbThatReachesAStringPrintsRedactedInsteadOfTheSecret(t
 func TestASecretInAStructFieldIsRedactedByEveryVerbIncludingTheSharpVFamily(t *testing.T) {
 	t.Parallel()
 
-	held := theSlotHolder{Name: "flux-deploy-key", Value: citypes.Secret(aRealSizedPrivateKey)}
+	held := theSlotHolder{Name: "flux-deploy-key", Value: citypes.Secret(thePastedPrivateKey)}
 
 	for _, verb := range []string{"%v", "%+v", "%#v", "%+#v", "%#+v", "%s", "%q"} {
 		printed := fmt.Sprintf(verb, held)
@@ -81,7 +57,7 @@ func TestASecretInAStructFieldIsRedactedByEveryVerbIncludingTheSharpVFamily(t *t
 func TestASecretInAMapOrASliceOrAnErrorChainIsRedactedToo(t *testing.T) {
 	t.Parallel()
 
-	held := citypes.Secret(aRealSizedPrivateKey)
+	held := citypes.Secret(thePastedPrivateKey)
 
 	assert.NotContains(t, fmt.Sprintf("%v", map[string]citypes.Secret{"key": held}), theKeyMarker)
 	assert.NotContains(t, fmt.Sprintf("%#v", map[string]citypes.Secret{"key": held}), theKeyMarker)
@@ -98,11 +74,11 @@ func TestASecretReadFromAnUnsetVariableIsEmpty(t *testing.T) {
 }
 
 func TestASecretReadFromAVariableCarriesItsValueAndStillNeverPrintsIt(t *testing.T) {
-	t.Setenv("FORGE_CI_A_PASTED_SLOT", aRealSizedPrivateKey)
+	t.Setenv("FORGE_CI_A_PASTED_SLOT", thePastedPrivateKey)
 
 	held := citypes.SecretFromEnv("FORGE_CI_A_PASTED_SLOT")
 
-	assert.Equal(t, aRealSizedPrivateKey, string(held))
+	assert.Equal(t, thePastedPrivateKey, string(held))
 	assert.NotContains(t, fmt.Sprintf("%v %#v %q", held, held, held), theKeyMarker)
 }
 
@@ -112,7 +88,7 @@ func TestAResourceHoldingAPastedSecretIsRedactedBySharpVAsWellAsByV(t *testing.T
 	res := citypes.Resource{
 		Kind: "secret",
 		Name: "flux-deploy-key",
-		Spec: map[string]any{"identity": aRealSizedPrivateKey},
+		Spec: map[string]any{"identity": thePastedPrivateKey},
 	}
 
 	for _, verb := range []string{"%v", "%+v", "%#v", "%+#v", "%#+v", "%s"} {

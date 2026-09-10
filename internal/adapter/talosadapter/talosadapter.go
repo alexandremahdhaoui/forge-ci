@@ -2,12 +2,16 @@ package talosadapter
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 
 	"github.com/cosi-project/runtime/pkg/resource"
 	"github.com/cosi-project/runtime/pkg/safe"
 	machineapi "github.com/siderolabs/talos/pkg/machinery/api/machine"
 	"github.com/siderolabs/talos/pkg/machinery/client"
+	clientconfig "github.com/siderolabs/talos/pkg/machinery/client/config"
 	configresource "github.com/siderolabs/talos/pkg/machinery/resources/config"
 
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
@@ -98,12 +102,41 @@ func (n Node) ApplyMachineConfig(
 }
 
 func (n Node) dial(ctx context.Context, node string, talosconfig citypes.Secret) (*client.Client, error) {
-	nodeClient, err := client.New(ctx, client.WithConfigFromFile(string(talosconfig)))
+	held, err := clientConfiguration(talosconfig)
 	if err != nil {
-		return nil, fmt.Errorf(
-			"dialing node %s with the client configuration the manager resolved, "+
-				"which must name a talosconfig file: %w", node, err)
+		return nil, fmt.Errorf("dialing node %s: %w", node, err)
+	}
+
+	nodeClient, err := client.New(ctx, client.WithConfig(held))
+	if err != nil {
+		return nil, fmt.Errorf("dialing node %s: %w", node, err)
 	}
 
 	return nodeClient, nil
+}
+
+func clientConfiguration(talosconfig citypes.Secret) (*clientconfig.Config, error) {
+	raw, err := os.ReadFile(string(talosconfig))
+	if err != nil {
+		return nil, fmt.Errorf(
+			"opening the client configuration file the manager resolved, "+
+				"which must name a talosconfig file: %w", causeWithoutThePath(err))
+	}
+
+	held, err := clientconfig.FromBytes(raw)
+	if err != nil {
+		return nil, errors.New(
+			"parsing the client configuration file the manager resolved: it is not a talosconfig document")
+	}
+
+	return held, nil
+}
+
+func causeWithoutThePath(err error) error {
+	var pathError *fs.PathError
+	if errors.As(err, &pathError) {
+		return pathError.Err
+	}
+
+	return err
 }
