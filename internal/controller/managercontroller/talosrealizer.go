@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 
 	"github.com/siderolabs/talos/pkg/machinery/config"
 	"github.com/siderolabs/talos/pkg/machinery/config/configdiff"
@@ -20,8 +19,8 @@ const (
 )
 
 type Talos interface {
-	MachineConfig(ctx context.Context, node, talosconfig string) (string, error)
-	ApplyMachineConfig(ctx context.Context, node, talosconfig, config string) error
+	MachineConfig(ctx context.Context, node string, talosconfig citypes.Secret) (string, error)
+	ApplyMachineConfig(ctx context.Context, node string, talosconfig citypes.Secret, config string) error
 }
 
 type TalosRealizer struct {
@@ -104,14 +103,14 @@ func (r TalosRealizer) realizeMachineConfig(res citypes.Resource, opts Options) 
 	return Did("applied machine config to node " + node), nil
 }
 
-func (r TalosRealizer) talosconfigFor(spec map[string]any) (string, string, error) {
-	path, err := citypes.SpecString(spec, "talosconfig")
+func (r TalosRealizer) talosconfigFor(spec map[string]any) (citypes.Secret, string, error) {
+	declared, err := citypes.SpecString(spec, "talosconfig")
 	if err != nil {
 		return "", "", err
 	}
 
-	if path != "" {
-		return path, "spec.talosconfig", nil
+	if declared != "" {
+		return citypes.Secret(declared), "spec.talosconfig", nil
 	}
 
 	name, err := citypes.SpecString(spec, "talosconfigEnv")
@@ -132,14 +131,14 @@ func (r TalosRealizer) talosconfigFor(spec map[string]any) (string, string, erro
 			"nor the manager's talosconfigEnv is declared"
 	}
 
-	path = os.Getenv(name)
-	if path == "" {
+	fromEnv := citypes.SecretFromEnv(name)
+	if fromEnv == "" {
 		return "", "", fmt.Errorf(
 			"reading the client configuration path: nothing is set in %s. export it before bootstrapping",
 			source)
 	}
 
-	return path, source, nil
+	return fromEnv, source, nil
 }
 
 func sameMachineConfig(running, declared string) (bool, error) {

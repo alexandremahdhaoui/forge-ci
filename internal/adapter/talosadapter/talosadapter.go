@@ -9,6 +9,8 @@ import (
 	machineapi "github.com/siderolabs/talos/pkg/machinery/api/machine"
 	"github.com/siderolabs/talos/pkg/machinery/client"
 	configresource "github.com/siderolabs/talos/pkg/machinery/resources/config"
+
+	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 )
 
 const (
@@ -50,7 +52,7 @@ func New(mode string) (Node, error) {
 	return Node{mode: chosen}, nil
 }
 
-func (n Node) MachineConfig(ctx context.Context, node, talosconfig string) (string, error) {
+func (n Node) MachineConfig(ctx context.Context, node string, talosconfig citypes.Secret) (string, error) {
 	nodeClient, err := n.dial(ctx, node, talosconfig)
 	if err != nil {
 		return "", err
@@ -73,7 +75,9 @@ func (n Node) MachineConfig(ctx context.Context, node, talosconfig string) (stri
 	return string(raw), nil
 }
 
-func (n Node) ApplyMachineConfig(ctx context.Context, node, talosconfig, machineConfig string) error {
+func (n Node) ApplyMachineConfig(
+	ctx context.Context, node string, talosconfig citypes.Secret, machineConfig string,
+) error {
 	nodeClient, err := n.dial(ctx, node, talosconfig)
 	if err != nil {
 		return err
@@ -93,8 +97,8 @@ func (n Node) ApplyMachineConfig(ctx context.Context, node, talosconfig, machine
 	return nil
 }
 
-func (n Node) dial(ctx context.Context, node, talosconfig string) (*client.Client, error) {
-	nodeClient, err := client.New(ctx, client.WithConfigFromFile(talosconfig))
+func (n Node) dial(ctx context.Context, node string, talosconfig citypes.Secret) (*client.Client, error) {
+	nodeClient, err := client.New(ctx, client.WithConfigFromFile(string(talosconfig)))
 	if err != nil {
 		return nil, fmt.Errorf(
 			"dialing node %s with the client configuration the manager resolved, "+

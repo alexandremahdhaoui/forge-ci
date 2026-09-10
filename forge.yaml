@@ -270,12 +270,6 @@ test:
       command: sh
       args: ["hack/wire-boundary.sh"]
 
-  - name: no-sharp-v
-    runner: forge://generic-test-runner
-    spec:
-      command: sh
-      args: ["hack/no-sharp-v.sh"]
-
   - name: docs
     runner: forge://generic-test-runner
     spec:

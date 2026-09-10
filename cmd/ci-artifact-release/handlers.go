@@ -117,7 +117,7 @@ func apiFor(spec map[string]any) githubadapter.API {
 
 	base, _ := spec["apiBaseURL"].(string)
 
-	return githubadapter.New(nil, base, os.Getenv(tokenEnv))
+	return githubadapter.New(nil, base, citypes.SecretFromEnv(tokenEnv))
 }
 
 // publish carries out what the controller decided. The decision is not made

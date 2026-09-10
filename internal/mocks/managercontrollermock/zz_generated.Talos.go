@@ -7,6 +7,7 @@ package managercontrollermock
 import (
 	"context"
 
+	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -38,7 +39,7 @@ func (_m *MockTalos) EXPECT() *MockTalos_Expecter {
 }
 
 // ApplyMachineConfig provides a mock function for the type MockTalos
-func (_mock *MockTalos) ApplyMachineConfig(ctx context.Context, node string, talosconfig string, config string) error {
+func (_mock *MockTalos) ApplyMachineConfig(ctx context.Context, node string, talosconfig citypes.Secret, config string) error {
 	ret := _mock.Called(ctx, node, talosconfig, config)
 
 	if len(ret) == 0 {
@@ -46,7 +47,7 @@ func (_mock *MockTalos) ApplyMachineConfig(ctx context.Context, node string, tal
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, string) error); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, citypes.Secret, string) error); ok {
 		r0 = returnFunc(ctx, node, talosconfig, config)
 	} else {
 		r0 = ret.Error(0)
@@ -62,13 +63,13 @@ type MockTalos_ApplyMachineConfig_Call struct {
 // ApplyMachineConfig is a helper method to define mock.On call
 //   - ctx context.Context
 //   - node string
-//   - talosconfig string
+//   - talosconfig citypes.Secret
 //   - config string
 func (_e *MockTalos_Expecter) ApplyMachineConfig(ctx any, node any, talosconfig any, config any) *MockTalos_ApplyMachineConfig_Call {
 	return &MockTalos_ApplyMachineConfig_Call{Call: _e.mock.On("ApplyMachineConfig", ctx, node, talosconfig, config)}
 }
 
-func (_c *MockTalos_ApplyMachineConfig_Call) Run(run func(ctx context.Context, node string, talosconfig string, config string)) *MockTalos_ApplyMachineConfig_Call {
+func (_c *MockTalos_ApplyMachineConfig_Call) Run(run func(ctx context.Context, node string, talosconfig citypes.Secret, config string)) *MockTalos_ApplyMachineConfig_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -78,9 +79,9 @@ func (_c *MockTalos_ApplyMachineConfig_Call) Run(run func(ctx context.Context, n
 		if args[1] != nil {
 			arg1 = args[1].(string)
 		}
-		var arg2 string
+		var arg2 citypes.Secret
 		if args[2] != nil {
-			arg2 = args[2].(string)
+			arg2 = args[2].(citypes.Secret)
 		}
 		var arg3 string
 		if args[3] != nil {
@@ -101,13 +102,13 @@ func (_c *MockTalos_ApplyMachineConfig_Call) Return(err error) *MockTalos_ApplyM
 	return _c
 }
 
-func (_c *MockTalos_ApplyMachineConfig_Call) RunAndReturn(run func(ctx context.Context, node string, talosconfig string, config string) error) *MockTalos_ApplyMachineConfig_Call {
+func (_c *MockTalos_ApplyMachineConfig_Call) RunAndReturn(run func(ctx context.Context, node string, talosconfig citypes.Secret, config string) error) *MockTalos_ApplyMachineConfig_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // MachineConfig provides a mock function for the type MockTalos
-func (_mock *MockTalos) MachineConfig(ctx context.Context, node string, talosconfig string) (string, error) {
+func (_mock *MockTalos) MachineConfig(ctx context.Context, node string, talosconfig citypes.Secret) (string, error) {
 	ret := _mock.Called(ctx, node, talosconfig)
 
 	if len(ret) == 0 {
@@ -116,15 +117,15 @@ func (_mock *MockTalos) MachineConfig(ctx context.Context, node string, taloscon
 
 	var r0 string
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) (string, error)); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, citypes.Secret) (string, error)); ok {
 		return returnFunc(ctx, node, talosconfig)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) string); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, citypes.Secret) string); ok {
 		r0 = returnFunc(ctx, node, talosconfig)
 	} else {
 		r0 = ret.Get(0).(string)
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string) error); ok {
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, citypes.Secret) error); ok {
 		r1 = returnFunc(ctx, node, talosconfig)
 	} else {
 		r1 = ret.Error(1)
@@ -140,12 +141,12 @@ type MockTalos_MachineConfig_Call struct {
 // MachineConfig is a helper method to define mock.On call
 //   - ctx context.Context
 //   - node string
-//   - talosconfig string
+//   - talosconfig citypes.Secret
 func (_e *MockTalos_Expecter) MachineConfig(ctx any, node any, talosconfig any) *MockTalos_MachineConfig_Call {
 	return &MockTalos_MachineConfig_Call{Call: _e.mock.On("MachineConfig", ctx, node, talosconfig)}
 }
 
-func (_c *MockTalos_MachineConfig_Call) Run(run func(ctx context.Context, node string, talosconfig string)) *MockTalos_MachineConfig_Call {
+func (_c *MockTalos_MachineConfig_Call) Run(run func(ctx context.Context, node string, talosconfig citypes.Secret)) *MockTalos_MachineConfig_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -155,9 +156,9 @@ func (_c *MockTalos_MachineConfig_Call) Run(run func(ctx context.Context, node s
 		if args[1] != nil {
 			arg1 = args[1].(string)
 		}
-		var arg2 string
+		var arg2 citypes.Secret
 		if args[2] != nil {
-			arg2 = args[2].(string)
+			arg2 = args[2].(citypes.Secret)
 		}
 		run(
 			arg0,
@@ -173,7 +174,7 @@ func (_c *MockTalos_MachineConfig_Call) Return(s string, err error) *MockTalos_M
 	return _c
 }
 
-func (_c *MockTalos_MachineConfig_Call) RunAndReturn(run func(ctx context.Context, node string, talosconfig string) (string, error)) *MockTalos_MachineConfig_Call {
+func (_c *MockTalos_MachineConfig_Call) RunAndReturn(run func(ctx context.Context, node string, talosconfig citypes.Secret) (string, error)) *MockTalos_MachineConfig_Call {
 	_c.Call.Return(run)
 	return _c
 }

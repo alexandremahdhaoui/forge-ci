@@ -17,6 +17,8 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/layout"
 	"github.com/google/go-containerregistry/pkg/v1/mutate"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
+
+	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 )
 
 // ErrEmptyLayout means the directory holds no manifest, so the build that was
@@ -35,7 +37,7 @@ type Registry interface {
 // injects secrets.GITHUB_TOKEN, which is why there is no secret to create,
 // seal or rotate.
 type Remote struct {
-	Token string
+	Token citypes.Secret
 }
 
 var _ Registry = (*Remote)(nil)
@@ -52,7 +54,7 @@ func (r *Remote) options() []remote.Option {
 
 	return []remote.Option{remote.WithAuth(authn.FromConfig(authn.AuthConfig{
 		Username: "token",
-		Password: r.Token,
+		Password: string(r.Token),
 	}))}
 }
 

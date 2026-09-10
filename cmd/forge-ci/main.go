@@ -12,6 +12,7 @@ import (
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/reconcilecontroller"
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/releasecontroller"
 	"github.com/alexandremahdhaoui/forge-ci/internal/driver/clidriver"
+	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 	"github.com/alexandremahdhaoui/forge/pkg/enginecli"
 	"github.com/alexandremahdhaoui/forge/pkg/engineversion"
 )
@@ -58,6 +59,6 @@ func main() {
 // pipeline declared.
 func githubFor(git gitadapter.Git) clidriver.GitHubFor {
 	return func(tokenEnv, apiBaseURL string) clidriver.Publisher {
-		return releasecontroller.New(git, githubadapter.New(nil, apiBaseURL, os.Getenv(tokenEnv)))
+		return releasecontroller.New(git, githubadapter.New(nil, apiBaseURL, citypes.SecretFromEnv(tokenEnv)))
 	}
 }

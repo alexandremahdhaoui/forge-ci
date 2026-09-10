@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"os"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/execadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/fsadapter"
@@ -22,7 +21,7 @@ func NewHandlers() Handlers {
 
 	return Handlers{
 		Reconcile: func(ctx context.Context, in ReconcileInput) (*ReconcileOutput, error) {
-			api := githubadapter.New(nil, baseURL(in.Spec), os.Getenv(tokenEnv(in.Spec)))
+			api := githubadapter.New(nil, baseURL(in.Spec), citypes.SecretFromEnv(tokenEnv(in.Spec)))
 			root, _ := in.Spec["root"].(string)
 			git := gitadapter.New(execadapter.New())
 			ctrl := managercontroller.New(

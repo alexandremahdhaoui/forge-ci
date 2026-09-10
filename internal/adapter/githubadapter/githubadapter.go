@@ -21,6 +21,8 @@ import (
 	"time"
 
 	"golang.org/x/crypto/nacl/box"
+
+	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 )
 
 // API is what the realizer and the compute controller need from GitHub.
@@ -90,14 +92,14 @@ const inactiveMarker = "not active"
 type Client struct {
 	client *http.Client
 	base   string
-	token  string
+	token  citypes.Secret
 }
 
 var _ API = (*Client)(nil)
 
 // New builds a client. A nil http.Client means http.DefaultClient; an
 // empty base means the public API.
-func New(client *http.Client, base, token string) *Client {
+func New(client *http.Client, base string, token citypes.Secret) *Client {
 	if client == nil {
 		client = http.DefaultClient
 	}
@@ -111,7 +113,7 @@ func New(client *http.Client, base, token string) *Client {
 
 // Seal encrypts a secret value against a repo's Actions public key with
 // an anonymous NaCl sealed box, the shape the secrets API demands.
-func Seal(publicKeyB64, value string) (string, error) {
+func Seal(publicKeyB64 string, value citypes.Secret) (string, error) {
 	raw, err := base64.StdEncoding.DecodeString(publicKeyB64)
 	if err != nil {
 		return "", fmt.Errorf("decoding the repo public key: %w", err)
@@ -308,7 +310,7 @@ func (c *Client) send(
 	}
 
 	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Authorization", "Bearer "+string(c.token))
 
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)

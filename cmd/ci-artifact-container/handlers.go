@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"os"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/containeradapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/containercontroller"
@@ -68,7 +67,7 @@ func registryFor(spec map[string]any) containeradapter.Registry {
 		tokenEnv = "GITHUB_TOKEN"
 	}
 
-	return &containeradapter.Remote{Token: os.Getenv(tokenEnv)}
+	return &containeradapter.Remote{Token: citypes.SecretFromEnv(tokenEnv)}
 }
 
 // publish carries out what the controller decided. The decision is not made

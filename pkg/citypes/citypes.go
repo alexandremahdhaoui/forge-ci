@@ -89,6 +89,10 @@ func (r Resource) String() string {
 	return kind + "/" + name + " holding spec keys " + strings.Join(slices.Sorted(maps.Keys(r.Spec)), ", ")
 }
 
+func (r Resource) GoString() string {
+	return r.String()
+}
+
 type Ownership struct {
 	Resource string `json:"resource" jsonschema:"Resource id, kind slash name"`
 	Manager  string `json:"manager" jsonschema:"Alias of the manager that created it"`

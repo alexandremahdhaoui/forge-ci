@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -106,7 +105,7 @@ func (r KubernetesRealizer) realizeSecret(res citypes.Resource, opts Options) (A
 }
 
 func (r KubernetesRealizer) createSecret(
-	namespace, name, id string, data map[string][]byte, hash string, opts Options,
+	namespace, name, id string, data map[string]citypes.Secret, hash string, opts Options,
 ) (Action, error) {
 	text := "create secret " + id + " holding " + declaredKeys(data)
 
@@ -121,7 +120,7 @@ func (r KubernetesRealizer) createSecret(
 			Annotations: map[string]string{SecretHashAnnotation: hash},
 		},
 		Type: corev1.SecretTypeOpaque,
-		Data: data,
+		Data: secretBytes(data),
 	}
 
 	if err := r.cluster.CreateSecret(r.ctx, written); err != nil {
@@ -132,7 +131,7 @@ func (r KubernetesRealizer) createSecret(
 }
 
 func (r KubernetesRealizer) replaceSecret(
-	live *corev1.Secret, id string, data map[string][]byte, hash string, opts Options,
+	live *corev1.Secret, id string, data map[string]citypes.Secret, hash string, opts Options,
 ) (Action, error) {
 	text := "replace the data of secret " + id + " with " + declaredKeys(data)
 
@@ -141,7 +140,7 @@ func (r KubernetesRealizer) replaceSecret(
 	}
 
 	written := live.DeepCopy()
-	written.Data = data
+	written.Data = secretBytes(data)
 	written.StringData = nil
 
 	if written.Annotations == nil {
@@ -157,7 +156,7 @@ func (r KubernetesRealizer) replaceSecret(
 	return Did("replaced the data of secret " + id + " with " + declaredKeys(data)), nil
 }
 
-func declaredData(spec map[string]any, id string) (map[string][]byte, error) {
+func declaredData(spec map[string]any, id string) (map[string]citypes.Secret, error) {
 	variables, err := citypes.SpecStringMap(spec, "data")
 	if err != nil {
 		return nil, fmt.Errorf("reading the data of secret %s: %w", id, err)
@@ -168,7 +167,7 @@ func declaredData(spec map[string]any, id string) (map[string][]byte, error) {
 			"reading the data of secret %s: spec.data is required, and it names one environment variable per key", id)
 	}
 
-	data := make(map[string][]byte, len(variables))
+	data := make(map[string]citypes.Secret, len(variables))
 
 	for _, key := range sortedStringKeys(variables) {
 		if key == "" {
@@ -183,7 +182,7 @@ func declaredData(spec map[string]any, id string) (map[string][]byte, error) {
 				"reading the data of secret %s: key %q names no environment variable", id, key)
 		}
 
-		value := os.Getenv(variable)
+		value := citypes.SecretFromEnv(variable)
 
 		if value == "" {
 			return nil, fmt.Errorf(
@@ -192,13 +191,22 @@ func declaredData(spec map[string]any, id string) (map[string][]byte, error) {
 				id, key)
 		}
 
-		data[key] = []byte(value)
+		data[key] = value
 	}
 
 	return data, nil
 }
 
-func hashOfData(data map[string][]byte) string {
+func secretBytes(data map[string]citypes.Secret) map[string][]byte {
+	out := make(map[string][]byte, len(data))
+	for key, value := range data {
+		out[key] = []byte(value)
+	}
+
+	return out
+}
+
+func hashOfData(data map[string]citypes.Secret) string {
 	joined := []byte{}
 
 	for _, key := range sortedDataKeys(data) {
@@ -217,11 +225,11 @@ func hashOfData(data map[string][]byte) string {
 	return hex.EncodeToString(sum[:])[:secretHashLength]
 }
 
-func declaredKeys(data map[string][]byte) string {
+func declaredKeys(data map[string]citypes.Secret) string {
 	return strings.Join(sortedDataKeys(data), ", ")
 }
 
-func sortedDataKeys(data map[string][]byte) []string {
+func sortedDataKeys(data map[string]citypes.Secret) []string {
 	keys := make([]string, 0, len(data))
 	for key := range data {
 		keys = append(keys, key)

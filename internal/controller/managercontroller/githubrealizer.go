@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -167,7 +166,7 @@ func (r GitHubRealizer) realizeSecret(res citypes.Resource, opts Options) (Actio
 				"--force rotates it", secret, repo)), nil
 	}
 
-	value := os.Getenv(fromEnv)
+	value := citypes.SecretFromEnv(fromEnv)
 	if value == "" {
 		return Action{}, fmt.Errorf(
 			"reading secret %s on %s: nothing is set in %s. export it in .envrc before bootstrapping",

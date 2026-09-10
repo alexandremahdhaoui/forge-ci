@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"os"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/fsadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/githubadapter"
@@ -20,7 +19,7 @@ import (
 // from the environment - it never crosses the wire.
 func NewHandlers() Handlers {
 	ctrl := workflowcontroller.New(func(spec workflowcontroller.Spec) githubadapter.API {
-		return githubadapter.New(nil, spec.APIBaseURL, os.Getenv(spec.TokenEnv))
+		return githubadapter.New(nil, spec.APIBaseURL, citypes.SecretFromEnv(spec.TokenEnv))
 	}, nil, nil)
 
 	// put and get are the same controller the local engine runs: the files

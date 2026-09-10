@@ -100,7 +100,7 @@ func TestTheTalosRealizerNamesItselfTalos(t *testing.T) {
 func TestTheTalosRealizerKeepsAMachineConfigTheNodeAlreadyHolds(t *testing.T) {
 	r, talos := talosRealizer(t)
 	talos.EXPECT().
-		MachineConfig(mock.Anything, "192.168.1.10", "/home/operator/.config/t0.yaml").
+		MachineConfig(mock.Anything, "192.168.1.10", citypes.Secret("/home/operator/.config/t0.yaml")).
 		Return(controlplane, nil)
 
 	action, err := r.Realize(machineConfig(controlplane), plain)
@@ -196,7 +196,7 @@ func TestTheTalosRealizerAppliesAMachineConfigThatDiffersFromTheNode(t *testing.
 	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything, mock.Anything).
 		Return(controlplane, nil)
 	talos.EXPECT().
-		ApplyMachineConfig(mock.Anything, "192.168.1.10", "/home/operator/.config/t0.yaml",
+		ApplyMachineConfig(mock.Anything, "192.168.1.10", citypes.Secret("/home/operator/.config/t0.yaml"),
 			controlplaneWithABiggerDisk).
 		Return(nil)
 
@@ -325,7 +325,7 @@ func TestTheTalosRealizerRefusesAnEmptyClientConfigurationVariable(t *testing.T)
 
 func TestTheTalosRealizerNamesTheSlotThatFedTheClientConfigurationWhenTheNodeCannotBeRead(t *testing.T) {
 	r, talos := talosRealizer(t)
-	talos.EXPECT().MachineConfig(mock.Anything, "192.168.1.10", "/etc/t0/declared.yaml").
+	talos.EXPECT().MachineConfig(mock.Anything, "192.168.1.10", citypes.Secret("/etc/t0/declared.yaml")).
 		Return("", errors.New("no route to host"))
 
 	res := machineConfig(controlplane)
@@ -341,10 +341,10 @@ func TestTheTalosRealizerNamesTheSlotThatFedTheClientConfigurationWhenTheApplyFa
 	t.Setenv("FORGE_CI_TEST_OTHER_CLIENT_CONFIG", "/etc/t0/other.yaml")
 
 	r, talos := talosRealizer(t)
-	talos.EXPECT().MachineConfig(mock.Anything, "192.168.1.10", "/etc/t0/other.yaml").
+	talos.EXPECT().MachineConfig(mock.Anything, "192.168.1.10", citypes.Secret("/etc/t0/other.yaml")).
 		Return(controlplane, nil)
 	talos.EXPECT().
-		ApplyMachineConfig(mock.Anything, "192.168.1.10", "/etc/t0/other.yaml", controlplaneWithABiggerDisk).
+		ApplyMachineConfig(mock.Anything, "192.168.1.10", citypes.Secret("/etc/t0/other.yaml"), controlplaneWithABiggerDisk).
 		Return(errors.New("no route to host"))
 
 	res := machineConfig(controlplaneWithABiggerDisk)
@@ -372,7 +372,7 @@ func TestTheTalosRealizerNeverEchoesASecretPastedIntoTheClientConfigurationVaria
 
 func TestTheTalosRealizerReadsTheClientConfigurationPathFromTheResource(t *testing.T) {
 	r, talos := talosRealizer(t)
-	talos.EXPECT().MachineConfig(mock.Anything, "192.168.1.10", "/etc/t0/declared.yaml").
+	talos.EXPECT().MachineConfig(mock.Anything, "192.168.1.10", citypes.Secret("/etc/t0/declared.yaml")).
 		Return(controlplane, nil)
 
 	res := machineConfig(controlplane)
@@ -387,7 +387,7 @@ func TestTheTalosRealizerReadsTheClientConfigurationPathFromTheVariableTheResour
 	t.Setenv("FORGE_CI_TEST_OTHER_CLIENT_CONFIG", "/etc/t0/other.yaml")
 
 	r, talos := talosRealizer(t)
-	talos.EXPECT().MachineConfig(mock.Anything, "192.168.1.10", "/etc/t0/other.yaml").
+	talos.EXPECT().MachineConfig(mock.Anything, "192.168.1.10", citypes.Secret("/etc/t0/other.yaml")).
 		Return(controlplane, nil)
 
 	res := machineConfig(controlplane)
