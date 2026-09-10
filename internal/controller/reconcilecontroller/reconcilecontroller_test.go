@@ -17,8 +17,6 @@ import (
 
 var errBoom = errors.New("boom")
 
-// noRepoGit is a git nobody asks a commit of. Every apply still derives a
-// version, so a tag line must answer even when the pipeline has no repos.
 func noRepoGit(t *testing.T) *gitadaptermock.MockGit {
 	t.Helper()
 
@@ -28,8 +26,6 @@ func noRepoGit(t *testing.T) *gitadaptermock.MockGit {
 	return git
 }
 
-// gitAt is a checkout at one commit. previous is the version line the release
-// reads back, and defaults to none, which is a workspace that never released.
 func gitAt(t *testing.T, sha string, previous ...string) *gitadaptermock.MockGit {
 	t.Helper()
 
@@ -187,11 +183,11 @@ func TestManySubstagesAllRun(t *testing.T) {
 	report, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(),
 		pipeline(stage("prod",
 			config.Substage{
-				Name: "eu-a", Engine: "here", Manager: "local", Targets: []string{"build"},
+				Name: "eu-a", Engine: "here", Targets: []string{"build"},
 				Params: map[string]string{"region": "eu-west-1", "cell": "a"},
 			},
 			config.Substage{
-				Name: "eu-b", Engine: "here", Manager: "local", Targets: []string{"build"},
+				Name: "eu-b", Engine: "here", Targets: []string{"build"},
 				Params: map[string]string{"region": "eu-west-1", "cell": "b"},
 			},
 		)), "/work", plain)
@@ -225,13 +221,6 @@ func TestAManagerRefusalStopsTheApply(t *testing.T) {
 	require.Contains(t, err.Error(), `manager "local"`)
 }
 
-// The whole reason the reconcile answers changed at all.
-//
-// Apply converges the pipeline's own resources and then resolves a revision
-// that hashes each repo's HEAD plus its uncommitted changes. Continuing would
-// measure the tree the reconcile just rewrote: the revision comes out dirty
-// and the release refuses it, on every run, because a fresh clone starts from
-// the same drift. Live run 33309087584 died exactly that way.
 func TestAChangedReconcileStopsTheApplyBeforeTheRevision(t *testing.T) {
 	f := newFakeEngines(t)
 	f.reconcileChanged = true
@@ -254,12 +243,6 @@ func TestAChangedReconcileStopsTheApplyBeforeTheRevision(t *testing.T) {
 		"nothing blocked: no stage failed and no gate refused")
 }
 
-// Superseding is a promise that the superseding run exists, and only a push
-// makes that true. A change nobody published - a directory the local manager
-// created, a commit with no remote - cannot re-fire the pipeline, so
-// stopping for it would strand the pipeline forever: every fresh clone
-// re-creates the change, reports superseded, and no run ever follows. Two
-// live runs died exactly that way on an empty state directory.
 func TestAChangedButUnpublishedReconcileContinues(t *testing.T) {
 	f := newFakeEngines(t)
 	f.reconcileChanged = true
@@ -282,8 +265,6 @@ func TestAChangedButUnpublishedReconcileContinues(t *testing.T) {
 	require.True(t, noted, "continuing past unpublished changes is said out loud, never silent")
 }
 
-// The compatibility guarantee. A manager that reports no change leaves the
-// apply exactly as it was before any of this existed.
 func TestAnUnchangedReconcileRunsTheWholePipeline(t *testing.T) {
 	f := newFakeEngines(t)
 
@@ -309,7 +290,7 @@ func TestAnUnknownComputeEngineIsReported(t *testing.T) {
 	f := newFakeEngines(t)
 
 	p := pipeline(stage("build", config.Substage{
-		Name: "default", Engine: "missing", Manager: "local", Targets: []string{"build"},
+		Name: "default", Engine: "missing", Targets: []string{"build"},
 	}))
 
 	_, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(), p, "/work", plain)
@@ -321,7 +302,7 @@ func TestAWrongPortIsReported(t *testing.T) {
 	f := newFakeEngines(t)
 
 	p := pipeline(stage("build", config.Substage{
-		Name: "default", Engine: "st", Manager: "local", Targets: []string{"build"},
+		Name: "default", Engine: "st", Targets: []string{"build"},
 	}))
 
 	_, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).Apply(context.Background(), p, "/work", plain)
@@ -651,13 +632,6 @@ func TestOneFailingSubstageStillReportsTheOthers(t *testing.T) {
 	require.Equal(t, citypes.StatusFailed, report.Stages[0].Runs[1].Status)
 }
 
-// A revision is the run's identity, not its verdict. A build that fails still
-// has one, because everything the run wrote - each run record, each artifact
-// the stages kept - is filed under it, and a run whose own name appeared only
-// on success would have nowhere to record the failure.
-//
-// Whether the commits were PROVEN is a different question, and the run records
-// answer it: this one says failed.
 func TestAFailedBuildStillHasARevision(t *testing.T) {
 	f := newFakeEngines(t)
 	f.runOutputs["build/default"] = citypes.RunOutput{Status: citypes.StatusFailed}
@@ -679,8 +653,6 @@ func TestAFailedBuildStillHasARevision(t *testing.T) {
 		"the run record is what says this revision was not proven")
 }
 
-// One run, one mint, whatever the pipeline looks like. No stage asks for it
-// and none can ask twice.
 func TestEveryRunMintsOnceBeforeItsFirstStage(t *testing.T) {
 	f := newFakeEngines(t)
 	c := reconcilecontroller.New(f.caller(), gitAt(t, "abc123"), clock())
@@ -771,9 +743,6 @@ func TestAStageWithNoReleasePublishesNothing(t *testing.T) {
 	require.Empty(t, f.published)
 }
 
-// The default strategy moves the patch. A minor or a major is a claim about
-// what changed, and the default reads no diff, so it moves the only number
-// nobody has an opinion about.
 func TestTheDefaultStrategyMovesThePatch(t *testing.T) {
 	f := newFakeEngines(t)
 
@@ -804,9 +773,6 @@ func TestTheMinorStrategyMovesTheMinor(t *testing.T) {
 	require.Equal(t, "v0.3.0", f.published[0].Version)
 }
 
-// The semantic strategy reads EVERY member's subjects, because a factory
-// releases its members together: a breaking change in any one of them is
-// breaking for the number they all carry.
 func TestTheSemanticStrategyReadsEveryMember(t *testing.T) {
 	f := newFakeEngines(t)
 
@@ -833,8 +799,6 @@ func TestTheSemanticStrategyReadsEveryMember(t *testing.T) {
 		"the highest claim any member makes decides the one number all of them carry")
 }
 
-// A cap holds a factory that is not ready for v1. A bump that would cross it
-// drops one level, so the factory keeps releasing rather than stopping.
 func TestACapClampsTheBumpInsteadOfStoppingTheRelease(t *testing.T) {
 	f := newFakeEngines(t)
 
@@ -855,8 +819,6 @@ func TestACapClampsTheBumpInsteadOfStoppingTheRelease(t *testing.T) {
 		"a major under a v0 cap drops to a minor rather than refusing to release")
 }
 
-// The prefix reaches the engine so the engine can name the tag, and only the
-// tag: the version stays the version.
 func TestTheTagPrefixReachesTheEngine(t *testing.T) {
 	f := newFakeEngines(t)
 
@@ -884,14 +846,6 @@ func TestAWorkspaceThatNeverReleasedStartsAtTheFirstVersion(t *testing.T) {
 	require.Equal(t, "v0.1.0", f.published[0].Version)
 }
 
-// TestOnlyABootstrapTellsTheManagerItMayWriteCredentials pins the flag that
-// keeps a pipeline run from holding the rights to rewrite the secrets it runs
-// under.
-//
-// The core hands over everything, bootstrapOnly included: dropping a resource
-// here would drop it from the ownership record too, and that record is what
-// stops another manager claiming it. What changes is the flag, and the
-// manager reads it.
 func TestOnlyABootstrapTellsTheManagerItMayWriteCredentials(t *testing.T) {
 	secret := citypes.Resource{
 		Kind:          "actions-secret",
@@ -929,9 +883,6 @@ func TestOnlyABootstrapTellsTheManagerItMayWriteCredentials(t *testing.T) {
 	})
 }
 
-// The serialized duplicate of a push wave finds every run recorded green and
-// executes nothing. The report must say so - a reused apply that reads like
-// a build that did work hides what actually happened.
 func TestAnApplyThatReusedEveryRunReportsNothingNew(t *testing.T) {
 	f := newFakeEngines(t)
 	p := pipeline(stage("build", substage("default", []string{"build"})))

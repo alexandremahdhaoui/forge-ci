@@ -35,45 +35,33 @@ type fakeEngines struct {
 	t     *testing.T
 	mu    sync.Mutex
 	store map[string]string
-	// puts is the kind of every state write, in order, so a test can say
-	// how MANY times a record family was written and not only that it was.
+
 	puts  []string
 	calls []call
 	live  int
 	peak  int
 
 	published []citypes.ArtifactInput
-	// restored is every artifact the compute engine was asked to bring
-	// back, by location, in the order it was asked.
+
 	restored []string
-	// missing is what the compute engine cannot bring back, by location -
-	// a fresh runner that never put them, seen from the core's side.
+
 	missing map[string]bool
-	// index is what the fake release engine answers as the staged index,
-	// so a test can seed what the last release shipped.
+
 	index      string
 	runOutputs map[string]citypes.RunOutput
 	gateStatus citypes.Status
 	promote    *citypes.PromotionOutput
 	failOn     map[call]error
 
-	// declared is what every engine answers declare with; realized records
-	// the resource ids a manager was handed, and bootstrapped records the
-	// flag it was handed them with.
 	declared     []citypes.Resource
 	realized     []string
 	bootstrapped bool
 
-	// reconcileChanged is what every manager answers changed with, which is
-	// how a test stands up a run that found drift and corrected it.
 	reconcileChanged bool
-	// reconcilePublished says the fake's settle pushed the changes - the
-	// half of the answer the stop decision hangs on.
+
 	reconcilePublished bool
 }
 
-// plain is an ordinary run: it writes, and it rewrites nothing that cannot
-// be compared. A case that names Options is a case about one of those flags.
 var plain = reconcilecontroller.Options{}
 
 func newFakeEngines(t *testing.T) *fakeEngines {
@@ -168,8 +156,6 @@ func (f *fakeEngines) dispatch(_ context.Context, uri, tool string, in, out any)
 
 		return assign(out, result)
 	case uri == uriCompute && tool == "put":
-		// The fake keeps nothing: the records come back as they went, the
-		// way an engine with nothing to move answers.
 		var input citypes.ArtifactPutInput
 		require.NoError(f.t, remarshal(in, &input))
 
@@ -178,8 +164,6 @@ func (f *fakeEngines) dispatch(_ context.Context, uri, tool string, in, out any)
 		var input citypes.ArtifactGetInput
 		require.NoError(f.t, remarshal(in, &input))
 
-		// What the engine cannot bring back is left out of the answer, the
-		// way the real engine skips what this run never put.
 		found := make([]forge.Artifact, 0, len(input.Artifacts))
 
 		f.mu.Lock()
@@ -269,8 +253,6 @@ func (f *fakeEngines) leave() {
 	f.mu.Unlock()
 }
 
-// countedPut is how many records of one kind were written. The store keeps
-// only the last of a key, so a test that must say "once" counts the writes.
 func (f *fakeEngines) countedPut(kind string) int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -359,28 +341,16 @@ func pipeline(stages ...config.Stage) config.Pipeline {
 	}
 }
 
-// Minting is no stage's business any more - the evaluate phase does it, once,
-// for the whole run - and neither is releasing: a release is a substage like
-// any other, so a releasing stage is one that carries a publishing substage
-// beside whatever else it runs.
 func stage(name string, subs ...config.Substage) config.Stage {
 	return config.Stage{Name: name, Promotion: "all-pass", Substages: subs}
 }
 
-// releaseStage is a stage that only publishes.
-//
-// A release is a substage like any other, and the substages of one stage run
-// at the same time - so a release beside a build would publish while the build
-// was still running, and would read none of what it made. Stage order is what
-// holds it back, which is the same tool that orders everything else.
 func releaseStage() config.Stage {
 	return config.Stage{Name: "release", Promotion: "all-pass", Substages: []config.Substage{
-		{Name: "publish", Engine: "gh", Manager: "local"},
+		{Name: "publish", Engine: "gh"},
 	}}
 }
 
-// releasingPipeline is the ordinary shape: a stage that builds, then a stage
-// that publishes what it built.
 func releasingPipeline(subs ...config.Substage) config.Pipeline {
 	if len(subs) == 0 {
 		subs = []config.Substage{substage("default", []string{"build"})}
@@ -391,15 +361,12 @@ func releasingPipeline(subs ...config.Substage) config.Pipeline {
 
 func substage(name string, targets []string, gates ...string) config.Substage {
 	return config.Substage{
-		Name: name, Engine: "here", Manager: "local", Targets: targets, Gates: gates,
+		Name: name, Engine: "here", Targets: targets, Gates: gates,
 	}
 }
 
 func mockAny() any { return mock.Anything }
 
-// rekeyEvaluation files the decision recorded for one revision under another
-// key, which is what a state store that answered the wrong record looks like
-// from the caller's side.
 func (f *fakeEngines) rekeyEvaluation(t *testing.T, from, to string) {
 	t.Helper()
 
@@ -414,8 +381,6 @@ func (f *fakeEngines) rekeyEvaluation(t *testing.T, from, to string) {
 	f.store["owned/evaluate-"+to] = payload
 }
 
-// stripEvaluationRevision drops the revision from a recorded decision, which
-// is the shape a forge-ci from before the revision travelled wrote.
 func (f *fakeEngines) stripEvaluationRevision(t *testing.T, revision string) {
 	t.Helper()
 
@@ -444,8 +409,6 @@ func (f *fakeEngines) stripEvaluationRevision(t *testing.T, revision string) {
 	f.store[key] = string(stripped)
 }
 
-// ignoreRepos tells the pipeline's artifact engine to leave these members
-// alone: they stay in the revision, pinned, and the release never tags them.
 func ignoreRepos(p *config.Pipeline, names ...string) {
 	list := make([]any, 0, len(names))
 	for _, name := range names {

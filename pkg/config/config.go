@@ -36,11 +36,7 @@ var (
 )
 
 type Pipeline struct {
-	Name string `json:"name"`
-	// Versioning decides the one number every member is released under.
-	// There is no field to type a version into, on purpose: a version is
-	// derived or it is nothing, so it can never be re-typed onto a release
-	// that already exists.
+	Name       string     `json:"name"`
 	Versioning Versioning `json:"versioning,omitempty"`
 	Repos      []Repo     `json:"repos,omitempty"`
 	Managers   []Manager  `json:"managers,omitempty"`
@@ -51,46 +47,20 @@ type Pipeline struct {
 	Stages     []Stage    `json:"stages"`
 }
 
-// Versioning is how one release number is derived for a whole factory. Every
-// member is tagged with that number, so a workspace has one version line
-// rather than one per repo.
 type Versioning struct {
-	// TagPrefix goes in front of the semver, with a dash. Empty means no
-	// prefix, which is what every factory does today: v0.50.0. Set it only
-	// when one repo is released by more than one factory, so the two lines
-	// do not read each other's tags: "forge" gives forge-v0.50.0.
 	TagPrefix string `json:"tagPrefix,omitempty"`
 
-	// Strategy picks the bump. Empty means bump-patch-version.
 	Strategy string `json:"strategy,omitempty"`
 
-	// Cap is the ceiling the bump may not cross, inclusive. "v0" holds the
-	// major at 0; "v0.50" holds major and minor. A bump that would cross it
-	// drops one level and retries, so a factory that is not ready for v1
-	// keeps releasing rather than stopping.
 	Cap string `json:"cap,omitempty"`
 
-	// Semantic is the vocabulary the semantic strategy reads commit
-	// subjects with. It is ignored by the other strategies.
 	Semantic Semantic `json:"semantic,omitempty"`
 
-	// IgnorePaths names what never releases, as glob patterns against each
-	// member's root. A revision whose release set differs from the last
-	// release only under these paths converges without a release. List only
-	// what nothing embeds: a README a binary carries is a code change, and a
-	// pattern that hides it hides a release.
 	IgnorePaths []string `json:"ignorePaths,omitempty"`
 
-	// SelfReconcileCommitPrefix is what the commit forge-ci writes when it
-	// reconciles its own CI resources starts with. Empty means "forge-ci:",
-	// so the commit reads "forge-ci: self reconcile". The release decision
-	// scores that commit as a patch unless a semantic list names the same
-	// prefix, in which case that list wins.
 	SelfReconcileCommitPrefix string `json:"selfReconcileCommitPrefix,omitempty"`
 }
 
-// CommitPrefix is the self reconcile commit prefix in force: the declared
-// one, or the default.
 func (v Versioning) CommitPrefix() string {
 	if strings.TrimSpace(v.SelfReconcileCommitPrefix) == "" {
 		return DefaultCommitPrefix
@@ -99,44 +69,23 @@ func (v Versioning) CommitPrefix() string {
 	return v.SelfReconcileCommitPrefix
 }
 
-// DefaultCommitPrefix is the self reconcile commit prefix when the pipeline
-// names none.
 const DefaultCommitPrefix = "forge-ci:"
 
-// Semantic is the vocabulary, not a standard. A team writes the prefixes it
-// actually uses, emoji included, and nothing here assumes conventional
-// commits.
 type Semantic struct {
 	Major  []string `json:"major,omitempty"`
 	Minor  []string `json:"minor,omitempty"`
 	Patch  []string `json:"patch,omitempty"`
 	Ignore []string `json:"ignore,omitempty"`
 
-	// Unmatched is the level a subject scores when no list claims it.
-	// Empty means patch. Set it to "ignore" to make the vocabulary
-	// exhaustive, so an unrecognised subject releases nothing, or to
-	// "error" to enforce it: the newest commit of each release repo must
-	// then match a list, or the run fails before anything builds, naming
-	// the subject. Older unmatched commits score patch: history is never
-	// rewritten, so the fix is a good commit on top.
 	Unmatched string `json:"unmatched,omitempty"`
 }
 
-// UnmatchedError is the Unmatched value that enforces the vocabulary.
 const UnmatchedError = "error"
 
 type Repo struct {
-	Name string `json:"name"`
-	URL  string `json:"url"`
-	Ref  string `json:"ref,omitempty"`
-	// Needs names the repos that must finish before this one starts, when a
-	// target runs in both. It is a dependency and not an order: a substage
-	// builds everything it can at once and holds back only what is waiting,
-	// so adding a repo cannot silently reorder the others.
-	//
-	// A need on a repo the target does not name costs nothing. The
-	// declaration says what must be built first when both are being built,
-	// not that the other must be built at all.
+	Name  string   `json:"name"`
+	URL   string   `json:"url"`
+	Ref   string   `json:"ref,omitempty"`
 	Needs []string `json:"needs,omitempty"`
 }
 
@@ -154,9 +103,6 @@ type Engine struct {
 	Spec    map[string]any `json:"spec,omitempty"`
 }
 
-// Target is one thing to run: an executable found on PATH and its
-// arguments, one per element, in each repo named by In. The pipeline names
-// the binary; forge-ci names none.
 type Target struct {
 	Alias  string   `json:"alias"`
 	Binary string   `json:"binary"`
@@ -165,50 +111,24 @@ type Target struct {
 }
 
 type Stage struct {
-	Name string `json:"name"`
-	// DisplayName is what to call this stage where a person reads it. Empty
-	// means a caller derives a title from the name, so a pipeline that says
-	// nothing still reads as words rather than as an identifier.
+	Name        string     `json:"name"`
 	DisplayName string     `json:"displayName,omitempty"`
 	Promotion   string     `json:"promotion,omitempty"`
 	Substages   []Substage `json:"substages"`
 }
 
 type Substage struct {
-	Name string `json:"name"`
-	// DisplayName is what to call this substage where a person reads it.
-	// Empty means a caller derives a title from the stage and substage
-	// names.
-	DisplayName string `json:"displayName,omitempty"`
-	// Engine names a compute engine, which runs targets, or an artifact
-	// engine, which publishes what the stages before it built. Which of the
-	// two it is decides whether Targets is required or refused.
-	Engine  string            `json:"engine"`
-	Manager string            `json:"manager"`
-	Targets []string          `json:"targets,omitempty"`
-	Gates   []string          `json:"gates,omitempty"`
-	Params  map[string]string `json:"params,omitempty"`
-	// Sync makes the compute engine converge the workspace - manifests,
-	// then the dependency closure - before this substage's targets run. A
-	// multi-repo workspace builds against generated manifests, so at least
-	// one substage must set it; Validate enforces that.
-	Sync bool `json:"sync,omitempty"`
-	// Needs names substages of THIS stage that must advance before this
-	// one runs. Empty means it runs beside everything else the stage
-	// declares: substages are concurrent unless one says otherwise. This
-	// is the one ordering a stage carries. Without it, two writes that
-	// must not race had to live in stages of their own, and the stage list
-	// stopped describing the pipeline.
-	Needs []string `json:"needs,omitempty"`
-	// Uses names substages of EARLIER stages, as <stage>/<substage>, whose
-	// built artifacts this one reads. Absent means everything every earlier
-	// stage built, which is what every substage read before this existed.
-	// Declared, a stage job brings back only what it named, and a stage
-	// that reads nothing carries nothing.
-	Uses []string `json:"uses,omitempty"`
+	Name        string            `json:"name"`
+	DisplayName string            `json:"displayName,omitempty"`
+	Engine      string            `json:"engine"`
+	Targets     []string          `json:"targets,omitempty"`
+	Gates       []string          `json:"gates,omitempty"`
+	Params      map[string]string `json:"params,omitempty"`
+	Sync        bool              `json:"sync,omitempty"`
+	Needs       []string          `json:"needs,omitempty"`
+	Uses        []string          `json:"uses,omitempty"`
 }
 
-// HasSubstage answers whether the stage declares a substage of this name.
 func (s Stage) HasSubstage(name string) bool {
 	for _, sub := range s.Substages {
 		if sub.Name == name {
@@ -219,7 +139,6 @@ func (s Stage) HasSubstage(name string) bool {
 	return false
 }
 
-// SubstageNames answers the substage names in declared order.
 func (s Stage) SubstageNames() []string {
 	names := make([]string, 0, len(s.Substages))
 	for _, sub := range s.Substages {
@@ -229,9 +148,6 @@ func (s Stage) SubstageNames() []string {
 	return names
 }
 
-// SubstageNeeds answers the needs graph among this stage's substages, in
-// the shape citypes.Waves orders: only substages that declare a need have
-// an entry.
 func (s Stage) SubstageNeeds() map[string][]string {
 	needs := map[string][]string{}
 	for _, sub := range s.Substages {
@@ -243,11 +159,6 @@ func (s Stage) SubstageNeeds() map[string][]string {
 	return needs
 }
 
-// retiredKeyHint rewrites a strict-parse refusal of a key this schema no
-// longer carries into the reason it left, so the fix is readable from the
-// error alone. artifactStorePath was declared for two months and read by
-// nothing: the store path is forge's, in forge.yaml, and forge-ci harvests
-// whatever forge recorded.
 func retiredKeyHint(err error) error {
 	if strings.Contains(err.Error(), `unknown field "artifactStorePath"`) {
 		return fmt.Errorf("%w; artifactStorePath is retired: the store path is forge's, declared in each repo's forge.yaml, and forge-ci reads no store path of its own", err)
@@ -302,10 +213,6 @@ func (p Pipeline) Validate() error {
 		repos[r.Name] = true
 	}
 
-	// The needs graph, once every name is known. A repo that waits on
-	// something no repos entry declares would wait forever and read as a
-	// build that never started, so a typo is refused here rather than at
-	// the substage that meets it.
 	needs := map[string][]string{}
 	names := make([]string, 0, len(p.Repos))
 
@@ -326,9 +233,6 @@ func (p Pipeline) Validate() error {
 		names = append(names, r.Name)
 	}
 
-	// A cycle is checked against every repo at once, which is the widest any
-	// target can be. A subset of a graph with no cycle has none either, so
-	// nothing that passes here can fail at a substage.
 	if _, err := citypes.Waves(names, needs); err != nil {
 		add("repos: %s", err)
 	}
@@ -390,10 +294,6 @@ func (p Pipeline) Validate() error {
 
 		engines[e.Alias] = e.Type
 
-		// An artifact engine may be told which of the factory's members to
-		// leave alone. The engine cannot check the names - it never learns
-		// what the factory holds - so the pipeline does, here, where both
-		// lists are in hand.
 		if e.Type == PortArtifact {
 			ignored := map[string]bool{}
 
@@ -506,17 +406,9 @@ func (p Pipeline) Validate() error {
 
 			subs[sub.Name] = true
 
-			// A substage either runs something or publishes something. Which
-			// it does is the engine's port, and the two shapes take opposite
-			// answers on targets: a compute substage with none does nothing,
-			// and an artifact substage with any carries a key nobody reads.
 			publishes := engines[sub.Engine] == PortArtifact
 			if !publishes {
 				requirePort(subWhere, sub.Engine, PortCompute)
-			}
-
-			if !managers[sub.Manager] {
-				add("%s: manager %q is not declared", subWhere, sub.Manager)
 			}
 
 			switch {
@@ -537,10 +429,6 @@ func (p Pipeline) Validate() error {
 				requirePort(subWhere+": gates", g, PortGate)
 			}
 
-			// A need names a substage of THIS stage. A name nothing declares
-			// would wait forever, and a build that never starts reads like
-			// one that was never asked for; a substage that needs itself is
-			// the smallest cycle.
 			for _, n := range sub.Needs {
 				if n == sub.Name {
 					add("%s: needs names itself", subWhere)
@@ -550,10 +438,6 @@ func (p Pipeline) Validate() error {
 			}
 		}
 
-		// A use names a substage of an EARLIER stage. This stage's own
-		// substages have not built anything a sibling can read, and a
-		// later stage has not run; both are refused by name rather than
-		// carried as an empty download.
 		for j, sub := range s.Substages {
 			subWhere := fmt.Sprintf("%s: substages[%d] (%s)", where, j, sub.Name)
 
@@ -574,18 +458,11 @@ func (p Pipeline) Validate() error {
 			}
 		}
 
-		// Two substages that each need the other never start. Refused by
-		// name rather than hung; the same walk the run uses answers it.
 		if _, err := citypes.Waves(s.SubstageNames(), s.SubstageNeeds()); err != nil {
 			add("%s: substages: %v", where, err)
 		}
 	}
 
-	// A multi-repo workspace builds against generated manifests, so a
-	// pipeline that never converges them is building what nobody wrote. The
-	// rule is structural: it knows a sync must happen somewhere, not which
-	// substage needs it. A single-repo pipeline is exempt - there is no
-	// workspace to converge.
 	if len(p.Repos) > 1 {
 		synced := false
 
@@ -610,8 +487,6 @@ func (p Pipeline) Validate() error {
 	return fmt.Errorf("invalid pipeline:\n  %s", strings.Join(errs, "\n  "))
 }
 
-// The strategies. A pipeline that names none bumps the patch, which is what
-// every factory did before this field existed.
 const (
 	StrategyPatch    = "bump-patch-version"
 	StrategyMinor    = "bump-minor-version"
@@ -624,9 +499,6 @@ var strategies = map[string]bool{
 	StrategySemantic: true,
 }
 
-// levels are what Semantic.Unmatched may name. "ignore" makes the vocabulary
-// exhaustive: a subject nothing claims releases nothing. "error" enforces
-// it: a subject nothing claims fails the run before anything builds.
 var levels = map[string]bool{
 	"major":        true,
 	"minor":        true,
@@ -635,13 +507,8 @@ var levels = map[string]bool{
 	UnmatchedError: true,
 }
 
-// capPattern is a ceiling, not a version: "v0" or "v0.50". A full semver is
-// refused because a cap on the patch would stop the only bump that always
-// works, and a factory that cannot bump is a factory that cannot release.
 var capPattern = regexp.MustCompile(`^v(0|[1-9]\d*)(\.(0|[1-9]\d*))?$`)
 
-// tagPrefixPattern keeps a prefix to something a tag can carry and a shell
-// can type. It joins the semver with a dash: "forge" -> forge-v0.50.0.
 var tagPrefixPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
 func (v Versioning) problems() []string {
@@ -666,18 +533,12 @@ func (v Versioning) problems() []string {
 			"semantic.unmatched %q must be major, minor, patch, ignore or error", v.Semantic.Unmatched))
 	}
 
-	// A path rule nothing reads is the same mistake as a vocabulary nothing
-	// reads: it only applies where a release set is compared, which is the
-	// release decision of any strategy, so it is never refused here. An
-	// empty pattern would match everything and hide every release.
 	for _, pattern := range v.IgnorePaths {
 		if strings.TrimSpace(pattern) == "" {
 			out = append(out, "ignorePaths carries an empty pattern")
 		}
 	}
 
-	// A vocabulary nothing reads is a vocabulary somebody wrote expecting it
-	// to work. Say so rather than ignoring it.
 	if v.SelfReconcileCommitPrefix != "" && strings.TrimSpace(v.SelfReconcileCommitPrefix) == "" {
 		out = append(out, "selfReconcileCommitPrefix must not be blank: every commit would read as a self reconcile")
 	}
@@ -694,15 +555,6 @@ func (s Semantic) empty() bool {
 		len(s.Ignore) == 0 && s.Unmatched == ""
 }
 
-// IgnoreRepos is the members an artifact engine is told to leave alone: they
-// stay in the revision, pinned at their shas, and the engine never tags them.
-// It lives in the engine's own spec because what to publish is the engine's
-// question, and it is read here because the names are the pipeline's - a
-// factory that writes into one of its own repos every run keeps that repo out
-// of its release set this way.
-//
-// A spec is free-form on the wire, so the shape is read defensively: anything
-// that is not a list of strings answers nothing rather than half of it.
 func IgnoreRepos(spec map[string]any) []string {
 	raw, ok := spec["ignoreRepos"].([]any)
 	if !ok {
@@ -720,7 +572,6 @@ func IgnoreRepos(spec map[string]any) []string {
 	return out
 }
 
-// stageBefore answers the stage named, when it comes before position at.
 func (p Pipeline) stageBefore(at int, name string) (Stage, bool) {
 	for i, s := range p.Stages {
 		if i >= at {

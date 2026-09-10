@@ -45,7 +45,6 @@ stages:
     substages:
       - name: default
         engine: here
-        manager: local
         targets: [build]
 `
 
@@ -119,10 +118,6 @@ func TestApplyRendersTheWholeReport(t *testing.T) {
 	require.Contains(t, text, "forge unit passed 37 tests 96.4% coverage")
 }
 
-// A superseded run exits 0. It is not a failure - nothing broke, the drift
-// is corrected and pushed, and the run that correction triggers does the
-// work. So the report on stdout is the only way an operator learns why no
-// stage ran, which is why it leads and says both halves.
 func TestASupersededApplyReportsLoudlyAndDoesNotFail(t *testing.T) {
 	var out bytes.Buffer
 
@@ -149,9 +144,6 @@ func TestASupersededApplyReportsLoudlyAndDoesNotFail(t *testing.T) {
 		"the last line is the word a rendered workflow reads to stop the jobs after the reconcile; got %q", text)
 }
 
-// A self-reconcile phase that found no drift ends on the other word, on its
-// last line, so a rendered workflow reads one line either way and lets the
-// evaluate job run only on this one.
 func TestAConvergedSelfReconcilePhaseEndsOnItsWord(t *testing.T) {
 	var out bytes.Buffer
 
@@ -172,9 +164,6 @@ func TestAConvergedSelfReconcilePhaseEndsOnItsWord(t *testing.T) {
 	require.NotContains(t, text, "revision ")
 }
 
-// A plan says so on its first line. An operator reading a wall of actions
-// has to be able to tell at a glance whether they already happened, and the
-// exit status cannot say it: a plan exits 0 and so does a green run.
 func TestADryRunSaysItIsAPlanAndPrintsNoRevision(t *testing.T) {
 	var out bytes.Buffer
 
@@ -196,8 +185,6 @@ func TestADryRunSaysItIsAPlanAndPrintsNoRevision(t *testing.T) {
 	require.NotContains(t, text, "stage ")
 }
 
-// The empty plan has to say something. A bare "nothing was written" with no
-// lines under it reads like a run that failed to look.
 func TestAnEmptyPlanSaysEverythingAlreadyMatches(t *testing.T) {
 	var out bytes.Buffer
 
@@ -211,8 +198,6 @@ func TestAnEmptyPlanSaysEverythingAlreadyMatches(t *testing.T) {
 	require.Contains(t, out.String(), "everything already matches what is declared")
 }
 
-// --force reaches the reconcile. It is one bool and it decides whether a
-// second operator's bootstrap silently replaces the first one's credential.
 func TestForceReachesTheReconcile(t *testing.T) {
 	var out bytes.Buffer
 
@@ -508,18 +493,6 @@ func TestGraphPropagatesAnError(t *testing.T) {
 	require.ErrorIs(t, err, errBoom)
 }
 
-// The root reaches every engine as spec["root"]. An engine joins paths from
-// it that only mean one place while it is absolute: the member checkouts it
-// runs git in, and the asset files it reads to upload.
-//
-// With --root . every join looks clean and means whatever directory the
-// process happens to be in. A release then fails on a file that is on disk -
-// at the last step, after the build and publish stages passed and the tags
-// are already cut.
-//
-// --root . is the form the operator runbook prints, so this was reachable by
-// following the documentation. Deriving the root from the config file
-// already absolutised it; an explicit one took the other branch.
 func TestTheRootReachesTheEnginesAbsolute(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "forge-ci.yaml")
@@ -561,9 +534,6 @@ func TestTheRootReachesTheEnginesAbsolute(t *testing.T) {
 	}
 }
 
-// A skipped run says why on its own line, runs no stage, exits 0, and ends
-// on the one word a rendered workflow reads. An intent phase that found
-// work ends on the other word.
 func TestASkippedApplyReportsTheReasonAndTheWord(t *testing.T) {
 	var out bytes.Buffer
 
@@ -597,7 +567,6 @@ func TestASkippedApplyReportsTheReasonAndTheWord(t *testing.T) {
 	require.True(t, strings.HasSuffix(out.String(), "evaluate: proceed\n"), out.String())
 }
 
-// A phase nobody implements is refused by name, before anything runs.
 func TestAnUnknownPhaseIsRefused(t *testing.T) {
 	var out bytes.Buffer
 
@@ -607,9 +576,6 @@ func TestAnUnknownPhaseIsRefused(t *testing.T) {
 	require.Contains(t, err.Error(), "self-reconcile, evaluate, stages")
 }
 
-// A workflow rendered by an earlier forge-ci still names the phases it
-// knew. Its first job must reach the self reconcile under the old spelling,
-// or the workflow can never re-render itself.
 func TestARetiredPhaseNameStillReachesItsPhase(t *testing.T) {
 	var out bytes.Buffer
 
@@ -622,9 +588,6 @@ func TestARetiredPhaseNameStillReachesItsPhase(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// A stage job is a stages phase narrowed by name, and the flags that narrow
-// it need each other in one order: --stage needs the stages phase, and
-// --substage needs --stage.
 func TestTheStageFlagsNeedEachOther(t *testing.T) {
 	for name, args := range map[string][]string{
 		"stage without the phase":  {"--stage", "build"},
@@ -652,10 +615,6 @@ func TestTheStageFlagsNeedEachOther(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// A run proves one set of commits, and only the phases after the evaluate one
-// can be told which: the evaluate phase decides it, and a whole apply holds it
-// from its first stage to its last. So --revision reaches the stages phase and
-// is refused everywhere else.
 func TestTheRevisionFlagBelongsToThePhasesAfterTheEvaluation(t *testing.T) {
 	for name, args := range map[string][]string{
 		"a whole apply":  {"--revision", "abc123"},

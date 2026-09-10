@@ -57,20 +57,10 @@ func run(t *testing.T, dir, name string, args ...string) (string, error) {
 
 	cmd := exec.CommandContext(context.Background(), name, args...)
 	cmd.Dir = dir
-	// The suite is hermetic: no git command here - the tests' own or the
-	// pipeline's - may read the machine's git config, or a developer's
-	// global signing setup turns plain commits and tags into signed ones
-	// that demand keys and messages the tests do not have.
 	cmd.Env = append(os.Environ(),
 		"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
 		"GIT_AUTHOR_NAME=e2e", "GIT_AUTHOR_EMAIL=e2e@example.com",
 		"GIT_COMMITTER_NAME=e2e", "GIT_COMMITTER_EMAIL=e2e@example.com",
-		// This suite is itself a stage of forge-self's pipeline, so the
-		// marker apply sets for its stages is in the environment, and every
-		// apply the suite spawns would be refused as the loop calling itself
-		// (forge-self run 88: 25 of 27 red). The suite's applies are on
-		// scratch repos of their own and are not that loop; the marker is
-		// cleared for them, and only for them.
 		"FORGE_CI_IN_APPLY=",
 	)
 
@@ -151,19 +141,10 @@ stages:
     substages:
       - name: default
         engine: here
-        manager: local
         targets: [build-all]
 `
 }
 
-// workspace stands a workspace up and provisions it, which is what an
-// operator does and in that order.
-//
-// The bootstrap matters to every test that applies. An apply reconciles
-// first, and on a workspace nobody bootstrapped the state directories do not
-// exist yet: the manager creates them, reports a change, and the run stops
-// as superseded before a stage can run. That is the rule working. A test
-// that skipped the bootstrap was testing a state the product never reaches.
 func workspace(t *testing.T, testCommand string) (root, statePath string) {
 	t.Helper()
 
@@ -173,8 +154,6 @@ func workspace(t *testing.T, testCommand string) (root, statePath string) {
 	return root, statePath
 }
 
-// bareWorkspace stops before the bootstrap, for the one test that is about
-// the bootstrap itself.
 func bareWorkspace(t *testing.T, testCommand string) (root, statePath string) {
 	t.Helper()
 
@@ -230,12 +209,6 @@ func TestTheWholeLoopRunsLocallyWithNoCloud(t *testing.T) {
 	out := mustRun(t, root, "forge-ci", "bootstrap", "--config", filepath.Join(root, "forge-ci.yaml"))
 	require.Contains(t, out, "created directory "+statePath)
 
-	// Only the store root is declared; a kind's directory appears with its
-	// first record. Bootstrap writes the revision and ownership records, so
-	// those two exist; runs/ waits for the first apply. Declaring empty
-	// kind directories was a run-stopper: git cannot carry one, so every
-	// fresh CI clone lacked it and every reconcile "created" it again,
-	// superseding the run with a change no trigger observes.
 	require.DirExists(t, filepath.Join(statePath, "revisions"))
 	require.NoDirExists(t, filepath.Join(statePath, "runs"))
 
@@ -317,9 +290,6 @@ func TestAFailingStageBlocksAndExitsNonZero(t *testing.T) {
 
 	id := revisionFromOutput(t, out)
 
-	// The revision is the run's name, so a run that failed has one: it is
-	// what the failure is filed under. The run record is what says the
-	// commits were not proven, and it says failed.
 	failed := readRun(t, statePath, id)
 	require.Equal(t, citypes.StatusFailed, failed.Status)
 
@@ -327,9 +297,6 @@ func TestAFailingStageBlocksAndExitsNonZero(t *testing.T) {
 		"a failing run is still a run, and it answers to a name")
 }
 
-// revisionFromOutput reads the id off the report. The report is the one place
-// that names this run's revision without a listing to disambiguate it from
-// every other revision the store holds.
 func revisionFromOutput(t *testing.T, out string) string {
 	t.Helper()
 
@@ -405,7 +372,6 @@ func TestApplyInsideApplyIsRefused(t *testing.T) {
     substages:
       - name: default
         engine: here
-        manager: local
         targets: [self-apply]
 `
 	require.NoError(t, os.WriteFile(config, []byte(withSelf), 0o600))
@@ -437,7 +403,6 @@ func TestASelfStageUsingBootstrapReconcilesWithoutRecursing(t *testing.T) {
     substages:
       - name: default
         engine: here
-        manager: local
         targets: [self-apply]
 `
 	require.NoError(t, os.WriteFile(config, []byte(withSelf), 0o600))
@@ -472,9 +437,6 @@ func TestAnUncommittedBreakIsCaught(t *testing.T) {
 	require.Contains(t, out, "-dirty")
 	require.Contains(t, out, "default failed")
 
-	// The uncommitted edit is its own revision and the report says so. That
-	// is the whole point: an uncommitted break must never reuse the passing
-	// run recorded under the clean revision.
 	dirty := revisionFromOutput(t, out)
 	require.NotEqual(t, clean[0], dirty, "an uncommitted edit must be its own revision")
 	require.True(t, strings.HasSuffix(dirty, "-dirty"))
@@ -538,19 +500,11 @@ func TestUntrackedBuildOutputNeverSettles(t *testing.T) {
 			"This is why a repo must gitignore its own output.")
 }
 
-// A file the factory's manifest names as generated churns without dirtying
-// the revision: the register moves those files by design, so their churn is
-// the system working. A file the manifest does not name still dirties it -
-// the protection for real edits stands.
 func TestFactoryGeneratedChurnDoesNotDirtyTheRevision(t *testing.T) {
 	root, statePath := bareWorkspace(t, "true")
 	config := filepath.Join(root, "forge-ci.yaml")
 	repo := filepath.Join(root, "demo-repo")
 
-	// A tracked file the factory declares generated, and the manifest that
-	// declares it - the same file forge-factory's sync writes. Committed
-	// before the bootstrap so the bootstrap's revision and the apply's are
-	// the same one.
 	require.NoError(t, os.WriteFile(filepath.Join(repo, "generated.file"), []byte("v1\n"), 0o600))
 	mustRun(t, repo, "git", "add", "generated.file")
 	mustRun(t, repo, "git", "commit", "-m", "track the generated file")
@@ -566,15 +520,12 @@ func TestFactoryGeneratedChurnDoesNotDirtyTheRevision(t *testing.T) {
 	require.Len(t, ids, 1)
 	require.NotContains(t, ids[0], "-dirty")
 
-	// The generated file churns. The revision must not move and must not
-	// come out dirty: this is the register bumping a version, not drift.
 	require.NoError(t, os.WriteFile(filepath.Join(repo, "generated.file"), []byte("v2\n"), 0o600))
 	mustRun(t, root, "forge-ci", "apply", "--config", config)
 
 	after := revisionIDs(t, statePath)
 	require.Equal(t, ids, after, "generated churn is not a new revision")
 
-	// An edit to a file the manifest does not name still counts.
 	require.NoError(t, os.WriteFile(filepath.Join(repo, "hand-edited.file"), []byte("x\n"), 0o600))
 
 	out, _ := run(t, root, "forge-ci", "apply", "--config", config)

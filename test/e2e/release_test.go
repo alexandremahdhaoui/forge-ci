@@ -20,17 +20,11 @@ import (
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/artifactcontroller"
 )
 
-// releaseFake is the GitHub API surface a release needs, recording what it
-// was sent. There is one path to GitHub and this is it: the engine speaks
-// the REST API with the token spec.tokenEnv names, in the repo spec.repo
-// names, on whatever host spec.apiBaseURL points at - which is what lets
-// this suite stay hermetic.
 type releaseFake struct {
 	server *httptest.Server
-	// releases is what consumers can see: repo to the published tag. A
-	// draft is not here until it is published.
+
 	releases map[string]string
-	// drafts is what was created and not yet published, by id.
+
 	drafts map[int64]fakeDraft
 	assets map[string][]byte
 	nextID int64
@@ -91,8 +85,6 @@ func newReleaseFake(t *testing.T) *releaseFake {
 		})
 	})
 	mux.HandleFunc("GET /repos/{owner}/{repo}/releases/tags/{tag}", func(w http.ResponseWriter, r *http.Request) {
-		// A draft is invisible here, exactly as on GitHub: only a published
-		// release answers by tag.
 		tag, ok := f.releases[r.PathValue("owner")+"/"+r.PathValue("repo")]
 		if !ok || tag != r.PathValue("tag") {
 			w.WriteHeader(http.StatusNotFound)
@@ -119,14 +111,6 @@ func newReleaseFake(t *testing.T) *releaseFake {
 	return f
 }
 
-// The build declares one tool over two platforms the way an instance would,
-// and generic-builder runs it once per platform: the host build lands at
-// dest/<name>, the cross build at dest/<name>_<os>_<arch>, each recorded
-// with the platform it was built for. The release stage reads those fields,
-// tags the member and publishes ONE aggregated release per revision: both
-// binaries plus the index that pins their digests. The bytes carry the
-// commit they were built from, as a real build's version stamp would, so a
-// new commit is a new binary and not a byte-identical rerun.
 const releaseForgeYAML = `name: demo-repo
 
 artifactStorePath: .forge/artifact-store.yaml
@@ -201,14 +185,12 @@ stages:
     substages:
       - name: default
         engine: here
-        manager: local
         targets: [build-all]
   - name: release
     promotion: all-pass
     substages:
       - name: publish
         engine: publish
-        manager: local
 `
 }
 
@@ -232,8 +214,6 @@ func TestAGreenBuildReleasesTheAggregatedDistribution(t *testing.T) {
 	mustRun(t, repo, "git", "add", ".")
 	mustRun(t, repo, "git", "commit", "-m", "first")
 
-	// The origin is a local bare mirror whose path still names owner/repo;
-	// the tag push and the API's repo derivation both ride it.
 	origin := filepath.Join(root, "remotes", "owner", "demo-repo.git")
 	require.NoError(t, os.MkdirAll(origin, 0o750))
 	mustRun(t, origin, "git", "init", "--bare")
@@ -242,9 +222,6 @@ func TestAGreenBuildReleasesTheAggregatedDistribution(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(root, "forge-ci.yaml"),
 		[]byte(releasePipelineYAML(root, statePath, fake.server.URL)), 0o600))
 
-	// Provisioned before it is applied, in that order, which is what an
-	// operator does. An apply on a workspace nobody bootstrapped creates the
-	// state directories, reports a change and stops as superseded.
 	mustRun(t, root, "forge-ci", "bootstrap", "--config", "forge-ci.yaml", "--root", ".")
 
 	out := mustRun(t, root, "forge-ci", "apply", "--config", "forge-ci.yaml", "--root", ".")
@@ -252,16 +229,11 @@ func TestAGreenBuildReleasesTheAggregatedDistribution(t *testing.T) {
 
 	revision := revisionID(t, statePath)
 
-	// One aggregated release per version, in the repo the spec named, under
-	// the same tag the members carry. The revision is still recorded, in the
-	// index below, so a release still says which tuple it was proven from.
 	require.Equal(t, "v0.1.0", fake.releases["owner/demo-repo"])
 
-	// The member is tagged with the semver the pipeline decided.
 	tags := mustRun(t, origin, "git", "tag")
 	require.Contains(t, tags, "v0.1.0")
 
-	// The release carries the built binary and the index that pins it.
 	binary, ok := fake.assets["demo-tool_linux_amd64"]
 	require.True(t, ok, "the built binary must ride the release; assets: %v", assetNames(fake))
 	require.Contains(t, string(binary), "demo-tool works")
@@ -273,7 +245,6 @@ func TestAGreenBuildReleasesTheAggregatedDistribution(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rawIndex, &index))
 	require.Equal(t, revision, index.Revision)
 	require.Equal(t, "v0.1.0", index.Release.Tag)
-	// One tool, both platforms, from the fields the two records carry.
 	require.Len(t, index.Tools, 1)
 	require.Equal(t, "demo-tool", index.Tools[0].Name)
 	require.Len(t, index.Tools[0].Platforms, 2)
@@ -281,26 +252,14 @@ func TestAGreenBuildReleasesTheAggregatedDistribution(t *testing.T) {
 	_, ok = fake.assets["demo-tool_linux_arm64"]
 	require.True(t, ok, "the cross build rides the release under its composed name")
 
-	// spec.assets is the door for files no artifact record carries: the
-	// glob-matched extra binary rides the same release as a plain asset.
-	// No record says which tool or platform it is, so the index - which
-	// never claims what nobody measured - leaves it out.
 	_, ok = fake.assets["extra-tool_linux_arm64"]
 	require.True(t, ok, "a spec.assets glob match must ride the release")
 
-	// The digest in the index is the digest of the uploaded bytes: the
-	// index never claims a byte nobody hashed.
 	sum := sha256.Sum256(binary)
 	require.Equal(t, "sha256:"+hex.EncodeToString(sum[:]),
 		index.Tools[0].Platforms["linux/amd64"].Digest)
 }
 
-// A second release of an already-published revision converges instead of
-// dying on the tag push. Live case: run 35 published v0.45.9, run 36 was a
-// fresh clone whose local tag list said "absent", so it re-created the tag
-// and the remote - the only party that knew - rejected the push. The remote
-// is the authority, and a tag already there at the same commit is
-// convergence, not work.
 func TestASecondReleaseOfTheSameRevisionConverges(t *testing.T) {
 	fake := newReleaseFake(t)
 
@@ -335,9 +294,6 @@ func TestASecondReleaseOfTheSameRevisionConverges(t *testing.T) {
 	mustRun(t, root, "forge-ci", "apply", "--config", "forge-ci.yaml", "--root", ".")
 	require.Equal(t, "v0.1.0", fake.releases["owner/demo-repo"])
 
-	// The re-run's checkout is a FRESH clone, tagless like every CI clone:
-	// actions/checkout fetches with --no-tags, which is exactly why the
-	// local tag list was never the authority.
 	require.NoError(t, os.RemoveAll(repo))
 	mustRun(t, root, "git", "clone", "--no-tags", origin, "demo-repo")
 	mustRun(t, repo, "git", "config", "user.email", "e2e@example.com")
@@ -351,8 +307,6 @@ func TestASecondReleaseOfTheSameRevisionConverges(t *testing.T) {
 	out := mustRun(t, root, "forge-ci", "apply", "--config", "forge-ci.yaml", "--root", ".")
 	require.NotContains(t, strings.ToLower(out), "rejected")
 
-	// Exactly one tag on the remote, still at its original commit: the
-	// second run stacked nothing and moved nothing.
 	tags := strings.Fields(mustRun(t, origin, "git", "tag"))
 	require.Equal(t, []string{"v0.1.0"}, tags)
 }
@@ -366,8 +320,6 @@ func assetNames(f *releaseFake) []string {
 	return names
 }
 
-// A dirty tree never releases: the guard that keeps an unproven byte out of
-// every distribution.
 func TestADirtyTreeNeverReleases(t *testing.T) {
 	fake := newReleaseFake(t)
 
@@ -389,13 +341,6 @@ func TestADirtyTreeNeverReleases(t *testing.T) {
 	require.Empty(t, fake.releases, "nothing may publish from a dirty tree")
 }
 
-// A repo that carries release history from before this pipeline existed
-// continues that line rather than starting over. Live case: forge carried
-// v0.1.0..v0.44.4 and the first release died trying to re-tag v0.1.0.
-//
-// The line lives in the repo the release is created in, and every member is
-// tagged with the one number read off it. That is the decision: one workspace,
-// one version, so a consumer who knows one member's version knows all of them.
 func TestAPreTaggedLineContinuesRatherThanStartingOver(t *testing.T) {
 	fake := newReleaseFake(t)
 
@@ -416,16 +361,11 @@ func TestAPreTaggedLineContinuesRatherThanStartingOver(t *testing.T) {
 	mustRun(t, repo, "git", "add", ".")
 	mustRun(t, repo, "git", "commit", "-m", "first")
 
-	// The pre-existing history: tags minted long before this pipeline.
 	mustRun(t, repo, "git", "tag", "-m", "v0.1.0", "v0.1.0")
 	mustRun(t, repo, "git", "tag", "-m", "v0.44.4", "v0.44.4")
 
-	// A tag from another factory's line sits alongside them. It must not be
-	// read as this line's history: with no prefix configured, only the plain
-	// semver line counts, so the next version is v0.44.5 and not v9.0.1.
 	mustRun(t, repo, "git", "tag", "-m", "other-v9.0.0", "other-v9.0.0")
 
-	// The head moves past the tagged commit, so the release tags fresh work.
 	require.NoError(t, os.WriteFile(filepath.Join(repo, "README.md"), []byte("two"), 0o600))
 	mustRun(t, repo, "git", "add", ".")
 	mustRun(t, repo, "git", "commit", "-m", "second")
@@ -438,21 +378,15 @@ func TestAPreTaggedLineContinuesRatherThanStartingOver(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(root, "forge-ci.yaml"),
 		[]byte(releasePipelineYAML(root, statePath, fake.server.URL)), 0o600))
 
-	// Provisioned before it is applied, in that order, which is what an
-	// operator does. An apply on a workspace nobody bootstrapped creates the
-	// state directories, reports a change and stops as superseded.
 	mustRun(t, root, "forge-ci", "bootstrap", "--config", "forge-ci.yaml", "--root", ".")
 
 	out := mustRun(t, root, "forge-ci", "apply", "--config", "forge-ci.yaml", "--root", ".")
 	require.Contains(t, out, "released")
 
-	// The line continues: v0.44.4 bumps to v0.44.5. Nothing tries to reuse
-	// v0.1.0, and the other factory's v9.0.0 is not this line's history.
 	tags := mustRun(t, origin, "git", "tag")
 	require.Contains(t, tags, "v0.44.5")
 	require.NotContains(t, tags, "v9.0.1")
 	require.NotContains(t, mustRun(t, repo, "git", "tag", "--points-at", "HEAD"), "v0.1.0")
 
-	// The release carries that same number. One workspace, one version.
 	require.Equal(t, "v0.44.5", fake.releases["owner/demo-repo"])
 }

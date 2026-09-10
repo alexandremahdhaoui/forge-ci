@@ -95,8 +95,6 @@ func TestEveryPortIsAccepted(t *testing.T) {
 	}
 }
 
-// A pipeline that names no version asks for the patch after the highest tag
-// the workspace carries. Requiring one here would make that unreachable.
 func TestAReleasingStageNeedsNoVersionOnThePipeline(t *testing.T) {
 	t.Parallel()
 
@@ -113,17 +111,14 @@ func TestAReleasingStageNeedsNoVersionOnThePipeline(t *testing.T) {
 		Stages: []config.Stage{{
 			Name: "prod",
 			Substages: []config.Substage{
-				{Name: "default", Engine: "here", Manager: "local", Targets: []string{"t"}},
-				{Name: "publish", Engine: "gh", Manager: "local"},
+				{Name: "default", Engine: "here", Targets: []string{"t"}},
+				{Name: "publish", Engine: "gh"},
 			},
 		}},
 	}.Validate()
 	require.NoError(t, err)
 }
 
-// Empty is the default and it is what every factory uses. A pipeline that
-// names no versioning at all behaves exactly as it did before the field
-// existed.
 func TestNoVersioningAtAllIsValid(t *testing.T) {
 	t.Parallel()
 
@@ -204,8 +199,6 @@ func TestEveryStrategyAndCapShapeIsAccepted(t *testing.T) {
 	}
 }
 
-// There is no door to type a version into. A version is derived or it is
-// nothing, so it can never be re-pointed at a release that already exists.
 func TestThereIsNoVersionFieldToTypeInto(t *testing.T) {
 	t.Parallel()
 
@@ -220,15 +213,12 @@ engines:
 targets: [{alias: t, binary: forge, args: [test-all]}]
 stages:
   - name: prod
-    substages: [{name: default, engine: here, manager: local, targets: [t]}]
+    substages: [{name: default, engine: here, targets: [t]}]
 `))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "version")
 }
 
-// needsPipeline is the smallest valid pipeline carrying a repo graph, so the
-// tests below assert on the graph and not on everything else a pipeline
-// needs to be valid.
 func needsPipeline(repos ...config.Repo) config.Pipeline {
 	return config.Pipeline{
 		Name:     "demo",
@@ -243,17 +233,12 @@ func needsPipeline(repos ...config.Repo) config.Pipeline {
 		Stages: []config.Stage{{
 			Name: "build",
 			Substages: []config.Substage{
-				// Sync satisfies the multi-repo rule so these tests stay
-				// about the needs graph; the rule has tests of its own.
-				{Name: "default", Engine: "here", Manager: "local", Targets: []string{"t"}, Sync: true},
+				{Name: "default", Engine: "here", Targets: []string{"t"}, Sync: true},
 			},
 		}},
 	}
 }
 
-// A multi-repo workspace builds against generated manifests, so a pipeline
-// that never converges them is building what nobody wrote. The rule is
-// structural: some substage must sync; which one is the pipeline's call.
 func TestAMultiRepoPipelineThatNeverSyncsIsRejected(t *testing.T) {
 	t.Parallel()
 
@@ -268,8 +253,6 @@ func TestAMultiRepoPipelineThatNeverSyncsIsRejected(t *testing.T) {
 	require.Contains(t, err.Error(), "converges its workspace nowhere")
 }
 
-// A single-repo pipeline has no workspace to converge, so the rule stays
-// out of its way - golden-register is exactly this shape.
 func TestASingleRepoPipelineNeedsNoSync(t *testing.T) {
 	t.Parallel()
 
@@ -289,9 +272,6 @@ func TestAValidNeedsGraphParses(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// A repo that waits on a name nothing declares would wait forever, and a
-// build that never starts reads like a build that was never asked for. The
-// typo is refused here rather than at the substage that meets it.
 func TestNeedingAnUndeclaredRepoIsRejected(t *testing.T) {
 	t.Parallel()
 
@@ -312,8 +292,6 @@ func TestNeedingItselfIsRejected(t *testing.T) {
 	require.Contains(t, err.Error(), "needs itself")
 }
 
-// The cycle is checked against every repo at once, which is the widest any
-// target can be, so nothing that parses can fail at a substage later.
 func TestACycleBetweenReposIsRejected(t *testing.T) {
 	t.Parallel()
 
@@ -325,8 +303,6 @@ func TestACycleBetweenReposIsRejected(t *testing.T) {
 	require.Contains(t, err.Error(), "cycle")
 }
 
-// Every pipeline in the fleet today declares no needs. Nothing about them
-// may change.
 func TestNoNeedsAtAllIsValid(t *testing.T) {
 	t.Parallel()
 
@@ -337,31 +313,23 @@ func TestNoNeedsAtAllIsValid(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// substageNeedsPipeline is one stage of three substages, the third waiting
-// on the second: the shape a release stage takes once its publishes stop
-// needing stages of their own.
 func substageNeedsPipeline(needs ...string) config.Pipeline {
 	p := needsPipeline(config.Repo{Name: "one", URL: "u"})
 	p.Stages[0].Substages = []config.Substage{
-		{Name: "artifacts", Engine: "here", Manager: "local", Targets: []string{"t"}},
-		{Name: "container", Engine: "here", Manager: "local", Targets: []string{"t"}, Needs: []string{"artifacts"}},
-		{Name: "revision", Engine: "here", Manager: "local", Targets: []string{"t"}, Needs: needs},
+		{Name: "artifacts", Engine: "here", Targets: []string{"t"}},
+		{Name: "container", Engine: "here", Targets: []string{"t"}, Needs: []string{"artifacts"}},
+		{Name: "revision", Engine: "here", Targets: []string{"t"}, Needs: needs},
 	}
 
 	return p
 }
 
-// A substage names the substages of its own stage it waits on, and the
-// stage list can then say what it means without faking order with stage
-// boundaries.
 func TestASubstageMayNeedAnotherOfItsStage(t *testing.T) {
 	t.Parallel()
 
 	require.NoError(t, substageNeedsPipeline("container").Validate())
 }
 
-// A need on a name the stage does not declare would wait forever, and a
-// substage that waits forever reads like one nobody asked for.
 func TestNeedingAnUndeclaredSubstageIsRejected(t *testing.T) {
 	t.Parallel()
 
@@ -371,8 +339,6 @@ func TestNeedingAnUndeclaredSubstageIsRejected(t *testing.T) {
 	require.Contains(t, err.Error(), `not a substage of stage "build"`)
 }
 
-// A substage that needs itself is the smallest cycle, and two that need
-// each other the next. Both are refused by name rather than hung.
 func TestASubstageCycleIsRejected(t *testing.T) {
 	t.Parallel()
 
@@ -388,10 +354,6 @@ func TestASubstageCycleIsRejected(t *testing.T) {
 	require.Contains(t, err.Error(), "cycle")
 }
 
-// The old shape named the binary by the KEY: forge: and forgeCI: were two
-// fields whose names were the executables. A pipeline that still writes
-// them fails the strict parse by key, which is a loud migration rather than
-// a target that silently runs nothing.
 func TestTheOldTargetKeysAreRefused(t *testing.T) {
 	t.Parallel()
 
@@ -405,7 +367,7 @@ engines:
 targets: [{alias: t, forge: test-all}]
 stages:
   - name: prod
-    substages: [{name: default, engine: here, manager: local, targets: [t]}]
+    substages: [{name: default, engine: here, targets: [t]}]
 `))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "forge")

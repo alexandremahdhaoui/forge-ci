@@ -23,7 +23,7 @@ func base() config.Pipeline {
 		Stages: []config.Stage{{
 			Name: "build",
 			Substages: []config.Substage{{
-				Name: "default", Engine: "here", Manager: "local", Targets: []string{"build"},
+				Name: "default", Engine: "here", Targets: []string{"build"},
 			}},
 		}},
 	}
@@ -131,13 +131,6 @@ func TestASubstageNeedsATarget(t *testing.T) {
 	requireInvalid(t, p, "targets must name at least one target")
 }
 
-func TestASubstageNeedsADeclaredManager(t *testing.T) {
-	p := base()
-	p.Stages[0].Substages[0].Manager = "ghost"
-
-	requireInvalid(t, p, `manager "ghost" is not declared`)
-}
-
 func TestATriggerMustBeATriggerEngine(t *testing.T) {
 	p := base()
 	p.Triggers = []string{"here"}
@@ -183,16 +176,12 @@ func TestEveryErrorIsReportedNotJustTheFirst(t *testing.T) {
 	require.Contains(t, err.Error(), "unknown target")
 }
 
-// A substage declares what it reads as <stage>/<substage> pairs of EARLIER
-// stages. Its own stage has built nothing a sibling can read, a later stage
-// has not run, and a name nothing declares is a download of nothing; each is
-// refused by name.
 func TestUsesNamesASubstageOfAnEarlierStage(t *testing.T) {
 	p := base()
 	p.Stages = append(p.Stages, config.Stage{
 		Name: "package",
 		Substages: []config.Substage{{
-			Name: "default", Engine: "here", Manager: "local", Targets: []string{"build"},
+			Name: "default", Engine: "here", Targets: []string{"build"},
 			Uses: []string{"build/default"},
 		}},
 	})
@@ -212,8 +201,6 @@ func TestUsesNamesASubstageOfAnEarlierStage(t *testing.T) {
 	requireInvalid(t, p, `uses names "package", which is not a stage before "build"`)
 }
 
-// The pipeline names the executable; forge-ci names none. A target with no
-// binary is refused, and a blank one is no binary.
 func TestATargetNamesItsBinary(t *testing.T) {
 	p := base()
 	p.Targets = []config.Target{{Alias: "build", Args: []string{"test-all"}}}
@@ -228,14 +215,6 @@ func TestAManagerNoEngineNamesIsRefusedByName(t *testing.T) {
 	p.Managers = append(p.Managers, config.Manager{Alias: "spare", Engine: "forge://x@v1"})
 
 	requireInvalid(t, p, `managers[1] (spare): manager "spare" is named by no engine, so it is never called`)
-}
-
-func TestAManagerOnlyASubstageNamesIsStillRefused(t *testing.T) {
-	p := base()
-	p.Managers = append(p.Managers, config.Manager{Alias: "spare", Engine: "forge://x@v1"})
-	p.Stages[0].Substages[0].Manager = "spare"
-
-	requireInvalid(t, p, `manager "spare" is named by no engine, so it is never called`)
 }
 
 func TestAManagerOneEngineNamesIsAccepted(t *testing.T) {

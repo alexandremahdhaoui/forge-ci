@@ -22,8 +22,6 @@ import (
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 )
 
-// ghFake is enough GitHub for the whole loop: a repo key, write-only
-// secrets, workflow enablement, dispatch and runs that echo the marker.
 type ghFake struct {
 	mu      sync.Mutex
 	keyB64  string
@@ -53,8 +51,6 @@ func (f *ghFake) handle(w http.ResponseWriter, r *http.Request) {
 	case strings.HasSuffix(r.URL.Path, "/actions/secrets/public-key"):
 		fmt.Fprintf(w, `{"key_id":"k1","key":"%s"}`, f.keyB64)
 	case strings.Contains(r.URL.Path, "/actions/secrets/") && r.Method == http.MethodGet:
-		// GitHub answers a secret's metadata and never its value, so
-		// existence is the only state a manager can compare against.
 		if !slices.Contains(f.secrets, filepath.Base(r.URL.Path)) {
 			w.WriteHeader(http.StatusNotFound)
 
@@ -67,11 +63,6 @@ func (f *ghFake) handle(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)
 	case strings.Contains(r.URL.Path, "/actions/workflows/") &&
 		strings.HasSuffix(r.URL.Path, ".yaml") && r.Method == http.MethodGet:
-		// The read that makes enablement converge rather than repeat.
-		// Enabling an already-enabled workflow succeeds, so a fake without
-		// this reports a change on every apply, the run stops as superseded
-		// and no stage ever runs. That is not a fixture detail: it is the
-		// behaviour the real API has.
 		if !slices.Contains(f.enabled, filepath.Base(r.URL.Path)) {
 			w.WriteHeader(http.StatusNotFound)
 
@@ -175,16 +166,10 @@ stages:
     substages:
       - name: default
         engine: gh-actions
-        manager: github
         targets: [build-all]
 `
 }
 
-// TestTheGitHubSurfaceIsProvisionedAndConverged is the acceptance for the
-// github engines: apply provisions every workflow file, secret and
-// enablement from the spec, a hand-edited workflow converges back on the
-// next apply, and a substage routed through the github compute lands a
-// passed run in state - all against a fake API, hermetically.
 func TestTheGitHubSurfaceIsProvisionedAndConverged(t *testing.T) {
 	fake, srv := newGHFake(t)
 	t.Setenv("GITHUB_TOKEN", "pat-under-test")
@@ -195,10 +180,6 @@ func TestTheGitHubSurfaceIsProvisionedAndConverged(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(root, "forge-ci.yaml"),
 		[]byte(githubPipelineYAML(root, statePath, srv.URL)), 0o600))
 
-	// The real flow, and the whole point of the settle: bootstrap
-	// provisions the surface AND commits what it wrote, so nobody has to
-	// commit eight repos' worth of generated files by hand and the revision
-	// apply resolves is not the tree the bootstrap just dirtied.
 	mustRun(t, root, "forge-ci", "bootstrap", "--config", "forge-ci.yaml", "--root", root)
 
 	repo := filepath.Join(root, "demo-repo")
@@ -209,8 +190,6 @@ func TestTheGitHubSurfaceIsProvisionedAndConverged(t *testing.T) {
 
 	mustRun(t, root, "forge-ci", "apply", "--config", "forge-ci.yaml", "--root", root)
 
-	// The GitHub surface exists: files on the checkout, secrets sealed,
-	// workflows enabled, ownership recorded under the github manager.
 	releaseFile := filepath.Join(root, "demo-repo", ".github", "workflows", "release.yaml")
 	runnerFile := filepath.Join(root, "demo-repo", ".github", "workflows", "ci-runner.yaml")
 	require.FileExists(t, releaseFile)
@@ -219,9 +198,6 @@ func TestTheGitHubSurfaceIsProvisionedAndConverged(t *testing.T) {
 	require.Contains(t, fake.enabled, "release.yaml")
 	require.Contains(t, fake.enabled, "ci-runner.yaml")
 
-	// The watch list provisioned its own notify workflow: the same list
-	// that decides what counts as a move now also puts the workflow that
-	// reports one into every watched repo.
 	notifyFile := filepath.Join(root, "demo-repo", ".github", "workflows", "notify.yaml")
 	require.FileExists(t, notifyFile)
 	require.Contains(t, fake.secrets, "FORGE_CI_DISPATCH_TOKEN")
@@ -238,9 +214,6 @@ func TestTheGitHubSurfaceIsProvisionedAndConverged(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, string(ownership), "actions-secret/acme/demo-repo/FORGE_CI_GITHUB_TOKEN")
 
-	// The remote substage ran through the dispatched runner and passed.
-	// Two revisions exist: the dirty one bootstrap recorded before the
-	// workflow files were committed, and the clean one apply ran.
 	entries, err := os.ReadDir(filepath.Join(statePath, "revisions"))
 	require.NoError(t, err)
 
@@ -261,16 +234,11 @@ func TestTheGitHubSurfaceIsProvisionedAndConverged(t *testing.T) {
 	require.NoError(t, json.Unmarshal(raw, &remoteRun))
 	require.Equal(t, citypes.StatusPassed, remoteRun.Status)
 
-	// Drift by hand; the next apply converges the file back. This is the
-	// whole point of the file-content kind.
 	want, err := os.ReadFile(releaseFile)
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(releaseFile, []byte("edited: by hand\n"), 0o600))
 
 	mustRun(t, root, "forge-ci", "apply", "--config", "forge-ci.yaml", "--root", root)
-
-	// The tree is clean again after convergence, so the same revision
-	// stands and nothing re-ran.
 
 	got, err := os.ReadFile(releaseFile)
 	require.NoError(t, err)
