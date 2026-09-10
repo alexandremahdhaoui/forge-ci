@@ -222,3 +222,26 @@ func TestATargetNamesItsBinary(t *testing.T) {
 	p.Targets = []config.Target{{Alias: "build", Binary: " "}}
 	requireInvalid(t, p, "binary must name the executable to run")
 }
+
+func TestAManagerNoEngineNamesIsRefusedByName(t *testing.T) {
+	p := base()
+	p.Managers = append(p.Managers, config.Manager{Alias: "spare", Engine: "forge://x@v1"})
+
+	requireInvalid(t, p, `managers[1] (spare): manager "spare" is named by no engine, so it is never called`)
+}
+
+func TestAManagerOnlyASubstageNamesIsStillRefused(t *testing.T) {
+	p := base()
+	p.Managers = append(p.Managers, config.Manager{Alias: "spare", Engine: "forge://x@v1"})
+	p.Stages[0].Substages[0].Manager = "spare"
+
+	requireInvalid(t, p, `manager "spare" is named by no engine, so it is never called`)
+}
+
+func TestAManagerOneEngineNamesIsAccepted(t *testing.T) {
+	p := base()
+	p.Managers = append(p.Managers, config.Manager{Alias: "spare", Engine: "forge://x@v1"})
+	p.Engines[0].Manager = "spare"
+
+	require.NoError(t, p.Validate())
+}

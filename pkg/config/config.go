@@ -359,8 +359,12 @@ func (p Pipeline) Validate() error {
 	}
 
 	engines := map[string]Port{}
+	namedManagers := map[string]bool{}
+
 	for i, e := range p.Engines {
 		where := fmt.Sprintf("engines[%d] (%s)", i, e.Alias)
+
+		namedManagers[e.Manager] = true
 
 		if !aliasPattern.MatchString(e.Alias) {
 			add("%s: alias must be lowercase kebab-case", where)
@@ -404,6 +408,13 @@ func (p Pipeline) Validate() error {
 
 				ignored[name] = true
 			}
+		}
+	}
+
+	for i, m := range p.Managers {
+		if !namedManagers[m.Alias] {
+			add("managers[%d] (%s): manager %q is named by no engine, so it is never called",
+				i, m.Alias, m.Alias)
 		}
 	}
 
