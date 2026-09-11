@@ -6,6 +6,11 @@ The `spec` block on this engine's entry in `forge-ci.yaml`.
 
 | Key | Type | Required | Means |
 |---|---|---|---|
-| `nodes` | list of objects | yes | The nodes to declare. Each entry holds `name`, the node's name and the resource name, `address`, what the manager reaches, and `configFile`, the path of the machine config document relative to the pipeline root. All three are required. |
+| `clusterName` | string | yes | The name of the cluster the machine config belongs to. |
+| `endpoint` | string | yes | The control plane endpoint as a url naming a host, such as `https://192.168.1.10:6443`. |
+| `kubernetesVersion` | string | yes | The Kubernetes version the machine config installs. |
+| `bundleFile` | string | yes | The path of the cluster's stored secret bundle relative to the pipeline root. |
+| `patchFile` | string | yes | The path of the control plane patch document relative to the pipeline root. |
+| `nodes` | list of objects | yes | The nodes to declare. Each entry holds `name`, the node's name and the resource name, and `address`, what the manager reaches. Both are required. |
 
 forge-ci never validates a spec. This engine does, because only it knows what the keys mean.

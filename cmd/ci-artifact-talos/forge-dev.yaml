@@ -1,7 +1,7 @@
 name: ci-artifact-talos
 kind: mcp-server
 version: 0.1.0
-description: Declare one machine config resource per node, read from a file under the pipeline root.
+description: Declare one machine config resource per node, rendered from a secret bundle and a patch under the pipeline root.
 openapi:
   specPath: ../../.forge/spec-cache/engines.v1.yaml
 generate:

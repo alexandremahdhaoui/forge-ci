@@ -2,7 +2,7 @@
 
 # ci-artifact-talos
 
-**Declare one machine config resource per node, read from a file under the pipeline root.**
+**Declare one machine config resource per node, rendered from a secret bundle and a patch under the pipeline root.**
 
 A forge-ci `artifact` engine.
 
@@ -10,8 +10,9 @@ A forge-ci `artifact` engine.
 
 A manager converges what something declares, and nothing declared a machine
 config, so the node manager was unreachable. This engine is the declaration.
-It names every node and the file holding that node's machine config
-document, and hands the text over as a resource the manager owns.
+It renders the control plane machine config from the cluster's stored
+secret bundle and a patch document, and hands it over once per node as a
+resource the manager owns.
 
 It wears the artifact port because that is the port a declaring engine can
 wear today. It publishes nothing. The publish tool refuses by name, so a
@@ -28,7 +29,7 @@ engine the release reads its behaviour from.
 ## By hand
 
 ```sh
-echo '{"root":"/w","spec":{"nodes":[{"name":"t0-controlplane","address":"192.168.1.10","configFile":"config/t0-controlplane.yaml"}]}}' \
+echo '{"root":"/w","spec":{"clusterName":"t0","endpoint":"https://192.168.1.10:6443","kubernetesVersion":"1.37.0","bundleFile":"secrets/bundle.yaml","patchFile":"talos/controlplane.patch.yaml","nodes":[{"name":"t0-controlplane","address":"192.168.1.10"}]}}' \
   | ci-artifact-talos declare
 ```
 
@@ -41,6 +42,11 @@ engines:
     engine: "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-artifact-talos@v0.1.0"
     manager: local
     spec:
+      clusterName: <string>
+      endpoint: <string>
+      kubernetesVersion: <string>
+      bundleFile: <string>
+      patchFile: <string>
       nodes: <list of objects>
 ```
 
@@ -48,17 +54,18 @@ engines:
 
 One node declares one resource. The kind is `machine-config`. The resource
 name is the node's name, `spec.node` is the address the manager reaches and
-`spec.config` is the text of the file.
+`spec.config` is the rendered control plane machine config.
 
-The file path is relative to the pipeline root, which rides the declare
-call. The engine reads the file and nothing else. It never reaches a node,
-it never runs a certificate generator and it never hashes the text. The
-manager already compares by loading both configs and asking the vendor for
-the patches between them, so a second comparison here would be a second
-authority over the same question.
+The engine reads the secret bundle and the patch from files relative to the
+pipeline root, which rides the declare call. The same bundle and the same
+patch render the same bytes every time. It never mints a bundle, never
+reaches a node and never hashes the text. The manager already compares by
+loading both configs and asking the vendor for the patches between them, so
+a second comparison here would be a second authority over the same question.
 
-A node with no name, no address or no configFile is refused by name. A
-configFile that cannot be read is an error naming the node and the file.
+Every spec key is required and an absent one is refused by name. A node with
+no name or no address is refused by name. A file that cannot be read is an
+error naming the cluster and the file.
 
-Certificates and keys are not this engine's business. The file it reads is
-whatever a human or another tool put there.
+The rendered config carries the cluster's private keys. No refusal and no
+resource description ever prints the bundle, the patch or the config.

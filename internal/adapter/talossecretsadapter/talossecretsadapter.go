@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"time"
 
 	"github.com/siderolabs/talos/pkg/machinery/config"
 	"github.com/siderolabs/talos/pkg/machinery/config/configpatcher"
@@ -25,15 +24,6 @@ type Cluster struct {
 type Secrets struct{}
 
 func New() Secrets { return Secrets{} }
-
-func (Secrets) Mint() (citypes.Secret, error) {
-	minted, err := secrets.NewBundle(secrets.NewFixedClock(time.Now()), config.TalosVersionCurrent)
-	if err != nil {
-		return "", errors.New("minting a talos secret bundle: the machinery refused to generate one")
-	}
-
-	return marshalBundle(minted)
-}
 
 func (Secrets) Load(bundle citypes.Secret) (citypes.Secret, error) {
 	held, err := unmarshalBundle(bundle)
@@ -64,27 +54,6 @@ func (Secrets) MachineConfig(bundle citypes.Secret, cluster Cluster, patch strin
 	raw, err := patched.Bytes()
 	if err != nil {
 		return "", fmt.Errorf("encoding the machine config of cluster %q: %w", cluster.Name, err)
-	}
-
-	return citypes.Secret(raw), nil
-}
-
-func (Secrets) Talosconfig(bundle citypes.Secret, cluster Cluster) (citypes.Secret, error) {
-	in, err := newInput(bundle, cluster)
-	if err != nil {
-		return "", err
-	}
-
-	rendered, err := in.Talosconfig()
-	if err != nil {
-		return "", fmt.Errorf(
-			"rendering the client configuration of cluster %q: %w", cluster.Name, err)
-	}
-
-	raw, err := rendered.Bytes()
-	if err != nil {
-		return "", fmt.Errorf(
-			"encoding the client configuration of cluster %q: %w", cluster.Name, err)
 	}
 
 	return citypes.Secret(raw), nil

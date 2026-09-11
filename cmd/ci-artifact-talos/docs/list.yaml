@@ -7,7 +7,7 @@ baseURL: "https://raw.githubusercontent.com/alexandremahdhaoui/forge-ci/refs/hea
 docs:
   - name: "usage"
     title: "ci-artifact-talos usage"
-    description: "Declare one machine config resource per node, read from a file under the pipeline root."
+    description: "Declare one machine config resource per node, rendered from a secret bundle and a patch under the pipeline root."
     url: "cmd/ci-artifact-talos/docs/usage.md"
     tags: ["usage", "artifact"]
     required: true

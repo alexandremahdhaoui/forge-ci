@@ -50,6 +50,13 @@ packages:
       Talos:
       Terraform:
 
+  github.com/alexandremahdhaoui/forge-ci/internal/controller/machineconfigcontroller:
+    config:
+      dir: internal/mocks/machineconfigcontrollermock
+      pkgname: machineconfigcontrollermock
+    interfaces:
+      Renderer:
+
   github.com/alexandremahdhaoui/forge-ci/internal/driver/clidriver:
     config:
       dir: internal/mocks/clidrivermock

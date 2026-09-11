@@ -4,13 +4,17 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/siderolabs/talos/pkg/machinery/config"
 	"github.com/siderolabs/talos/pkg/machinery/config/configloader"
+	"github.com/siderolabs/talos/pkg/machinery/config/generate/secrets"
 	"github.com/siderolabs/talos/pkg/machinery/config/machine"
 	"github.com/siderolabs/talos/pkg/machinery/constants"
+	"sigs.k8s.io/yaml"
 
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 )
@@ -46,35 +50,32 @@ func testCluster() Cluster {
 	}
 }
 
-func TestAMintedBundleRoundTripsThroughYamlUnchanged(t *testing.T) {
-	t.Parallel()
+func throwawayBundle(t *testing.T) citypes.Secret {
+	t.Helper()
 
-	minted, err := New().Mint()
+	minted, err := secrets.NewBundle(secrets.NewFixedClock(time.Now()), config.TalosVersionCurrent)
 	require.NoError(t, err)
-	require.NotEmpty(t, minted)
 
-	reread, err := New().Load(minted)
+	raw, err := yaml.Marshal(minted)
 	require.NoError(t, err)
-	assert.Equal(t, minted, reread)
+
+	return citypes.Secret(raw)
 }
 
-func TestTwoMintsAnswerDifferentBundles(t *testing.T) {
+func TestAStoredBundleRoundTripsThroughLoadUnchanged(t *testing.T) {
 	t.Parallel()
 
-	first, err := New().Mint()
-	require.NoError(t, err)
+	stored := throwawayBundle(t)
 
-	second, err := New().Mint()
+	reread, err := New().Load(stored)
 	require.NoError(t, err)
-
-	assert.NotEqual(t, first, second)
+	assert.Equal(t, stored, reread)
 }
 
 func TestTheSameBundleAndInputsRenderIdenticalMachineConfigBytesTwice(t *testing.T) {
 	t.Parallel()
 
-	bundle, err := New().Mint()
-	require.NoError(t, err)
+	bundle := throwawayBundle(t)
 
 	first, err := New().MachineConfig(bundle, testCluster(), patchDocument)
 	require.NoError(t, err)
@@ -88,10 +89,7 @@ func TestTheSameBundleAndInputsRenderIdenticalMachineConfigBytesTwice(t *testing
 func TestARenderedMachineConfigLoadsThroughTheTalosConfigLoader(t *testing.T) {
 	t.Parallel()
 
-	bundle, err := New().Mint()
-	require.NoError(t, err)
-
-	rendered, err := New().MachineConfig(bundle, testCluster(), patchDocument)
+	rendered, err := New().MachineConfig(throwawayBundle(t), testCluster(), patchDocument)
 	require.NoError(t, err)
 
 	loaded, err := configloader.NewFromBytes([]byte(rendered))
@@ -104,10 +102,7 @@ func TestARenderedMachineConfigLoadsThroughTheTalosConfigLoader(t *testing.T) {
 func TestARenderedMachineConfigCarriesThePatchDocumentContent(t *testing.T) {
 	t.Parallel()
 
-	bundle, err := New().Mint()
-	require.NoError(t, err)
-
-	rendered, err := New().MachineConfig(bundle, testCluster(), patchDocument)
+	rendered, err := New().MachineConfig(throwawayBundle(t), testCluster(), patchDocument)
 	require.NoError(t, err)
 
 	assert.Contains(t, string(rendered), "naa.5002538d009d9e70")
@@ -120,27 +115,10 @@ func TestARenderedMachineConfigCarriesAVersionV1Alpha1DocumentThePatchAloneDoesN
 
 	require.NotContains(t, patchDocument, "version: v1alpha1")
 
-	bundle, err := New().Mint()
-	require.NoError(t, err)
-
-	rendered, err := New().MachineConfig(bundle, testCluster(), patchDocument)
+	rendered, err := New().MachineConfig(throwawayBundle(t), testCluster(), patchDocument)
 	require.NoError(t, err)
 
 	assert.Contains(t, string(rendered), "version: v1alpha1")
-}
-
-func TestARenderedClientConfigurationNamesTheClusterAndItsEndpointHost(t *testing.T) {
-	t.Parallel()
-
-	bundle, err := New().Mint()
-	require.NoError(t, err)
-
-	rendered, err := New().Talosconfig(bundle, testCluster())
-	require.NoError(t, err)
-
-	assert.Contains(t, string(rendered), "t0")
-	assert.Contains(t, string(rendered), "cluster.example.com")
-	assert.NotContains(t, string(rendered), "6443")
 }
 
 func TestAnUnreadableBundleIsRefusedByName(t *testing.T) {
@@ -163,10 +141,7 @@ func TestABundleMissingItsCertificatesIsRefusedByName(t *testing.T) {
 func TestAMachineConfigWithNoPatchDocumentIsRefusedByName(t *testing.T) {
 	t.Parallel()
 
-	bundle, err := New().Mint()
-	require.NoError(t, err)
-
-	_, err = New().MachineConfig(bundle, testCluster(), "")
+	_, err := New().MachineConfig(throwawayBundle(t), testCluster(), "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "needs a patch document and got none")
 }
@@ -174,13 +149,10 @@ func TestAMachineConfigWithNoPatchDocumentIsRefusedByName(t *testing.T) {
 func TestAnEndpointThatNamesNoHostIsRefusedByName(t *testing.T) {
 	t.Parallel()
 
-	bundle, err := New().Mint()
-	require.NoError(t, err)
-
 	cluster := testCluster()
 	cluster.Endpoint = "6443"
 
-	_, err = New().MachineConfig(bundle, cluster, patchDocument)
+	_, err := New().MachineConfig(throwawayBundle(t), cluster, patchDocument)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "it must be a url naming a host")
 }
@@ -188,8 +160,7 @@ func TestAnEndpointThatNamesNoHostIsRefusedByName(t *testing.T) {
 func TestNoRefusalEverCarriesBundleBytes(t *testing.T) {
 	t.Parallel()
 
-	bundle, err := New().Mint()
-	require.NoError(t, err)
+	bundle := throwawayBundle(t)
 
 	secretLine := longestLine(string(bundle))
 	require.NotEmpty(t, secretLine)
@@ -197,11 +168,7 @@ func TestNoRefusalEverCarriesBundleBytes(t *testing.T) {
 	cluster := testCluster()
 	cluster.KubernetesVersion = ""
 
-	_, err = New().MachineConfig(bundle, cluster, patchDocument)
-	require.Error(t, err)
-	assert.NotContains(t, err.Error(), secretLine)
-
-	_, err = New().Talosconfig(bundle, cluster)
+	_, err := New().MachineConfig(bundle, cluster, patchDocument)
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), secretLine)
 
@@ -213,7 +180,7 @@ func TestNoRefusalEverCarriesBundleBytes(t *testing.T) {
 func TestABundleNeverPrintsItselfThroughTheSecretType(t *testing.T) {
 	t.Parallel()
 
-	bundle, err := New().Mint()
+	bundle, err := New().Load(throwawayBundle(t))
 	require.NoError(t, err)
 
 	assert.Equal(t, citypes.Redacted, bundle.String())
@@ -224,10 +191,7 @@ func TestABundleNeverPrintsItselfThroughTheSecretType(t *testing.T) {
 func TestARenderedMachineConfigNeverPrintsItselfThroughTheSecretType(t *testing.T) {
 	t.Parallel()
 
-	bundle, err := New().Mint()
-	require.NoError(t, err)
-
-	rendered, err := New().MachineConfig(bundle, testCluster(), patchDocument)
+	rendered, err := New().MachineConfig(throwawayBundle(t), testCluster(), patchDocument)
 	require.NoError(t, err)
 
 	assert.Equal(t, citypes.Redacted, rendered.String())
