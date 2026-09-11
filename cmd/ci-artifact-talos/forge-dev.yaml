@@ -1,0 +1,19 @@
+name: ci-artifact-talos
+kind: mcp-server
+version: 0.1.0
+description: Declare one machine config resource per node, read from a file under the pipeline root.
+openapi:
+  specPath: ../../.forge/spec-cache/engines.v1.yaml
+generate:
+  packageName: main
+  docsBaseURL: https://raw.githubusercontent.com/alexandremahdhaoui/forge-ci/refs/heads/main
+layout:
+  tools:
+    - name: declare
+      description: Report one machine config resource per declared node.
+      input: DeclareInput
+      output: DeclareOutput
+    - name: publish
+      description: Refuse. This engine declares machine configs and never publishes.
+      input: ArtifactInput
+      output: ArtifactOutput

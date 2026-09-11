@@ -1,0 +1,48 @@
+name: ci-artifact-talos
+port: artifact
+version: v0.1.0
+tagline: Declare one machine config resource per node, read from a file under the pipeline root.
+why: |
+  A manager converges what something declares, and nothing declared a machine
+  config, so the node manager was unreachable. This engine is the declaration.
+  It names every node and the file holding that node's machine config
+  document, and hands the text over as a resource the manager owns.
+
+  It wears the artifact port because that is the port a declaring engine can
+  wear today. It publishes nothing. The publish tool refuses by name, so a
+  substage that names this engine fails loudly instead of turning it into the
+  engine the release reads its behaviour from.
+tools:
+  - name: declare
+    does: Report one machine-config resource per declared node.
+  - name: publish
+    does: Refuse. This engine declares machine configs and never publishes.
+example:
+  tool: declare
+  input: '{"root":"/w","spec":{"nodes":[{"name":"t0-controlplane","address":"192.168.1.10","configFile":"config/t0-controlplane.yaml"}]}}'
+notes: |
+  One node declares one resource. The kind is `machine-config`. The resource
+  name is the node's name, `spec.node` is the address the manager reaches and
+  `spec.config` is the text of the file.
+
+  The file path is relative to the pipeline root, which rides the declare
+  call. The engine reads the file and nothing else. It never reaches a node,
+  it never runs a certificate generator and it never hashes the text. The
+  manager already compares by loading both configs and asking the vendor for
+  the patches between them, so a second comparison here would be a second
+  authority over the same question.
+
+  A node with no name, no address or no configFile is refused by name. A
+  configFile that cannot be read is an error naming the node and the file.
+
+  Certificates and keys are not this engine's business. The file it reads is
+  whatever a human or another tool put there.
+spec:
+  - key: nodes
+    type: list of objects
+    required: true
+    means: >-
+      The nodes to declare. Each entry holds `name`, the node's name and the
+      resource name, `address`, what the manager reaches, and `configFile`,
+      the path of the machine config document relative to the pipeline root.
+      All three are required.
