@@ -73,8 +73,8 @@ func declaredRelease() citypes.Resource {
 	return declaredReleaseWith(nil)
 }
 
-func liveRelease(chart, version, status string) managercontroller.HelmRelease {
-	return managercontroller.HelmRelease{
+func liveRelease(chart, version, status string) citypes.HelmRelease {
+	return citypes.HelmRelease{
 		Namespace: theNamespace,
 		Name:      theReleaseName,
 		Chart:     chart,
@@ -131,13 +131,13 @@ func TestAMissingReleaseIsInstalledOnAnOrdinaryApplyAndAnswersDid(t *testing.T) 
 
 	r, cluster, helm := helmRealizer(t)
 
-	var written managercontroller.HelmRelease
+	var written citypes.HelmRelease
 
 	cluster.EXPECT().APIServer().Return(theAPIServer)
 	helm.EXPECT().Release(mock.Anything, theNamespace, theReleaseName).
-		Return(managercontroller.HelmRelease{}, notFound, nil)
+		Return(citypes.HelmRelease{}, notFound, nil)
 	helm.EXPECT().InstallRelease(mock.Anything, mock.Anything).
-		Run(func(_ context.Context, release managercontroller.HelmRelease) { written = release }).
+		Run(func(_ context.Context, release citypes.HelmRelease) { written = release }).
 		Return(nil)
 
 	action, err := r.Realize(declaredRelease(), plain)
@@ -154,13 +154,13 @@ func TestAMissingReleaseCarriesTheDeclaredValuesAndNamespaceFlagToTheHelmClient(
 
 	r, cluster, helm := helmRealizer(t)
 
-	var written managercontroller.HelmRelease
+	var written citypes.HelmRelease
 
 	cluster.EXPECT().APIServer().Return(theAPIServer)
 	helm.EXPECT().Release(mock.Anything, theNamespace, theReleaseName).
-		Return(managercontroller.HelmRelease{}, notFound, nil)
+		Return(citypes.HelmRelease{}, notFound, nil)
 	helm.EXPECT().InstallRelease(mock.Anything, mock.Anything).
-		Run(func(_ context.Context, release managercontroller.HelmRelease) { written = release }).
+		Run(func(_ context.Context, release citypes.HelmRelease) { written = release }).
 		Return(nil)
 
 	res := declaredReleaseWith(map[string]any{
@@ -181,7 +181,7 @@ func TestADryRunOverAMissingReleaseAnswersKeptAndInstallsNothing(t *testing.T) {
 
 	cluster.EXPECT().APIServer().Return(theAPIServer)
 	helm.EXPECT().Release(mock.Anything, theNamespace, theReleaseName).
-		Return(managercontroller.HelmRelease{}, notFound, nil)
+		Return(citypes.HelmRelease{}, notFound, nil)
 
 	action, err := r.Realize(declaredRelease(), managercontroller.Options{DryRun: true})
 	require.NoError(t, err)
@@ -289,7 +289,7 @@ func TestAHelmClientThatCannotBeReadIsReportedWithTheReleaseItWasReading(t *test
 
 	cluster.EXPECT().APIServer().Return(theAPIServer)
 	helm.EXPECT().Release(mock.Anything, theNamespace, theReleaseName).
-		Return(managercontroller.HelmRelease{}, notFound, errors.New("the registry is unreachable"))
+		Return(citypes.HelmRelease{}, notFound, errors.New("the registry is unreachable"))
 
 	_, err := r.Realize(declaredRelease(), plain)
 	require.Error(t, err)
@@ -304,7 +304,7 @@ func TestAnInstallThatFailsIsReportedWithTheReleaseItWasInstalling(t *testing.T)
 
 	cluster.EXPECT().APIServer().Return(theAPIServer)
 	helm.EXPECT().Release(mock.Anything, theNamespace, theReleaseName).
-		Return(managercontroller.HelmRelease{}, notFound, nil)
+		Return(citypes.HelmRelease{}, notFound, nil)
 	helm.EXPECT().InstallRelease(mock.Anything, mock.Anything).
 		Return(errors.New("the chart was not pulled"))
 
@@ -403,13 +403,13 @@ func TestAVPrefixedVersionReachesTheHelmClientWithoutItsPrefix(t *testing.T) {
 
 	r, cluster, helm := helmRealizer(t)
 
-	var written managercontroller.HelmRelease
+	var written citypes.HelmRelease
 
 	cluster.EXPECT().APIServer().Return(theAPIServer)
 	helm.EXPECT().Release(mock.Anything, theNamespace, theReleaseName).
-		Return(managercontroller.HelmRelease{}, notFound, nil)
+		Return(citypes.HelmRelease{}, notFound, nil)
 	helm.EXPECT().InstallRelease(mock.Anything, mock.Anything).
-		Run(func(_ context.Context, release managercontroller.HelmRelease) { written = release }).
+		Run(func(_ context.Context, release citypes.HelmRelease) { written = release }).
 		Return(nil)
 
 	action, err := r.Realize(declaredReleaseWith(map[string]any{"version": "v" + theVersion}), plain)

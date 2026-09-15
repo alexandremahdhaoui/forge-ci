@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/fsadapter"
+	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/helmadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/kubernetesadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/managercontroller"
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
@@ -20,8 +21,13 @@ func NewHandlers() Handlers {
 				return nil, fmt.Errorf("building the cluster client of manager %s: %w", in.Manager, err)
 			}
 
+			releases, err := helmadapter.New()
+			if err != nil {
+				return nil, fmt.Errorf("building the helm client of manager %s: %w", in.Manager, err)
+			}
+
 			ctrl := managercontroller.New(
-				managercontroller.NewKubernetesRealizer(ctx, cluster, nil), fs)
+				managercontroller.NewKubernetesRealizer(ctx, cluster, releases), fs)
 
 			out, err := ctrl.Reconcile(toReconcileInput(in))
 			if err != nil {

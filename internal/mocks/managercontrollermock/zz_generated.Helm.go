@@ -7,7 +7,7 @@ package managercontrollermock
 import (
 	"context"
 
-	"github.com/alexandremahdhaoui/forge-ci/internal/controller/managercontroller"
+	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -39,7 +39,7 @@ func (_m *MockHelm) EXPECT() *MockHelm_Expecter {
 }
 
 // InstallRelease provides a mock function for the type MockHelm
-func (_mock *MockHelm) InstallRelease(ctx context.Context, release managercontroller.HelmRelease) error {
+func (_mock *MockHelm) InstallRelease(ctx context.Context, release citypes.HelmRelease) error {
 	ret := _mock.Called(ctx, release)
 
 	if len(ret) == 0 {
@@ -47,7 +47,7 @@ func (_mock *MockHelm) InstallRelease(ctx context.Context, release managercontro
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, managercontroller.HelmRelease) error); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, citypes.HelmRelease) error); ok {
 		r0 = returnFunc(ctx, release)
 	} else {
 		r0 = ret.Error(0)
@@ -62,20 +62,20 @@ type MockHelm_InstallRelease_Call struct {
 
 // InstallRelease is a helper method to define mock.On call
 //   - ctx context.Context
-//   - release managercontroller.HelmRelease
+//   - release citypes.HelmRelease
 func (_e *MockHelm_Expecter) InstallRelease(ctx any, release any) *MockHelm_InstallRelease_Call {
 	return &MockHelm_InstallRelease_Call{Call: _e.mock.On("InstallRelease", ctx, release)}
 }
 
-func (_c *MockHelm_InstallRelease_Call) Run(run func(ctx context.Context, release managercontroller.HelmRelease)) *MockHelm_InstallRelease_Call {
+func (_c *MockHelm_InstallRelease_Call) Run(run func(ctx context.Context, release citypes.HelmRelease)) *MockHelm_InstallRelease_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
 			arg0 = args[0].(context.Context)
 		}
-		var arg1 managercontroller.HelmRelease
+		var arg1 citypes.HelmRelease
 		if args[1] != nil {
-			arg1 = args[1].(managercontroller.HelmRelease)
+			arg1 = args[1].(citypes.HelmRelease)
 		}
 		run(
 			arg0,
@@ -90,29 +90,29 @@ func (_c *MockHelm_InstallRelease_Call) Return(err error) *MockHelm_InstallRelea
 	return _c
 }
 
-func (_c *MockHelm_InstallRelease_Call) RunAndReturn(run func(ctx context.Context, release managercontroller.HelmRelease) error) *MockHelm_InstallRelease_Call {
+func (_c *MockHelm_InstallRelease_Call) RunAndReturn(run func(ctx context.Context, release citypes.HelmRelease) error) *MockHelm_InstallRelease_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // Release provides a mock function for the type MockHelm
-func (_mock *MockHelm) Release(ctx context.Context, namespace string, name string) (managercontroller.HelmRelease, bool, error) {
+func (_mock *MockHelm) Release(ctx context.Context, namespace string, name string) (citypes.HelmRelease, bool, error) {
 	ret := _mock.Called(ctx, namespace, name)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Release")
 	}
 
-	var r0 managercontroller.HelmRelease
+	var r0 citypes.HelmRelease
 	var r1 bool
 	var r2 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) (managercontroller.HelmRelease, bool, error)); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) (citypes.HelmRelease, bool, error)); ok {
 		return returnFunc(ctx, namespace, name)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) managercontroller.HelmRelease); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) citypes.HelmRelease); ok {
 		r0 = returnFunc(ctx, namespace, name)
 	} else {
-		r0 = ret.Get(0).(managercontroller.HelmRelease)
+		r0 = ret.Get(0).(citypes.HelmRelease)
 	}
 	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string) bool); ok {
 		r1 = returnFunc(ctx, namespace, name)
@@ -163,12 +163,12 @@ func (_c *MockHelm_Release_Call) Run(run func(ctx context.Context, namespace str
 	return _c
 }
 
-func (_c *MockHelm_Release_Call) Return(release managercontroller.HelmRelease, found bool, err error) *MockHelm_Release_Call {
+func (_c *MockHelm_Release_Call) Return(release citypes.HelmRelease, found bool, err error) *MockHelm_Release_Call {
 	_c.Call.Return(release, found, err)
 	return _c
 }
 
-func (_c *MockHelm_Release_Call) RunAndReturn(run func(ctx context.Context, namespace string, name string) (managercontroller.HelmRelease, bool, error)) *MockHelm_Release_Call {
+func (_c *MockHelm_Release_Call) RunAndReturn(run func(ctx context.Context, namespace string, name string) (citypes.HelmRelease, bool, error)) *MockHelm_Release_Call {
 	_c.Call.Return(run)
 	return _c
 }

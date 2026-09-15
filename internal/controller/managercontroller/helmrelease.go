@@ -22,20 +22,10 @@ var (
 	chartRepositorySchemes = []string{"oci://", "https://"}
 )
 
-type HelmRelease struct {
-	Namespace       string
-	Name            string
-	Chart           string
-	Version         string
-	Repository      string
-	Values          map[string]any
-	CreateNamespace bool
-	Status          string
-}
-
 type Helm interface {
-	Release(ctx context.Context, namespace, name string) (release HelmRelease, found bool, err error)
-	InstallRelease(ctx context.Context, release HelmRelease) error
+	Release(ctx context.Context, namespace, name string) (
+		release citypes.HelmRelease, found bool, err error)
+	InstallRelease(ctx context.Context, release citypes.HelmRelease) error
 }
 
 func (r KubernetesRealizer) realizeHelmRelease(res citypes.Resource, opts Options) (Action, error) {
@@ -96,7 +86,9 @@ func (r KubernetesRealizer) confirmAPIServer(declared, subject string) error {
 	return nil
 }
 
-func (r KubernetesRealizer) installRelease(declared HelmRelease, id string, opts Options) (Action, error) {
+func (r KubernetesRealizer) installRelease(
+	declared citypes.HelmRelease, id string, opts Options,
+) (Action, error) {
 	declared.Version = strings.TrimPrefix(declared.Version, "v")
 
 	text := "install release " + id + " from chart " + declared.Chart + " " + declared.Version
@@ -112,7 +104,7 @@ func (r KubernetesRealizer) installRelease(declared HelmRelease, id string, opts
 	return Did("installed release " + id + " from chart " + declared.Chart + " " + declared.Version), nil
 }
 
-func keptRelease(live, declared HelmRelease, id string) (Action, error) {
+func keptRelease(live, declared citypes.HelmRelease, id string) (Action, error) {
 	if live.Status != StatusDeployed {
 		return Action{}, fmt.Errorf(
 			"reading release %s: the cluster holds it in status %q, and only %q is healthy. "+
@@ -136,24 +128,24 @@ func keptRelease(live, declared HelmRelease, id string) (Action, error) {
 	return Kept("kept release " + id), nil
 }
 
-func declaredRelease(spec map[string]any) (HelmRelease, error) {
+func declaredRelease(spec map[string]any) (citypes.HelmRelease, error) {
 	namespace, err := citypes.SpecString(spec, "namespace")
 	if err != nil {
-		return HelmRelease{}, err
+		return citypes.HelmRelease{}, err
 	}
 
 	name, err := citypes.SpecString(spec, "name")
 	if err != nil {
-		return HelmRelease{}, err
+		return citypes.HelmRelease{}, err
 	}
 
 	chart, err := citypes.SpecString(spec, "chart")
 	if err != nil {
-		return HelmRelease{}, err
+		return citypes.HelmRelease{}, err
 	}
 
 	if namespace == "" || name == "" || chart == "" {
-		return HelmRelease{}, fmt.Errorf(
+		return citypes.HelmRelease{}, fmt.Errorf(
 			"reading release %s/%s: spec.namespace, spec.name and spec.chart are required",
 			namespace, name)
 	}
@@ -162,25 +154,25 @@ func declaredRelease(spec map[string]any) (HelmRelease, error) {
 
 	repository, err := declaredRepository(spec, id)
 	if err != nil {
-		return HelmRelease{}, err
+		return citypes.HelmRelease{}, err
 	}
 
 	version, err := declaredVersion(spec, id)
 	if err != nil {
-		return HelmRelease{}, err
+		return citypes.HelmRelease{}, err
 	}
 
 	values, err := citypes.SpecMap(spec, "values")
 	if err != nil {
-		return HelmRelease{}, err
+		return citypes.HelmRelease{}, err
 	}
 
 	createNamespace, err := citypes.SpecBool(spec, "createNamespace")
 	if err != nil {
-		return HelmRelease{}, err
+		return citypes.HelmRelease{}, err
 	}
 
-	return HelmRelease{
+	return citypes.HelmRelease{
 		Namespace:       namespace,
 		Name:            name,
 		Chart:           chart,
