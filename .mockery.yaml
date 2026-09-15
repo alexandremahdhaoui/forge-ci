@@ -46,6 +46,7 @@ packages:
       dir: internal/mocks/managercontrollermock
       pkgname: managercontrollermock
     interfaces:
+      Helm:
       Kubernetes:
       Talos:
       Terraform:

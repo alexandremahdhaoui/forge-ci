@@ -21,7 +21,7 @@ func NewHandlers() Handlers {
 			}
 
 			ctrl := managercontroller.New(
-				managercontroller.NewKubernetesRealizer(ctx, cluster), fs)
+				managercontroller.NewKubernetesRealizer(ctx, cluster, nil), fs)
 
 			out, err := ctrl.Reconcile(toReconcileInput(in))
 			if err != nil {

@@ -12,7 +12,8 @@ import (
 )
 
 type Cluster struct {
-	client kubernetes.Interface
+	client    kubernetes.Interface
+	apiServer string
 }
 
 func New() (Cluster, error) {
@@ -27,7 +28,11 @@ func New() (Cluster, error) {
 		return Cluster{}, fmt.Errorf("building the client of the cluster: %w", err)
 	}
 
-	return Cluster{client: client}, nil
+	return Cluster{client: client, apiServer: config.Host}, nil
+}
+
+func (c Cluster) APIServer() string {
+	return c.apiServer
 }
 
 func (c Cluster) Secret(ctx context.Context, namespace, name string) (*corev1.Secret, bool, error) {

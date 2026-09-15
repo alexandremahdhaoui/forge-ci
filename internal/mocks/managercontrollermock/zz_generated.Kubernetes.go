@@ -38,6 +38,50 @@ func (_m *MockKubernetes) EXPECT() *MockKubernetes_Expecter {
 	return &MockKubernetes_Expecter{mock: &_m.Mock}
 }
 
+// APIServer provides a mock function for the type MockKubernetes
+func (_mock *MockKubernetes) APIServer() string {
+	ret := _mock.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for APIServer")
+	}
+
+	var r0 string
+	if returnFunc, ok := ret.Get(0).(func() string); ok {
+		r0 = returnFunc()
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+	return r0
+}
+
+// MockKubernetes_APIServer_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'APIServer'
+type MockKubernetes_APIServer_Call struct {
+	*mock.Call
+}
+
+// APIServer is a helper method to define mock.On call
+func (_e *MockKubernetes_Expecter) APIServer() *MockKubernetes_APIServer_Call {
+	return &MockKubernetes_APIServer_Call{Call: _e.mock.On("APIServer")}
+}
+
+func (_c *MockKubernetes_APIServer_Call) Run(run func()) *MockKubernetes_APIServer_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockKubernetes_APIServer_Call) Return(s string) *MockKubernetes_APIServer_Call {
+	_c.Call.Return(s)
+	return _c
+}
+
+func (_c *MockKubernetes_APIServer_Call) RunAndReturn(run func() string) *MockKubernetes_APIServer_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CreateSecret provides a mock function for the type MockKubernetes
 func (_mock *MockKubernetes) CreateSecret(ctx context.Context, secret *v1.Secret) error {
 	ret := _mock.Called(ctx, secret)

@@ -25,6 +25,7 @@ const (
 )
 
 type Kubernetes interface {
+	APIServer() string
 	Secret(ctx context.Context, namespace, name string) (secret *corev1.Secret, found bool, err error)
 	CreateSecret(ctx context.Context, secret *corev1.Secret) error
 	ReplaceSecret(ctx context.Context, secret *corev1.Secret) error
@@ -33,12 +34,13 @@ type Kubernetes interface {
 type KubernetesRealizer struct {
 	ctx     context.Context
 	cluster Kubernetes
+	helm    Helm
 }
 
 var _ Realizer = KubernetesRealizer{}
 
-func NewKubernetesRealizer(ctx context.Context, cluster Kubernetes) KubernetesRealizer {
-	return KubernetesRealizer{ctx: ctx, cluster: cluster}
+func NewKubernetesRealizer(ctx context.Context, cluster Kubernetes, helm Helm) KubernetesRealizer {
+	return KubernetesRealizer{ctx: ctx, cluster: cluster, helm: helm}
 }
 
 func (KubernetesRealizer) Kind() string {
@@ -49,9 +51,12 @@ func (r KubernetesRealizer) Realize(res citypes.Resource, opts Options) (Action,
 	switch res.Kind {
 	case KindSecret:
 		return r.realizeSecret(res, opts)
+	case KindHelmRelease:
+		return r.realizeHelmRelease(res, opts)
 	default:
 		return Action{}, fmt.Errorf(
-			"the kubernetes manager cannot realize kind %q, it knows %s", res.Kind, KindSecret)
+			"the kubernetes manager cannot realize kind %q, it knows %s and %s",
+			res.Kind, KindSecret, KindHelmRelease)
 	}
 }
 

@@ -1,7 +1,7 @@
 name: ci-manager-kubernetes
 port: manager
 version: v0.1.0
-tagline: Converge a declared secret in a cluster, and record what it changed.
+tagline: Converge a declared secret and a declared helm release in a cluster, and record what it changed.
 why: |
   A run time credential is declared, never pasted. The declaration names the
   environment variable that carries each value and nothing else, so git holds
@@ -9,12 +9,17 @@ why: |
   reads the live secret first, so a rerun that changes nothing answers Kept.
 tools:
   - name: reconcile
-    does: Converge every declared secret and return who owns it.
+    does: Converge every declared secret and helm release, and return who owns it.
 example:
   tool: reconcile
   input: '{"manager":"kubernetes","resources":[{"kind":"secret","name":"flux-deploy-key","spec":{"namespace":"flux-system","name":"flux-deploy-key","data":{"identity":"FLUX_DEPLOY_KEY"}}}]}'
 notes: |
-  It knows one kind, `secret`. The resource name is the secret's name in the
+  It knows two kinds, `secret` and `helm-release`, and it refuses any other by
+  name.
+
+  ## secret
+
+  The resource name is the secret's name in the
   declaration. `spec.namespace` and `spec.name` are the namespace and the name
   in the cluster. `spec.data` maps each key of the secret to the name of the
   environment variable holding its value, never to the value itself, so a
@@ -53,8 +58,47 @@ notes: |
   it is the way to restore a secret someone edited in the cluster.
 
   There is no delete path. A secret dropped from a declaration stays as it is.
-  It refuses a resource recorded as owned by a different manager, and it
-  refuses a kind it does not know by name.
+  It refuses a resource recorded as owned by a different manager.
+
+  ## helm-release
+
+  `spec.namespace` and `spec.release` are the namespace and the release name in
+  the cluster. `spec.chart`, `spec.repository` and `spec.version` name the chart
+  to install. `spec.values` is an optional map handed to the chart.
+  `spec.createNamespace` is an optional bool. `spec.apiServer` is the API server
+  the declaration expects. Every one of the others is required, and a missing one
+  is an error naming the key.
+
+  `spec.repository` is refused by name unless it starts with `oci://` or
+  `https://`. `spec.version` is one exact chart version. A range such as
+  `^2.13.0` or `2.13.x` is refused by name, so what a run installs is written in
+  the declaration and nowhere else.
+
+  `spec.apiServer` is read against the live cluster before anything else, and a
+  cluster that is not the one it names is an error carrying both. A declaration
+  therefore says which cluster it belongs to, the same way a machine config names
+  its node.
+
+  Kept means the release exists and is healthy. It never means the release equals
+  the declaration. A healthy release whose chart version differs answers Kept and
+  names both versions in its text, and it is never upgraded, because Flux is the
+  one writer of a release it already holds. A release in any status other than
+  `deployed` is an error naming the status, so a pending or failed release is
+  never retried blind. A release carrying a different chart is an error naming
+  both charts.
+
+  Did means the cluster held no release of that name and one was installed. An
+  ordinary apply installs a missing release. It is not bootstrap only.
+
+  A dry run reads the live release exactly as a real run does and answers Kept,
+  with the text beginning `would install` when nothing is there. It writes
+  nothing.
+
+  The helm client is not wired yet. Until it is, a `helm-release` resource that
+  passes every check above is an error saying this manager carries no helm client
+  yet.
+
+  ## the cluster
 
   The cluster it reaches comes from the standard client configuration
   resolution, so `KUBECONFIG`, the user's default configuration file and an
