@@ -45,14 +45,17 @@ notes: |
   The engine never reads a variable, so no value passes through it. The
   resource is named `namespace/name`.
 
-  `spec.apiServer` sits once above the list and rides every resource, so the
-  manager refuses a cluster that is not the one the pipeline named, per
-  resource.
+  `spec.apiServer` sits once above the list and rides every resource. The
+  manager confirms it on a `helm-release` and refuses a cluster that is not the
+  one the pipeline named. It does not confirm it on a `secret`.
 
-  Every spec key is required and an absent one is refused by name. An unknown
-  kind, a document that is not a release, a source reference that resolves to
-  nothing and a file that cannot be read are each refused by name. No refusal
-  and no resource description ever prints the contents of a values file.
+  Every spec key is required except `createNamespace`, and an absent required
+  key is refused by name. An unknown kind, a document that is not a release, a
+  release file that cannot be read and a values file that cannot be read are
+  each refused by name. Resolving a source reference passes over any document
+  beside the release that cannot be read or parsed, and a reference that
+  matches nothing is refused by name at the end. No refusal and no resource
+  description ever prints the contents of a values file.
 spec:
   - key: apiServer
     type: string

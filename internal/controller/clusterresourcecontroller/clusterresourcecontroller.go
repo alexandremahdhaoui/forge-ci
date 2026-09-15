@@ -3,6 +3,8 @@ package clusterresourcecontroller
 import (
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/fsadapter"
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
@@ -34,8 +36,15 @@ func (c *Controller) Declare(in citypes.DeclareInput) (citypes.DeclareOutput, er
 		return citypes.DeclareOutput{}, err
 	}
 
-	declared, ok := in.Spec["resources"].([]any)
-	if !ok || len(declared) == 0 {
+	held, named := in.Spec["resources"]
+
+	declared, ok := held.([]any)
+	if named && held != nil && !ok {
+		return citypes.DeclareOutput{}, fmt.Errorf(
+			"reading spec.resources: a list is required, the spec holds a %T", held)
+	}
+
+	if len(declared) == 0 {
 		return citypes.DeclareOutput{}, ErrResources
 	}
 
@@ -111,11 +120,13 @@ func declaredSecret(index int, held map[string]any, apiServer string) (citypes.R
 
 	data := make(map[string]any, len(variables))
 
-	for key, variable := range variables {
+	for _, key := range slices.Sorted(maps.Keys(variables)) {
 		if key == "" {
 			return citypes.Resource{}, fmt.Errorf(
 				"reading the data of secret %s: data holds a key with no name", id)
 		}
+
+		variable := variables[key]
 
 		if variable == "" {
 			return citypes.Resource{}, fmt.Errorf(

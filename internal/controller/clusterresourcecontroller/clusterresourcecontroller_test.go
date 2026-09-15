@@ -403,6 +403,48 @@ func TestASpecNamingAnEmptyResourceListIsRefusedByName(t *testing.T) {
 	require.ErrorIs(t, err, clusterresourcecontroller.ErrResources)
 }
 
+func TestASpecWhoseResourcesAreNotAListNamesTheTypeItFoundAndAnAbsentOneKeepsItsOwnMessage(t *testing.T) {
+	t.Parallel()
+
+	_, err := onDisk().Declare(citypes.DeclareInput{
+		Root: "testdata",
+		Spec: map[string]any{"apiServer": theAPIServer, "resources": "one"},
+	})
+
+	require.Error(t, err)
+	require.NotErrorIs(t, err, clusterresourcecontroller.ErrResources)
+	assert.Equal(t, "reading spec.resources: a list is required, the spec holds a string", err.Error())
+
+	_, err = onDisk().Declare(citypes.DeclareInput{
+		Root: "testdata",
+		Spec: map[string]any{"apiServer": theAPIServer},
+	})
+
+	require.ErrorIs(t, err, clusterresourcecontroller.ErrResources)
+}
+
+func TestASecretHoldingTwoUnusableDataKeysRefusesWithTheSameMessageEveryRun(t *testing.T) {
+	t.Parallel()
+
+	input := declaring(map[string]any{
+		"kind":      "secret",
+		"namespace": "flux-system",
+		"name":      "deploy-key",
+		"data":      map[string]any{"alpha": "", "beta": ""},
+	})
+
+	_, first := onDisk().Declare(input)
+	require.Error(t, first)
+
+	for range 60 {
+		_, again := onDisk().Declare(input)
+		require.Error(t, again)
+		assert.Equal(t, first.Error(), again.Error())
+	}
+
+	assert.Contains(t, first.Error(), `key "alpha" names no environment variable`)
+}
+
 func TestARefusalOverAValuesFileNeverCarriesALineOfIt(t *testing.T) {
 	t.Parallel()
 

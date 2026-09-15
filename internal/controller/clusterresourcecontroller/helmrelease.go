@@ -201,10 +201,6 @@ func (c *Controller) readValues(root, valuesFile, id string) (map[string]any, er
 			"reading the values of release %s from %s: the file holds no yaml mapping", id, valuesFile)
 	}
 
-	if values == nil {
-		values = map[string]any{}
-	}
-
 	return values, nil
 }
 
