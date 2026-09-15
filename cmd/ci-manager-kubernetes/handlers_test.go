@@ -7,37 +7,73 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/helmadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/managercontroller"
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 )
 
 const refusalOfAClientNeverBuiltByNew = "this helm client was never built by New"
 
-func TestOnlyAReconcileDeclaringAReleaseCarriesAHelmClientThatCanReachHelm(t *testing.T) {
+func TestOnlyAReconcileThatWillRealizeAReleaseCarriesAHelmClientThatCanReachHelm(t *testing.T) {
 	t.Parallel()
 
 	for _, c := range []struct {
 		declaration string
-		resources   []Resource
+		in          citypes.ReconcileInput
 		refuses     bool
 	}{
 		{
 			declaration: "only secrets",
-			resources:   []Resource{{Kind: "secret", Name: "flux-deploy-key"}},
-			refuses:     true,
+			in: citypes.ReconcileInput{
+				Resources: []citypes.Resource{{Kind: "secret", Name: "flux-deploy-key"}},
+			},
+			refuses: true,
 		},
 		{
 			declaration: "only a release",
-			resources: []Resource{
-				{Kind: managercontroller.KindHelmRelease, Name: "flux"},
+			in: citypes.ReconcileInput{
+				Resources: []citypes.Resource{
+					{Kind: managercontroller.KindHelmRelease, Name: "flux"},
+				},
 			},
 			refuses: false,
 		},
 		{
 			declaration: "a secret and a release",
-			resources: []Resource{
-				{Kind: "secret", Name: "flux-deploy-key"},
-				{Kind: managercontroller.KindHelmRelease, Name: "flux"},
+			in: citypes.ReconcileInput{
+				Resources: []citypes.Resource{
+					{Kind: "secret", Name: "flux-deploy-key"},
+					{Kind: managercontroller.KindHelmRelease, Name: "flux"},
+				},
+			},
+			refuses: false,
+		},
+		{
+			declaration: "a bootstrapOnly release on a routine run",
+			in: citypes.ReconcileInput{
+				Resources: []citypes.Resource{
+					{Kind: managercontroller.KindHelmRelease, Name: "flux", BootstrapOnly: true},
+				},
+			},
+			refuses: true,
+		},
+		{
+			declaration: "a bootstrapOnly release on a bootstrap",
+			in: citypes.ReconcileInput{
+				Bootstrap: true,
+				Resources: []citypes.Resource{
+					{Kind: managercontroller.KindHelmRelease, Name: "flux", BootstrapOnly: true},
+				},
+			},
+			refuses: false,
+		},
+		{
+			declaration: "a bootstrapOnly release beside one an apply realizes",
+			in: citypes.ReconcileInput{
+				Resources: []citypes.Resource{
+					{Kind: managercontroller.KindHelmRelease, Name: "cilium", BootstrapOnly: true},
+					{Kind: managercontroller.KindHelmRelease, Name: "flux"},
+				},
 			},
 			refuses: false,
 		},
@@ -45,7 +81,7 @@ func TestOnlyAReconcileDeclaringAReleaseCarriesAHelmClientThatCanReachHelm(t *te
 		t.Run(c.declaration, func(t *testing.T) {
 			t.Parallel()
 
-			releases, err := releaseClient(c.resources)
+			releases, err := releaseClient(c.in, helmadapter.StorageMemory)
 			require.NoError(t, err)
 
 			var port managercontroller.Helm = releases
@@ -72,6 +108,42 @@ func TestOnlyAReconcileDeclaringAReleaseCarriesAHelmClientThatCanReachHelm(t *te
 				"the client opened helm storage and went on to look the chart up")
 		})
 	}
+}
+
+func TestAManagerSpecThatDeclaresNoStorageKeepsHelmOnItsRecordSecrets(t *testing.T) {
+	t.Parallel()
+
+	storage, err := declaredStorage(nil)
+	require.NoError(t, err)
+	assert.Equal(t, helmadapter.StorageSecrets, storage)
+}
+
+func TestEveryStorageHelmKeepsRecordsInIsAccepted(t *testing.T) {
+	t.Parallel()
+
+	for _, declared := range []string{helmadapter.StorageSecrets, helmadapter.StorageMemory} {
+		storage, err := declaredStorage(map[string]any{"storage": declared})
+		require.NoError(t, err)
+		assert.Equal(t, declared, storage)
+	}
+}
+
+func TestAStorageTheManagerDoesNotKnowIsRefusedByNameAndNamesBothItAccepts(t *testing.T) {
+	t.Parallel()
+
+	_, err := declaredStorage(map[string]any{"storage": "papyrus"})
+	require.Error(t, err)
+	assert.Equal(t,
+		`reading spec.storage: it names "papyrus", `+
+			"and helm keeps its release records in secrets or memory", err.Error())
+}
+
+func TestAStorageKeyThatIsNotAStringIsRefusedByName(t *testing.T) {
+	t.Parallel()
+
+	_, err := declaredStorage(map[string]any{"storage": 7})
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "reading spec.storage: a string is required, the spec holds a int")
 }
 
 func TestEveryFieldOfAReconcileInputCrossesIntoTheController(t *testing.T) {

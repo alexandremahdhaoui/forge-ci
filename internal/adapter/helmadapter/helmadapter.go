@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"reflect"
 	"strings"
 	"time"
@@ -24,7 +23,8 @@ import (
 const (
 	installTimeout = 10 * time.Minute
 
-	storageVariable = "HELM_DRIVER"
+	StorageSecrets = "secrets"
+	StorageMemory  = "memory"
 
 	chartNameKey    = "Name"
 	chartVersionKey = "Version"
@@ -32,20 +32,21 @@ const (
 	releaseInfoField = "Info"
 )
 
+var Storages = []string{StorageSecrets, StorageMemory}
+
 type Releases struct {
 	settings *cli.EnvSettings
 	registry *registry.Client
 	open     func(namespace string) (*action.Configuration, error)
 }
 
-func New() (Releases, error) {
+func New(storage string) (Releases, error) {
 	client, err := registry.NewClient()
 	if err != nil {
 		return Releases{}, fmt.Errorf("building the chart registry client: %w", err)
 	}
 
 	settings := cli.New()
-	storage := os.Getenv(storageVariable)
 
 	return Releases{
 		settings: settings,

@@ -36,6 +36,7 @@ engines:
     manager: local
     spec:
       statePath: <string>
+      storage: <string>
 ```
 
 ## Worth knowing
@@ -146,6 +147,10 @@ An install waits for the release to come up and gives up after ten minutes,
 so one reconcile blocks that long at most for each release it installs. The
 wait and its limit are fixed and nothing declares them.
 
-`HELM_DRIVER` is helm's own environment variable and it picks where helm
-keeps its release records. The manager reads it and hands it to helm
-unchanged. An unset variable leaves helm on its own default.
+`spec.storage` picks where helm keeps its release records. It takes
+`secrets` or `memory`, and any other value is refused by name. Omit it and
+it is `secrets`. The manager reads no environment variable to decide this,
+because a manager runs as a grandchild process and an exported variable
+reaches it with nothing in git to read. An operator who exported `memory`
+would get a manager that installs into nothing and reports success, and a
+declaration is refused in review instead.

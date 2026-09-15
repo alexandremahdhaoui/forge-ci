@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"slices"
+	"strings"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/fsadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/helmadapter"
@@ -21,15 +23,24 @@ func NewHandlers() Handlers {
 				return nil, fmt.Errorf("building the cluster client of manager %s: %w", in.Manager, err)
 			}
 
-			releases, err := releaseClient(in.Resources)
+			storage, err := declaredStorage(in.Spec)
+			if err != nil {
+				return nil, fmt.Errorf("reading the spec of manager %s: %w", in.Manager, err)
+			}
+
+			input := toReconcileInput(in)
+
+			releases, err := releaseClient(input, storage)
 			if err != nil {
 				return nil, fmt.Errorf("building the helm client of manager %s: %w", in.Manager, err)
 			}
 
-			ctrl := managercontroller.New(
-				managercontroller.NewKubernetesRealizer(ctx, cluster, releases), fs)
+			realizer, err := managercontroller.NewKubernetesRealizer(ctx, cluster, releases)
+			if err != nil {
+				return nil, fmt.Errorf("building the realizer of manager %s: %w", in.Manager, err)
+			}
 
-			out, err := ctrl.Reconcile(toReconcileInput(in))
+			out, err := managercontroller.New(realizer, fs).Reconcile(input)
 			if err != nil {
 				return nil, err
 			}
@@ -39,10 +50,29 @@ func NewHandlers() Handlers {
 	}
 }
 
-func releaseClient(resources []Resource) (helmadapter.Releases, error) {
-	for _, r := range resources {
-		if r.Kind == managercontroller.KindHelmRelease {
-			return helmadapter.New()
+func declaredStorage(spec map[string]any) (string, error) {
+	storage, err := citypes.SpecString(spec, "storage")
+	if err != nil {
+		return "", err
+	}
+
+	if storage == "" {
+		return helmadapter.StorageSecrets, nil
+	}
+
+	if !slices.Contains(helmadapter.Storages, storage) {
+		return "", fmt.Errorf(
+			"reading spec.storage: it names %q, and helm keeps its release records in %s",
+			storage, strings.Join(helmadapter.Storages, " or "))
+	}
+
+	return storage, nil
+}
+
+func releaseClient(in citypes.ReconcileInput, storage string) (helmadapter.Releases, error) {
+	for _, r := range in.Resources {
+		if managercontroller.Realizes(in, r) && r.Kind == managercontroller.KindHelmRelease {
+			return helmadapter.New(storage)
 		}
 	}
 

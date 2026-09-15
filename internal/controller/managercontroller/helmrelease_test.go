@@ -39,7 +39,7 @@ func helmRealizer(t *testing.T) (
 	cluster := managercontrollermock.NewMockKubernetes(t)
 	helm := managercontrollermock.NewMockHelm(t)
 
-	return managercontroller.NewKubernetesRealizer(t.Context(), cluster, helm), cluster, helm
+	return realizerHolding(t, cluster, helm), cluster, helm
 }
 
 func declaredReleaseWith(overrides map[string]any) citypes.Resource {
@@ -86,7 +86,7 @@ func liveRelease(chart, version, status string) citypes.HelmRelease {
 func TestTheKubernetesRealizerNamesBothKindsItKnowsWhenItRefusesAnother(t *testing.T) {
 	t.Parallel()
 
-	r := managercontroller.NewKubernetesRealizer(t.Context(), nil, nil)
+	r := realizerThatMustNotReachAPort(t)
 
 	_, err := r.Realize(citypes.Resource{Kind: "config-map", Name: "settings"}, plain)
 	require.Error(t, err)
@@ -294,7 +294,7 @@ func TestAnInstallThatFailsIsReportedWithTheReleaseItWasInstalling(t *testing.T)
 func TestARepositoryOnAnotherSchemeIsRefusedByName(t *testing.T) {
 	t.Parallel()
 
-	r := managercontroller.NewKubernetesRealizer(t.Context(), nil, nil)
+	r := realizerThatMustNotReachAPort(t)
 
 	res := declaredReleaseWith(map[string]any{"repository": "http://charts.example"})
 
@@ -323,7 +323,7 @@ func TestARepositoryOverHTTPSIsAccepted(t *testing.T) {
 func TestADeclarationCarryingNoRepositoryIsRefusedByName(t *testing.T) {
 	t.Parallel()
 
-	r := managercontroller.NewKubernetesRealizer(t.Context(), nil, nil)
+	r := realizerThatMustNotReachAPort(t)
 
 	_, err := r.Realize(declaredReleaseWith(map[string]any{"repository": nil}), plain)
 	require.Error(t, err)
@@ -333,7 +333,7 @@ func TestADeclarationCarryingNoRepositoryIsRefusedByName(t *testing.T) {
 func TestAVersionThatIsNotMajorMinorPatchIsRefusedByName(t *testing.T) {
 	t.Parallel()
 
-	r := managercontroller.NewKubernetesRealizer(t.Context(), nil, nil)
+	r := realizerThatMustNotReachAPort(t)
 
 	for _, version := range []string{"^2.13.0", "~2.13.0", "2.13.x", ">=2.13.0", "2.13"} {
 		_, err := r.Realize(declaredReleaseWith(map[string]any{"version": version}), plain)
@@ -414,7 +414,7 @@ func TestAPrereleaseChartVersionIsExactAndIsAccepted(t *testing.T) {
 func TestADeclarationCarryingNoVersionIsRefusedByName(t *testing.T) {
 	t.Parallel()
 
-	r := managercontroller.NewKubernetesRealizer(t.Context(), nil, nil)
+	r := realizerThatMustNotReachAPort(t)
 
 	_, err := r.Realize(declaredReleaseWith(map[string]any{"version": nil}), plain)
 	require.Error(t, err)
@@ -424,7 +424,7 @@ func TestADeclarationCarryingNoVersionIsRefusedByName(t *testing.T) {
 func TestADeclarationMissingTheNamespaceTheReleaseOrTheChartIsRefusedByName(t *testing.T) {
 	t.Parallel()
 
-	r := managercontroller.NewKubernetesRealizer(t.Context(), nil, nil)
+	r := realizerThatMustNotReachAPort(t)
 
 	for _, key := range []string{"namespace", "name", "chart"} {
 		_, err := r.Realize(declaredReleaseWith(map[string]any{key: nil}), plain)
@@ -437,7 +437,7 @@ func TestADeclarationMissingTheNamespaceTheReleaseOrTheChartIsRefusedByName(t *t
 func TestAReleaseNameThatIsNotAStringIsRefusedByName(t *testing.T) {
 	t.Parallel()
 
-	r := managercontroller.NewKubernetesRealizer(t.Context(), nil, nil)
+	r := realizerThatMustNotReachAPort(t)
 
 	_, err := r.Realize(declaredReleaseWith(map[string]any{"name": 7}), plain)
 	require.Error(t, err)
@@ -447,7 +447,7 @@ func TestAReleaseNameThatIsNotAStringIsRefusedByName(t *testing.T) {
 func TestAValuesBlockThatIsNotAMapIsRefusedByName(t *testing.T) {
 	t.Parallel()
 
-	r := managercontroller.NewKubernetesRealizer(t.Context(), nil, nil)
+	r := realizerThatMustNotReachAPort(t)
 
 	_, err := r.Realize(declaredReleaseWith(map[string]any{"values": "replicas=2"}), plain)
 	require.Error(t, err)
@@ -457,7 +457,7 @@ func TestAValuesBlockThatIsNotAMapIsRefusedByName(t *testing.T) {
 func TestACreateNamespaceThatIsNotABoolIsRefusedByName(t *testing.T) {
 	t.Parallel()
 
-	r := managercontroller.NewKubernetesRealizer(t.Context(), nil, nil)
+	r := realizerThatMustNotReachAPort(t)
 
 	_, err := r.Realize(declaredReleaseWith(map[string]any{"createNamespace": "yes"}), plain)
 	require.Error(t, err)
@@ -467,7 +467,7 @@ func TestACreateNamespaceThatIsNotABoolIsRefusedByName(t *testing.T) {
 func TestADeclarationCarryingNoAPIServerIsRefusedByName(t *testing.T) {
 	t.Parallel()
 
-	r := managercontroller.NewKubernetesRealizer(t.Context(), nil, nil)
+	r := realizerThatMustNotReachAPort(t)
 
 	_, err := r.Realize(declaredReleaseWith(map[string]any{"apiServer": nil}), plain)
 	require.Error(t, err)
@@ -477,7 +477,7 @@ func TestADeclarationCarryingNoAPIServerIsRefusedByName(t *testing.T) {
 func TestAnAPIServerKeyThatIsNotAStringIsRefusedByName(t *testing.T) {
 	t.Parallel()
 
-	r := managercontroller.NewKubernetesRealizer(t.Context(), nil, nil)
+	r := realizerThatMustNotReachAPort(t)
 
 	_, err := r.Realize(declaredReleaseWith(map[string]any{"apiServer": 7}), plain)
 	require.Error(t, err)

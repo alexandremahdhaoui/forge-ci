@@ -43,7 +43,25 @@ func kubernetesRealizer(t *testing.T) (managercontroller.KubernetesRealizer, *ma
 	cluster := managercontrollermock.NewMockKubernetes(t)
 	cluster.EXPECT().APIServer().Return(theAPIServer)
 
-	return managercontroller.NewKubernetesRealizer(t.Context(), cluster, nil), cluster
+	return realizerHolding(t, cluster, managercontrollermock.NewMockHelm(t)), cluster
+}
+
+func realizerHolding(
+	t *testing.T, cluster managercontroller.Kubernetes, helm managercontroller.Helm,
+) managercontroller.KubernetesRealizer {
+	t.Helper()
+
+	r, err := managercontroller.NewKubernetesRealizer(t.Context(), cluster, helm)
+	require.NoError(t, err)
+
+	return r
+}
+
+func realizerThatMustNotReachAPort(t *testing.T) managercontroller.KubernetesRealizer {
+	t.Helper()
+
+	return realizerHolding(t,
+		managercontrollermock.NewMockKubernetes(t), managercontrollermock.NewMockHelm(t))
 }
 
 func declaredSecret(data map[string]any) citypes.Resource {
@@ -107,16 +125,45 @@ func hashWrittenBy(t *testing.T, res citypes.Resource) string {
 	return written.Annotations[managercontroller.SecretHashAnnotation]
 }
 
+func TestBuildingTheKubernetesRealizerWithNoClusterClientIsRefusedByName(t *testing.T) {
+	t.Parallel()
+
+	_, err := managercontroller.NewKubernetesRealizer(
+		t.Context(), nil, managercontrollermock.NewMockHelm(t))
+	require.Error(t, err)
+	assert.Equal(t, "building the kubernetes realizer: it was handed no cluster client, "+
+		"and it reaches the cluster through one of each", err.Error())
+}
+
+func TestBuildingTheKubernetesRealizerWithNoHelmClientIsRefusedByName(t *testing.T) {
+	t.Parallel()
+
+	_, err := managercontroller.NewKubernetesRealizer(
+		t.Context(), managercontrollermock.NewMockKubernetes(t), nil)
+	require.Error(t, err)
+	assert.Equal(t, "building the kubernetes realizer: it was handed no helm client, "+
+		"and it reaches the cluster through one of each", err.Error())
+}
+
+func TestBuildingTheKubernetesRealizerWithNeitherClientNamesBothOfThem(t *testing.T) {
+	t.Parallel()
+
+	_, err := managercontroller.NewKubernetesRealizer(t.Context(), nil, nil)
+	require.Error(t, err)
+	assert.Equal(t, "building the kubernetes realizer: it was handed no cluster client "+
+		"and no helm client, and it reaches the cluster through one of each", err.Error())
+}
+
 func TestTheKubernetesRealizerNamesItselfKubernetes(t *testing.T) {
 	t.Parallel()
 
-	assert.Equal(t, "kubernetes", managercontroller.NewKubernetesRealizer(t.Context(), nil, nil).Kind())
+	assert.Equal(t, "kubernetes", realizerThatMustNotReachAPort(t).Kind())
 }
 
 func TestTheKubernetesRealizerRefusesAKindItDoesNotKnowByName(t *testing.T) {
 	t.Parallel()
 
-	r := managercontroller.NewKubernetesRealizer(t.Context(), nil, nil)
+	r := realizerThatMustNotReachAPort(t)
 
 	_, err := r.Realize(citypes.Resource{Kind: "config-map", Name: "settings"}, plain)
 	require.Error(t, err)
@@ -127,7 +174,7 @@ func TestTheKubernetesRealizerRefusesAKindItDoesNotKnowByName(t *testing.T) {
 func TestTheKubernetesRealizerRefusesASecretThatNamesNoNamespace(t *testing.T) {
 	t.Parallel()
 
-	r := managercontroller.NewKubernetesRealizer(t.Context(), nil, nil)
+	r := realizerThatMustNotReachAPort(t)
 	res := citypes.Resource{
 		Kind: managercontroller.KindSecret,
 		Name: theSecretName,
@@ -142,7 +189,7 @@ func TestTheKubernetesRealizerRefusesASecretThatNamesNoNamespace(t *testing.T) {
 func TestTheKubernetesRealizerRefusesASecretThatNamesNoName(t *testing.T) {
 	t.Parallel()
 
-	r := managercontroller.NewKubernetesRealizer(t.Context(), nil, nil)
+	r := realizerThatMustNotReachAPort(t)
 	res := citypes.Resource{
 		Kind: managercontroller.KindSecret,
 		Name: theSecretName,
@@ -157,7 +204,7 @@ func TestTheKubernetesRealizerRefusesASecretThatNamesNoName(t *testing.T) {
 func TestTheKubernetesRealizerRefusesANamespaceThatIsNotAString(t *testing.T) {
 	t.Parallel()
 
-	r := managercontroller.NewKubernetesRealizer(t.Context(), nil, nil)
+	r := realizerThatMustNotReachAPort(t)
 	res := citypes.Resource{
 		Kind: managercontroller.KindSecret,
 		Name: theSecretName,
@@ -172,7 +219,7 @@ func TestTheKubernetesRealizerRefusesANamespaceThatIsNotAString(t *testing.T) {
 func TestTheKubernetesRealizerRefusesANameThatIsNotAString(t *testing.T) {
 	t.Parallel()
 
-	r := managercontroller.NewKubernetesRealizer(t.Context(), nil, nil)
+	r := realizerThatMustNotReachAPort(t)
 	res := citypes.Resource{
 		Kind: managercontroller.KindSecret,
 		Name: theSecretName,
@@ -187,7 +234,7 @@ func TestTheKubernetesRealizerRefusesANameThatIsNotAString(t *testing.T) {
 func TestTheKubernetesRealizerRefusesADataBlockThatIsNotAMap(t *testing.T) {
 	t.Parallel()
 
-	r := managercontroller.NewKubernetesRealizer(t.Context(), nil, nil)
+	r := realizerThatMustNotReachAPort(t)
 
 	_, err := r.Realize(declaredSecret(nil), plain)
 	require.Error(t, err)
@@ -198,7 +245,7 @@ func TestTheKubernetesRealizerRefusesADataBlockThatIsNotAMap(t *testing.T) {
 func TestTheKubernetesRealizerRefusesADataBlockThatIsNotAMapOfStrings(t *testing.T) {
 	t.Parallel()
 
-	r := managercontroller.NewKubernetesRealizer(t.Context(), nil, nil)
+	r := realizerThatMustNotReachAPort(t)
 	res := citypes.Resource{
 		Kind: managercontroller.KindSecret,
 		Name: theSecretName,
@@ -218,7 +265,7 @@ func TestTheKubernetesRealizerRefusesADataBlockThatIsNotAMapOfStrings(t *testing
 func TestTheKubernetesRealizerRefusesADataValueThatIsNotAString(t *testing.T) {
 	t.Parallel()
 
-	r := managercontroller.NewKubernetesRealizer(t.Context(), nil, nil)
+	r := realizerThatMustNotReachAPort(t)
 
 	_, err := r.Realize(declaredSecret(map[string]any{"identity": 7}), plain)
 	require.Error(t, err)
@@ -229,7 +276,7 @@ func TestTheKubernetesRealizerRefusesADataValueThatIsNotAString(t *testing.T) {
 func TestTheKubernetesRealizerRefusesADataBlockHoldingNoKey(t *testing.T) {
 	t.Parallel()
 
-	r := managercontroller.NewKubernetesRealizer(t.Context(), nil, nil)
+	r := realizerThatMustNotReachAPort(t)
 
 	_, err := r.Realize(declaredSecret(map[string]any{}), plain)
 	require.Error(t, err)
@@ -239,7 +286,7 @@ func TestTheKubernetesRealizerRefusesADataBlockHoldingNoKey(t *testing.T) {
 func TestTheKubernetesRealizerRefusesAKeyWithNoName(t *testing.T) {
 	t.Parallel()
 
-	r := managercontroller.NewKubernetesRealizer(t.Context(), nil, nil)
+	r := realizerThatMustNotReachAPort(t)
 
 	_, err := r.Realize(declaredSecret(map[string]any{"": identityVariable}), plain)
 	require.Error(t, err)
@@ -249,7 +296,7 @@ func TestTheKubernetesRealizerRefusesAKeyWithNoName(t *testing.T) {
 func TestTheKubernetesRealizerRefusesAKeyThatNamesNoEnvironmentVariable(t *testing.T) {
 	t.Parallel()
 
-	r := managercontroller.NewKubernetesRealizer(t.Context(), nil, nil)
+	r := realizerThatMustNotReachAPort(t)
 
 	_, err := r.Realize(declaredSecret(map[string]any{"identity": ""}), plain)
 	require.Error(t, err)
@@ -257,7 +304,7 @@ func TestTheKubernetesRealizerRefusesAKeyThatNamesNoEnvironmentVariable(t *testi
 }
 
 func TestTheKubernetesRealizerRefusesAKeyWhoseVariableIsEmpty(t *testing.T) {
-	r := managercontroller.NewKubernetesRealizer(t.Context(), nil, nil)
+	r := realizerThatMustNotReachAPort(t)
 
 	_, err := r.Realize(oneKey(t, ""), plain)
 	require.Error(t, err)
@@ -268,7 +315,7 @@ func TestTheKubernetesRealizerRefusesAKeyWhoseVariableIsEmpty(t *testing.T) {
 }
 
 func TestSayingTheKeyMustHoldAVariableNameSeparatesAPastedSecretFromAnUnsetVariable(t *testing.T) {
-	r := managercontroller.NewKubernetesRealizer(t.Context(), nil, nil)
+	r := realizerThatMustNotReachAPort(t)
 
 	_, pasted := r.Realize(declaredSecret(map[string]any{"identity": thePastedPrivateKey}), plain)
 	require.Error(t, pasted)
@@ -285,7 +332,7 @@ func TestSayingTheKeyMustHoldAVariableNameSeparatesAPastedSecretFromAnUnsetVaria
 func TestTheKubernetesRealizerNeverEchoesAPastedSecretBackOutOfItsRefusal(t *testing.T) {
 	t.Parallel()
 
-	r := managercontroller.NewKubernetesRealizer(t.Context(), nil, nil)
+	r := realizerThatMustNotReachAPort(t)
 
 	_, err := r.Realize(declaredSecret(map[string]any{"identity": thePastedPrivateKey}), plain)
 	require.Error(t, err)
@@ -301,7 +348,7 @@ func TestASecretIsRefusedWhenTheLiveClusterIsNotTheOneTheDeclarationNames(t *tes
 	cluster := managercontrollermock.NewMockKubernetes(t)
 	cluster.EXPECT().APIServer().Return(anotherAPIServer)
 
-	r := managercontroller.NewKubernetesRealizer(t.Context(), cluster, nil)
+	r := realizerHolding(t, cluster, managercontrollermock.NewMockHelm(t))
 
 	_, err := r.Realize(oneKey(t, "a key"), plain)
 	require.Error(t, err)
@@ -312,7 +359,7 @@ func TestASecretIsRefusedWhenTheLiveClusterIsNotTheOneTheDeclarationNames(t *tes
 }
 
 func TestASecretDeclarationCarryingNoAPIServerIsRefusedByName(t *testing.T) {
-	r := managercontroller.NewKubernetesRealizer(t.Context(), nil, nil)
+	r := realizerThatMustNotReachAPort(t)
 
 	res := oneKey(t, "a key")
 	delete(res.Spec, "apiServer")
@@ -323,7 +370,7 @@ func TestASecretDeclarationCarryingNoAPIServerIsRefusedByName(t *testing.T) {
 }
 
 func TestASecretAPIServerKeyThatIsNotAStringIsRefusedByName(t *testing.T) {
-	r := managercontroller.NewKubernetesRealizer(t.Context(), nil, nil)
+	r := realizerThatMustNotReachAPort(t)
 
 	res := oneKey(t, "a key")
 	res.Spec["apiServer"] = 7
@@ -337,7 +384,7 @@ func TestAClusterClientThatNamesNoAPIServerRefusesASecretByName(t *testing.T) {
 	cluster := managercontrollermock.NewMockKubernetes(t)
 	cluster.EXPECT().APIServer().Return("")
 
-	r := managercontroller.NewKubernetesRealizer(t.Context(), cluster, nil)
+	r := realizerHolding(t, cluster, managercontrollermock.NewMockHelm(t))
 
 	_, err := r.Realize(oneKey(t, "a key"), plain)
 	require.Error(t, err)

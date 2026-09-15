@@ -7,5 +7,6 @@ The `spec` block on this engine's entry in `forge-ci.yaml`.
 | Key | Type | Required | Means |
 |---|---|---|---|
 | `statePath` | string | no | Where to record what was converged. Omit it and nothing is recorded. |
+| `storage` | string | no | Where helm keeps its release records, `secrets` or `memory`. Omit it and it is `secrets`. |
 
 forge-ci never validates a spec. This engine does, because only it knows what the keys mean.

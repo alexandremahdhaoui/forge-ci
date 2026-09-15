@@ -40,8 +40,27 @@ type KubernetesRealizer struct {
 
 var _ Realizer = KubernetesRealizer{}
 
-func NewKubernetesRealizer(ctx context.Context, cluster Kubernetes, helm Helm) KubernetesRealizer {
-	return KubernetesRealizer{ctx: ctx, cluster: cluster, helm: helm}
+func NewKubernetesRealizer(
+	ctx context.Context, cluster Kubernetes, helm Helm,
+) (KubernetesRealizer, error) {
+	var missing []string
+
+	if cluster == nil {
+		missing = append(missing, "cluster")
+	}
+
+	if helm == nil {
+		missing = append(missing, "helm")
+	}
+
+	if len(missing) > 0 {
+		return KubernetesRealizer{}, fmt.Errorf(
+			"building the kubernetes realizer: it was handed no %s client, "+
+				"and it reaches the cluster through one of each",
+			strings.Join(missing, " client and no "))
+	}
+
+	return KubernetesRealizer{ctx: ctx, cluster: cluster, helm: helm}, nil
 }
 
 func (KubernetesRealizer) Kind() string {

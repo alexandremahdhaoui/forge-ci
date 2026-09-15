@@ -24,8 +24,6 @@ const (
 	theName      = "cilium"
 	theChart     = "cilium"
 	theVersion   = "1.18.2"
-
-	memoryStorage = "memory"
 )
 
 func hermetic(t *testing.T, storage string) Releases {
@@ -46,9 +44,8 @@ current-context: here
 `), 0o600))
 
 	t.Setenv("KUBECONFIG", kubeconfig)
-	t.Setenv(storageVariable, storage)
 
-	releases, err := New()
+	releases, err := New(storage)
 	require.NoError(t, err)
 
 	return releases
@@ -108,7 +105,7 @@ func TestAReleaseHelmStorageHoldsWithoutAChartRefusesInsteadOfComingBackFound(t 
 }
 
 func TestAReleaseHelmStorageDoesNotHoldIsReportedAsNotFoundAndNeverAsAnError(t *testing.T) {
-	_, found, err := hermetic(t, memoryStorage).Release(context.Background(), theNamespace, theName)
+	_, found, err := hermetic(t, StorageMemory).Release(context.Background(), theNamespace, theName)
 
 	require.NoError(t, err)
 	require.False(t, found)
@@ -136,7 +133,7 @@ func TestAChartThatCannotBeLocatedRefusesNamingTheChartTheVersionAndTheRelease(t
 	}))
 	defer repository.Close()
 
-	err := hermetic(t, memoryStorage).InstallRelease(context.Background(), citypes.HelmRelease{
+	err := hermetic(t, StorageMemory).InstallRelease(context.Background(), citypes.HelmRelease{
 		Namespace:  theNamespace,
 		Name:       theName,
 		Chart:      theChart,

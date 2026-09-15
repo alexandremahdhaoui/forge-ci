@@ -65,6 +65,7 @@ managers:
     engine: "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-manager-kubernetes@v0.1.0"
     spec:
       statePath: ` + filepath.Join(root, "manager-kubernetes.json") + `
+      storage: memory
 engines:
   - alias: here
     type: compute
@@ -142,7 +143,6 @@ current-context: here
 `), 0o600))
 
 	t.Setenv("KUBECONFIG", kubeconfig)
-	t.Setenv("HELM_DRIVER", "memory")
 
 	return root
 }
