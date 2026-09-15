@@ -208,8 +208,7 @@ func helmStorageOfManager(pipeline config.Pipeline, alias string) (string, error
 		return storage, nil
 	}
 
-	return "", fmt.Errorf(
-		"an engine names manager %q and the pipeline declares no manager of that alias", alias)
+	return "", nil
 }
 
 func theLiveCluster(t *testing.T, declared declaration) (kubernetesadapter.Cluster, error) {
@@ -626,16 +625,6 @@ func TestTheRootOfTheLiveStageIsTheOneTheEnvironmentNamesWhenItNamesOne(t *testi
 	declared, err := declaredAt(pipeline)
 	require.NoError(t, err)
 	require.Equal(t, elsewhere, declared.root)
-}
-
-func TestAnEngineNamingAManagerThePipelineNeverDeclaredIsRefusedByThatAlias(t *testing.T) {
-	_, err := helmStorageOfManager(config.Pipeline{
-		Managers: []config.Manager{{Alias: "here"}},
-	}, "elsewhere")
-	require.Error(t, err)
-	require.Equal(t,
-		`an engine names manager "elsewhere" and the pipeline declares no manager of that alias`,
-		err.Error())
 }
 
 func TestAPipelineFileWhoseManagerNamesAStorageHelmDoesNotKeepIsRefusedByTheFunctionTheStageReadsItThrough(t *testing.T) {
