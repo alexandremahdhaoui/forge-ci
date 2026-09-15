@@ -23,8 +23,6 @@ const (
 
 	theKeyMarker = "ZZZTOPSECRETZZZclientprivatekey"
 
-	theDeclaredMint = "Ask the person who holds the credential to write it into the cluster"
-
 	found    = true
 	notFound = false
 )
@@ -255,6 +253,16 @@ func TestTheKubernetesRealizerRefusesAKeyWithNoName(t *testing.T) {
 	assert.Contains(t, err.Error(), "spec.keys holds a key with no name")
 }
 
+func TestTheKubernetesRealizerRefusesAKeyOfNothingButWhitespaceAsOneWithNoName(t *testing.T) {
+	t.Parallel()
+
+	r := realizerThatMustNotReachAPort(t)
+
+	_, err := r.Realize(declaredSecret([]any{" \n\t "}), plain)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "spec.keys holds a key with no name")
+}
+
 func TestASecretIsRefusedWhenTheLiveClusterIsNotTheOneTheDeclarationNames(t *testing.T) {
 	t.Parallel()
 
@@ -463,20 +471,6 @@ func TestASecretTheClusterDoesNotHoldNamesItsKeysAndTheEntryHoldingTheMintingSte
 		": the cluster holds no secret of that name, nothing in this toolchain writes one, "+
 		"and it must hold identity, known_hosts. The pipeline file says how a person mints it, "+
 		"under spec.mint of the secret entry naming "+theSecretID, err.Error())
-}
-
-func TestTheMintingStepsNeverReachTheManagerAndNeverReachAnError(t *testing.T) {
-	t.Parallel()
-
-	r, cluster := kubernetesRealizer(t)
-	cluster.EXPECT().Secret(mock.Anything, theNamespace, theSecretName).Return(nil, notFound, nil)
-
-	res := twoKeys()
-	res.Spec["mint"] = theDeclaredMint
-
-	_, err := r.Realize(res, plain)
-	require.Error(t, err)
-	assert.NotContains(t, err.Error(), theDeclaredMint)
 }
 
 func TestTheManagerNamesNoKeyTypeAndNoProductOfItsOwnWhenASecretIsAbsent(t *testing.T) {

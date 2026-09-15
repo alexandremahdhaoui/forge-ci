@@ -129,7 +129,7 @@ func declaredSecret(index int, held map[string]any, apiServer string) (citypes.R
 	keys := make([]any, 0, len(declared))
 
 	for _, key := range declared {
-		if key == "" {
+		if strings.TrimSpace(key) == "" {
 			return citypes.Resource{}, fmt.Errorf(
 				"reading the keys of secret %s: keys holds a key with no name", id)
 		}

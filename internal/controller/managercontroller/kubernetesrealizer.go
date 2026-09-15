@@ -174,7 +174,7 @@ func declaredKeys(spec map[string]any, id string) ([]string, error) {
 	}
 
 	for _, key := range keys {
-		if key == "" {
+		if strings.TrimSpace(key) == "" {
 			return nil, fmt.Errorf(
 				"reading the keys of secret %s: spec.keys holds a key with no name", id)
 		}

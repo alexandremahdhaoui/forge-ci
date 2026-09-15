@@ -59,6 +59,9 @@ notes: |
   them. It lives here because this entry is the one place that knows what the
   secret is, and the manager knows only that it is a secret.
 
+  An empty `keys` list and a key with no name are each refused by name, and a
+  key name that is nothing but whitespace is a key with no name.
+
   A `secret` entry naming a key this engine does not read is refused by name,
   naming every unknown key and every key a secret entry holds. An entry still
   writing `data` is told that `data` is no longer read, because that spelling

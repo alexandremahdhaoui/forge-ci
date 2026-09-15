@@ -62,7 +62,8 @@ wrong cluster.
 
 A declaration carrying no `spec.keys`, an empty list, a value that is not a
 list of strings, and a key with no name are each an error naming what was
-seen.
+seen. A key name that is nothing but whitespace is a key with no name, the
+same way a value that is nothing but whitespace is an empty value.
 
 Kept means the live secret exists and holds every declared key with a value
 in it, and its action line names every key it confirmed. A secret missing a

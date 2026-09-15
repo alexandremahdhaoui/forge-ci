@@ -499,6 +499,17 @@ func TestEveryMalformedSpecIsRefusedByName(t *testing.T) {
 			},
 			names: "keys holds a key with no name",
 		},
+		{
+			name: "a secret key of nothing but whitespace is as empty as a key with no name",
+			spec: map[string]any{
+				"apiServer": theAPIServer,
+				"resources": []any{map[string]any{
+					"kind": "secret", "namespace": "flux-system", "name": "deploy-key",
+					"keys": []any{" \n\t "},
+				}},
+			},
+			names: "keys holds a key with no name",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

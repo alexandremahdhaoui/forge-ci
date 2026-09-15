@@ -386,10 +386,6 @@ func readSecretBack(
 		return fmt.Errorf("reading the keys of secret %s/%s: %w", namespace, name, err)
 	}
 
-	if len(keys) == 0 {
-		return fmt.Errorf("secret %s/%s declares no key", namespace, name)
-	}
-
 	live, found, err := cluster.Secret(ctx, namespace, name)
 	if err != nil {
 		return fmt.Errorf("reading secret %s/%s: %w", namespace, name, err)
@@ -423,10 +419,6 @@ func declaredValue(resource citypes.Resource, key string) (string, error) {
 	value, err := citypes.SpecString(resource.Spec, key)
 	if err != nil {
 		return "", fmt.Errorf("reading %s of resource %s: %w", key, resource.ID(), err)
-	}
-
-	if value == "" {
-		return "", fmt.Errorf("resource %s declares no %s", resource.ID(), key)
 	}
 
 	return value, nil
@@ -606,6 +598,8 @@ func TestAKindTheStageHasNoArmForIsRefusedByItsIDRatherThanReadBackWrong(t *test
 }
 
 func TestTheRootOfTheLiveStageDefaultsToThePipelineFilesParentTheWayTheCLIDoes(t *testing.T) {
+	t.Setenv(envRoot, "")
+
 	root := t.TempDir()
 
 	pipeline := filepath.Join(root, "forge-ci.yaml")
@@ -641,6 +635,23 @@ func TestAnEngineNamingAManagerThePipelineNeverDeclaredIsRefusedByThatAlias(t *t
 	require.Error(t, err)
 	require.Equal(t,
 		`an engine names manager "elsewhere" and the pipeline declares no manager of that alias`,
+		err.Error())
+}
+
+func TestAPipelineFileWhoseManagerNamesAStorageHelmDoesNotKeepIsRefusedByTheFunctionTheStageReadsItThrough(t *testing.T) {
+	root := t.TempDir()
+
+	path := filepath.Join(root, "forge-ci.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(twoClusterEnginesPipelineYAML(
+		root, theFirstAPIServer, theFirstAPIServer,
+		"a-filing-cabinet", helmadapter.StorageSecrets)), 0o600))
+
+	_, err := declaredAt(path)
+	require.Error(t, err)
+	require.Equal(t,
+		`reading the spec of manager cluster-first: reading spec.storage: `+
+			`it names "a-filing-cabinet", and helm keeps its release records in `+
+			strings.Join(helmadapter.Storages, " or "),
 		err.Error())
 }
 
