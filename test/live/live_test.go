@@ -48,6 +48,9 @@ const (
 	reachTimeout = 3 * time.Second
 
 	cli = "forge-ci"
+
+	theFirstAPIServer  = "https://10.0.0.1:6443"
+	theSecondAPIServer = "https://10.0.0.2:6443"
 )
 
 type declaration struct {
@@ -66,16 +69,23 @@ func declaredByThePipeline(t *testing.T) declaration {
 		t.Skipf("%s names no pipeline file, so this stage read no cluster back", envPipeline)
 	}
 
-	return declaredAt(t, path)
-}
-
-func declaredAt(t *testing.T, path string) declaration {
-	t.Helper()
-
-	out := parsedAt(t, path)
-	require.NoError(t, atLeastOneClusterResource(out))
+	out, err := declaredAt(path)
+	require.NoError(t, err)
 
 	return out
+}
+
+func declaredAt(path string) (declaration, error) {
+	out, err := parsedAt(path)
+	if err != nil {
+		return declaration{}, err
+	}
+
+	if err := atLeastOneClusterResource(out); err != nil {
+		return declaration{}, err
+	}
+
+	return out, nil
 }
 
 func agreesWithEveryEngineBefore(alias, subject, declared, held string) error {
@@ -98,70 +108,87 @@ func atLeastOneClusterResource(declared declaration) error {
 			"and this stage reads back every resource a pipeline declares", declared.pipeline)
 }
 
-func parsedAt(t *testing.T, path string) declaration {
-	t.Helper()
-
+func parsedAt(path string) (declaration, error) {
 	abs, err := filepath.Abs(path)
-	require.NoError(t, err)
+	if err != nil {
+		return declaration{}, fmt.Errorf("resolving the pipeline at %s: %w", path, err)
+	}
 
 	data, err := os.ReadFile(abs)
-	require.NoError(t, err, "reading the pipeline at %s", abs)
+	if err != nil {
+		return declaration{}, fmt.Errorf("reading the pipeline at %s: %w", abs, err)
+	}
 
 	pipeline, err := config.Parse(data)
-	require.NoError(t, err, "reading the pipeline at %s", abs)
+	if err != nil {
+		return declaration{}, fmt.Errorf("reading the pipeline at %s: %w", abs, err)
+	}
 
 	out := declaration{pipeline: abs, root: filepath.Dir(abs)}
 	controller := clusterresourcecontroller.New(fsadapter.New())
 
 	for _, engine := range pipeline.Engines {
 		server, err := citypes.SpecString(engine.Spec, apiServerKey)
-		require.NoError(t, err, "reading the spec of engine %s", engine.Alias)
+		if err != nil {
+			return declaration{}, fmt.Errorf("reading the spec of engine %s: %w", engine.Alias, err)
+		}
 
 		if server == "" {
 			continue
 		}
 
-		require.NoError(t,
-			agreesWithEveryEngineBefore(engine.Alias, apiServerSubject, server, out.apiServer))
+		if err := agreesWithEveryEngineBefore(
+			engine.Alias, apiServerSubject, server, out.apiServer); err != nil {
+			return declaration{}, err
+		}
 
-		storage := helmStorageOfManager(t, pipeline, engine.Manager)
+		storage, err := helmStorageOfManager(pipeline, engine.Manager)
+		if err != nil {
+			return declaration{}, err
+		}
 
-		require.NoError(t,
-			agreesWithEveryEngineBefore(engine.Alias, storageSubject, storage, out.storage))
+		if err := agreesWithEveryEngineBefore(
+			engine.Alias, storageSubject, storage, out.storage); err != nil {
+			return declaration{}, err
+		}
 
 		out.apiServer = server
 		out.storage = storage
 
 		declared, err := controller.Declare(
 			citypes.DeclareInput{Spec: engine.Spec, Root: out.root})
-		require.NoError(t, err, "declaring the resources of engine %s", engine.Alias)
+		if err != nil {
+			return declaration{}, fmt.Errorf(
+				"declaring the resources of engine %s: %w", engine.Alias, err)
+		}
 
 		out.resources = append(out.resources, declared.Resources...)
 	}
 
-	return out
+	return out, nil
 }
 
-func helmStorageOfManager(t *testing.T, pipeline config.Pipeline, alias string) string {
-	t.Helper()
-
+func helmStorageOfManager(pipeline config.Pipeline, alias string) (string, error) {
 	for _, manager := range pipeline.Managers {
 		if manager.Alias != alias {
 			continue
 		}
 
 		declared, err := citypes.SpecString(manager.Spec, storageKey)
-		require.NoError(t, err, "reading the spec of manager %s", alias)
+		if err != nil {
+			return "", fmt.Errorf("reading the spec of manager %s: %w", alias, err)
+		}
 
 		storage, err := helmadapter.Storage(declared)
-		require.NoError(t, err, "reading the spec of manager %s", alias)
+		if err != nil {
+			return "", fmt.Errorf("reading the spec of manager %s: %w", alias, err)
+		}
 
-		return storage
+		return storage, nil
 	}
 
-	t.Fatalf("an engine names manager %q and the pipeline declares no manager of that alias", alias)
-
-	return ""
+	return "", fmt.Errorf(
+		"an engine names manager %q and the pipeline declares no manager of that alias", alias)
 }
 
 func theLiveCluster(t *testing.T, declared declaration) kubernetesadapter.Cluster {
@@ -293,18 +320,13 @@ func readSecretBack(t *testing.T, cluster kubernetesadapter.Cluster, resource ci
 	require.NotNil(t, live)
 
 	for _, key := range keys {
-		assert.True(t, holdsKey(live, key), "secret %s/%s holds no %s", namespace, name, key)
+		assert.True(t, holdsKey(live, key),
+			"secret %s/%s holds no value under %s", namespace, name, key)
 	}
 }
 
 func holdsKey(secret *corev1.Secret, key string) bool {
-	if _, held := secret.Data[key]; held {
-		return true
-	}
-
-	_, held := secret.StringData[key]
-
-	return held
+	return len(secret.Data[key]) > 0
 }
 
 func declaredString(t *testing.T, resource citypes.Resource, key string) string {
@@ -382,49 +404,55 @@ func TestTheSecretArmReadsADeclaredKeyBackFromAnAPIServerStoodUpInThisTestProces
 	require.NoError(t, os.WriteFile(pipeline,
 		[]byte(secretPipelineYAML(root, server.URL, namespace, name, key)), 0o600))
 
-	t.Setenv(envPipeline, pipeline)
-
-	declared := declaredAt(t, pipeline)
+	declared, err := declaredAt(pipeline)
+	require.NoError(t, err)
 	require.Len(t, declared.resources, 1)
 
 	cluster := theLiveCluster(t, declared)
 	readBack(t, cluster, helmadapter.Releases{}, declared.resources[0])
 }
 
-func TestAPipelineDeclaringNoClusterResourceFailsThisStageInsteadOfSkippingIt(t *testing.T) {
+func TestAPipelineFileDeclaringNoClusterResourceIsRefusedByTheFunctionTheStageReadsItThrough(t *testing.T) {
 	root := t.TempDir()
 
 	path := filepath.Join(root, "forge-ci.yaml")
 	require.NoError(t, os.WriteFile(path, []byte(clusterlessPipelineYAML(root)), 0o600))
 
-	parsed := parsedAt(t, path)
-	require.Empty(t, parsed.resources)
-
-	err := atLeastOneClusterResource(parsed)
+	_, err := declaredAt(path)
 	require.Error(t, err)
 	require.Equal(t,
-		"the pipeline at "+parsed.pipeline+" declares no cluster resource, "+
+		"the pipeline at "+path+" declares no cluster resource, "+
 			"and this stage reads back every resource a pipeline declares", err.Error())
 }
 
-func TestTwoEnginesWhoseManagersDeclareDifferentHelmStorageAreRefusedByName(t *testing.T) {
-	err := agreesWithEveryEngineBefore(
-		"second", storageSubject, helmadapter.StorageMemory, helmadapter.StorageSecrets)
+func TestAPipelineFileWhoseTwoManagersDeclareDifferentHelmStorageIsRefusedByTheFunctionTheStageReadsItThrough(t *testing.T) {
+	root := t.TempDir()
 
+	path := filepath.Join(root, "forge-ci.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(twoClusterEnginesPipelineYAML(
+		root, theFirstAPIServer, theFirstAPIServer,
+		helmadapter.StorageSecrets, helmadapter.StorageMemory)), 0o600))
+
+	_, err := declaredAt(path)
 	require.Error(t, err)
 	require.Equal(t,
 		`engine second declares helm storage "memory" and an engine before it declares "secrets", `+
 			"and one pipeline reads one cluster back", err.Error())
 }
 
-func TestTwoEnginesDeclaringDifferentAPIServersAreRefusedByName(t *testing.T) {
-	err := agreesWithEveryEngineBefore(
-		"second", apiServerSubject, "https://10.0.0.2:6443", "https://10.0.0.1:6443")
+func TestAPipelineFileWhoseTwoEnginesDeclareDifferentAPIServersIsRefusedByTheFunctionTheStageReadsItThrough(t *testing.T) {
+	root := t.TempDir()
 
+	path := filepath.Join(root, "forge-ci.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(twoClusterEnginesPipelineYAML(
+		root, theFirstAPIServer, theSecondAPIServer,
+		helmadapter.StorageSecrets, helmadapter.StorageSecrets)), 0o600))
+
+	_, err := declaredAt(path)
 	require.Error(t, err)
 	require.Equal(t,
-		`engine second declares api server "https://10.0.0.2:6443" and an engine before it `+
-			`declares "https://10.0.0.1:6443", and one pipeline reads one cluster back`,
+		`engine second declares api server "`+theSecondAPIServer+`" and an engine before it `+
+			`declares "`+theFirstAPIServer+`", and one pipeline reads one cluster back`,
 		err.Error())
 }
 
@@ -460,6 +488,70 @@ managers:
   - alias: here
     engine: "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-manager-local@v0.1.0"
 engines:
+  - alias: ci-state
+    type: state
+    engine: "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-state-git@v0.1.0"
+    manager: here
+    spec:
+      path: ` + filepath.Join(root, "state") + `
+  - alias: all-pass
+    type: promotion
+    engine: "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-promotion-all@v0.1.0"
+    manager: here
+  - alias: compute
+    type: compute
+    engine: "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-compute-local@v0.1.0"
+    manager: here
+state: ci-state
+targets:
+  - alias: noop
+    binary: "true"
+stages:
+  - name: build
+    promotion: all-pass
+    substages:
+      - name: default
+        engine: compute
+        targets: [noop]
+`
+}
+
+func twoClusterEnginesPipelineYAML(root, firstServer, secondServer, firstStorage, secondStorage string) string {
+	return `name: live
+managers:
+  - alias: cluster-first
+    engine: "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-manager-kubernetes@v0.1.0"
+    spec:
+      storage: ` + firstStorage + `
+  - alias: cluster-second
+    engine: "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-manager-kubernetes@v0.1.0"
+    spec:
+      storage: ` + secondStorage + `
+  - alias: here
+    engine: "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-manager-local@v0.1.0"
+engines:
+  - alias: first
+    type: artifact
+    engine: "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-artifact-kubernetes@v0.1.0"
+    manager: cluster-first
+    spec:
+      apiServer: ` + firstServer + `
+      resources:
+        - kind: secret
+          namespace: a-namespace
+          name: first-secret
+          keys: [a-key]
+  - alias: second
+    type: artifact
+    engine: "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-artifact-kubernetes@v0.1.0"
+    manager: cluster-second
+    spec:
+      apiServer: ` + secondServer + `
+      resources:
+        - kind: secret
+          namespace: a-namespace
+          name: second-secret
+          keys: [a-key]
   - alias: ci-state
     type: state
     engine: "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-state-git@v0.1.0"

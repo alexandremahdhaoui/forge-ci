@@ -108,7 +108,7 @@ func (r KubernetesRealizer) realizeSecret(res citypes.Resource) (Action, error) 
 	}
 
 	if !found {
-		return Action{}, errors.New(theClusterHoldsNoSecret(id, keys, mint))
+		return Action{}, errors.New(theClusterHoldsNoSecret(id, keys, mint != ""))
 	}
 
 	if live == nil {
@@ -134,15 +134,16 @@ func (r KubernetesRealizer) realizeSecret(res citypes.Resource) (Action, error) 
 	return Kept("kept secret " + id + ", holding " + strings.Join(keys, ", ")), nil
 }
 
-func theClusterHoldsNoSecret(id string, keys []string, mint string) string {
+func theClusterHoldsNoSecret(id string, keys []string, declaresMint bool) string {
 	text := "reading secret " + id + ": the cluster holds no secret of that name, " +
 		"nothing in this toolchain writes one, and it must hold " + strings.Join(keys, ", ")
 
-	if mint == "" {
+	if !declaresMint {
 		return text
 	}
 
-	return text + ". " + mint
+	return text + ". The pipeline file says how a person mints it, " +
+		"under spec.mint of the secret entry naming " + id
 }
 
 func keysTheLiveSecretLacks(live *corev1.Secret, keys []string) []string {

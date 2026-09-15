@@ -67,7 +67,7 @@ func TestAKubeconfigNamingNoClusterRefusesByNameInsteadOfBuildingAClientThatReac
 	assert.Contains(t, err.Error(), "reading the client configuration of the cluster")
 }
 
-func TestAKubeconfigNamingAHostTheClientCannotUseRefusesByName(t *testing.T) {
+func TestAKubeconfigNamingAHostTheClientCannotUseRefusesSayingItWasBuildingTheClientAndNamingTheHost(t *testing.T) {
 	writeKubeconfig(t, `apiVersion: v1
 kind: Config
 clusters:
@@ -83,7 +83,9 @@ current-context: here
 
 	_, err := New()
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "the cluster")
+	assert.Equal(t,
+		`building the client of the cluster: host must be a URL or a host:port pair: "://not a url"`,
+		err.Error())
 }
 
 func TestReadingASecretTheClusterRefusesIsReportedAsAnErrorNamingTheSecret(t *testing.T) {

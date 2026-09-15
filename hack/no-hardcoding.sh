@@ -1,26 +1,11 @@
 #!/bin/sh
-# forge-ci names no project, no language toolchain, no floating version, and
-# - outside the engines that adapt one platform - no platform word either.
-#
-# The GitHub engines may say GitHub: ci-compute-github renders Actions
-# workflows, ci-manager-github converges an Actions repository, the release
-# and container engines publish to GitHub and ghcr, the trigger engine
-# reads GitHub's API, and the github adapter is the HTTP client they share.
-# Those words belong to the platform they adapt, and each engine's spec is
-# where a customer changes them. Everywhere else a runner label, an action
-# pin, an API host, a token name, a state path, a second semver expression
-# or a second spelling of the dirty suffix is a literal that should have
-# been a spec key or a shared constant, and this gate fails on it by name.
 set -eu
 
 fail=0
 
-# The scope: production Go under cmd, internal and pkg; generated code and
-# mocks are what forge-dev and mockery wrote and are checked at their source.
 FILES=$(find cmd internal pkg -name '*.go' ! -name '*_test.go' ! -path 'internal/mocks/*' ! -name 'zz_generated*')
 FILES="$FILES $(find test/live -name '*.go' 2>/dev/null || true)"
 
-# The words this tool must never know, anywhere.
 BANNED="golden-rust golden-go golden-python golden-typescript poe-wayfinder opends gamesync cargo rustc pnpm npm uv pytest clippy oapi-codegen mockery"
 
 for word in $BANNED; do
@@ -33,8 +18,6 @@ for word in $BANNED; do
     fi
 done
 
-# Latest is never a fallback: every go-run carries a pin, so a floating
-# version in production code is a regression.
 latest_hits=$(grep -rn "@latest" $FILES || true)
 if [ -n "$latest_hits" ]; then
     echo "forge-ci must never float to @latest; a go run carries a pinned version." >&2
@@ -42,11 +25,6 @@ if [ -n "$latest_hits" ]; then
     fail=1
 fi
 
-# A literal class, its pattern, and the files allowed to carry it. Anything
-# outside the allowlist that matches fails naming the file, the line and
-# the class.
-#
-#   class            pattern                        allowed prefixes
 platform_classes='
 runner-label     ubuntu-latest                  cmd/ci-compute-github/ cmd/ci-manager-github/ internal/controller/workflowcontroller/workflowcontroller.go internal/controller/triggercontroller/notify.go
 action-pin       actions/[a-z-]*@v[0-9]         cmd/ci-compute-github/ internal/controller/workflowcontroller/workflowcontroller.go

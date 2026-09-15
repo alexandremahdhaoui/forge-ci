@@ -78,9 +78,11 @@ never written, so the entry names no value and no variable and no value
 passes through this engine. The resource is named `namespace/name`.
 
 `mint` is free text saying how a person mints that particular secret. The
-manager prints it when the cluster holds no secret of that name. It lives
-here because this entry is the one place that knows what the secret is, and
-the manager knows only that it is a secret.
+manager never prints it. When the cluster holds no secret of that name, the
+manager's error points back at this entry, so an operator reads the steps
+here and the run log carries none of them. It lives here because this entry is
+the one place that knows what the secret is, and the manager knows only that
+it is a secret.
 
 A `secret` entry naming a key this engine does not read is refused by name,
 naming every unknown key and every key a secret entry holds. An entry still

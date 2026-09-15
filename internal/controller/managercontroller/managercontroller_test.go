@@ -249,18 +249,7 @@ func TestNoStatePathSkipsRecording(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// TestABootstrapOnlyResourceIsOwnedButNotRealizedByAnApply pins the rule that
-// keeps a pipeline run from holding the rights to rewrite the secrets it runs
-// under.
-//
-// A credential cannot be converged: it is written blind, because nothing can
-// be read back to compare against, so realizing one on every run is only
-// writing it again. The platform draws the same line - a workflow's own token
-// is excluded from the secrets API whatever its permissions declare.
-//
-// Ownership is recorded either way. That record is what stops another manager
-// claiming the resource, and that is true whichever ceremony this is.
-func TestABootstrapOnlyResourceIsOwnedButNotRealizedByAnApply(t *testing.T) {
+func TestAnApplyRecordsOwnershipOfABootstrapOnlyResourceAndNeverWritesItBecauseACredentialIsWrittenBlindAndWritingItEveryRunWouldHandTheRunTheRightToRewriteTheSecretsItRunsUnder(t *testing.T) {
 	dir := t.TempDir()
 
 	credential := citypes.Resource{
@@ -388,12 +377,10 @@ func TestRecordingBytesTheStateFileAlreadyHoldsWritesNothingBecauseRewritingThem
 	fs.AssertNotCalled(t, "WriteFile", statePath, recorded)
 }
 
-// Two failures are two lines. Fixing one thing and re-running to discover the
-// next is how a provisioning session turns into an afternoon.
-func TestEveryFailureIsReportedTogether(t *testing.T) {
+func TestEveryFailureIsReportedTogetherBecauseFixingOneAndRerunningToDiscoverTheNextTurnsAProvisioningSessionIntoAnAfternoon(t *testing.T) {
 	t.Parallel()
 
-	realizer := &countingRealizer{
+	realizer := &realizerRecordingWhatItSawAndFailingTheResourceIDsItWasTold{
 		fail: map[string]error{
 			"actions-secret/o/r/A_TOKEN":  errBoom,
 			"workflow-enabled/o/r/w.yaml": errOther,
@@ -413,13 +400,10 @@ func TestEveryFailureIsReportedTogether(t *testing.T) {
 	require.ErrorIs(t, err, errOther)
 }
 
-// A resource with no kind or no name is the caller handing over something
-// that is not a resource. That is not a realization that failed, and it stays
-// fatal on the spot.
-func TestAMalformedResourceIsStillFatalImmediately(t *testing.T) {
+func TestAResourceWithNoKindOrNoNameIsFatalOnTheSpotBecauseTheCallerHandedOverSomethingThatIsNotAResourceRatherThanARealizationThatFailed(t *testing.T) {
 	t.Parallel()
 
-	realizer := &countingRealizer{}
+	realizer := &realizerRecordingWhatItSawAndFailingTheResourceIDsItWasTold{}
 
 	_, err := managercontroller.New(realizer, fsadapter.New()).Reconcile(citypes.ReconcileInput{
 		Manager:   "m",
@@ -435,18 +419,15 @@ var (
 	errOther = errors.New("other")
 )
 
-// countingRealizer records what it was asked to realize, and fails the
-// resource ids it was told to. It exists so a test can decide which resource
-// breaks and then assert on what happened to the ones after it.
-type countingRealizer struct {
+type realizerRecordingWhatItSawAndFailingTheResourceIDsItWasTold struct {
 	seen    []string
 	fail    map[string]error
 	changes bool
 }
 
-func (countingRealizer) Kind() string { return "counting" }
+func (realizerRecordingWhatItSawAndFailingTheResourceIDsItWasTold) Kind() string { return "counting" }
 
-func (c *countingRealizer) Realize(res citypes.Resource, _ managercontroller.Options) (managercontroller.Action, error) {
+func (c *realizerRecordingWhatItSawAndFailingTheResourceIDsItWasTold) Realize(res citypes.Resource, _ managercontroller.Options) (managercontroller.Action, error) {
 	c.seen = append(c.seen, res.Name)
 
 	if err, ok := c.fail[res.ID()]; ok {

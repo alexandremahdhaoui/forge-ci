@@ -48,14 +48,22 @@ notes: |
 
   A secret the cluster does not hold is an error naming it, saying nothing in
   this toolchain writes one, and naming every declared key. When the declaration
-  wrote `spec.mint`, that text is printed after it. The manager names no key
-  type and no product of its own, because what a secret is belongs to the
-  declaration that asked for it.
+  wrote `spec.mint`, the error adds that the pipeline file holds the minting
+  steps under `spec.mint` of the secret entry naming that namespace and name.
+  The text itself never travels into an error, because a run log is read by
+  everyone who reads the run and the entry is where an operator reads it. The
+  manager names no key type and no product of its own, because what a secret is
+  belongs to the declaration that asked for it.
 
   A dry run reads the live secret exactly as a real run does and answers the
   same thing, because neither one writes. Force changes nothing here for the
-  same reason. Key names travel into an action line and into every refusal. A
-  value the cluster holds never travels into either one.
+  same reason. Key names travel into an action line and into the three refusals
+  that read them, the absent secret, the missing key and the empty key. A
+  missing `spec.namespace` or `spec.name`, a missing `spec.apiServer`, a cluster
+  that is not the one `spec.apiServer` names, and a cluster that answered it
+  holds the secret and handed back nothing all fire before one key was read back
+  from the cluster, so a key name printed there would be invented. A value the
+  cluster holds never travels into any of them.
 
   There is no create path, no update path and no delete path. A secret dropped
   from a declaration stays as it is. It refuses a resource recorded as owned by
