@@ -3,8 +3,6 @@ package clusterresourcecontroller
 import (
 	"errors"
 	"fmt"
-	"maps"
-	"slices"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/fsadapter"
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
@@ -107,33 +105,26 @@ func declaredSecret(index int, held map[string]any, apiServer string) (citypes.R
 
 	id := namespace + "/" + name
 
-	variables, err := citypes.SpecStringMap(held, "data")
+	declared, err := citypes.SpecStringSlice(held, "keys")
 	if err != nil {
-		return citypes.Resource{}, fmt.Errorf("reading the data of secret %s: %w", id, err)
+		return citypes.Resource{}, fmt.Errorf("reading the keys of secret %s: %w", id, err)
 	}
 
-	if len(variables) == 0 {
+	if len(declared) == 0 {
 		return citypes.Resource{}, fmt.Errorf(
-			"reading the data of secret %s: data is required, and it names one environment variable per key",
+			"reading the keys of secret %s: keys is required, and it names every key the live secret must hold",
 			id)
 	}
 
-	data := make(map[string]any, len(variables))
+	keys := make([]any, 0, len(declared))
 
-	for _, key := range slices.Sorted(maps.Keys(variables)) {
+	for _, key := range declared {
 		if key == "" {
 			return citypes.Resource{}, fmt.Errorf(
-				"reading the data of secret %s: data holds a key with no name", id)
+				"reading the keys of secret %s: keys holds a key with no name", id)
 		}
 
-		variable := variables[key]
-
-		if variable == "" {
-			return citypes.Resource{}, fmt.Errorf(
-				"reading the data of secret %s: key %q names no environment variable", id, key)
-		}
-
-		data[key] = variable
+		keys = append(keys, key)
 	}
 
 	return citypes.Resource{
@@ -143,7 +134,7 @@ func declaredSecret(index int, held map[string]any, apiServer string) (citypes.R
 			"apiServer": apiServer,
 			"namespace": namespace,
 			"name":      name,
-			"data":      data,
+			"keys":      keys,
 		},
 	}, nil
 }

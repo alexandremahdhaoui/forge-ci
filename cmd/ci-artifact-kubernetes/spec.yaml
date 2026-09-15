@@ -26,7 +26,7 @@ tools:
     does: Refuse. This engine declares cluster resources and never publishes.
 example:
   tool: declare
-  input: '{"root":"/w","spec":{"apiServer":"https://10.0.0.1:6443","resources":[{"kind":"helm-release","helmReleaseFile":"gitops/platform/app/helmrelease.yaml","valuesFile":"gitops/platform/app/values.yaml","createNamespace":true},{"kind":"secret","namespace":"app-system","name":"deploy-key","data":{"identity":"DEPLOY_KEY"}}]}}'
+  input: '{"root":"/w","spec":{"apiServer":"https://10.0.0.1:6443","resources":[{"kind":"helm-release","helmReleaseFile":"gitops/platform/app/helmrelease.yaml","valuesFile":"gitops/platform/app/values.yaml","createNamespace":true},{"kind":"secret","namespace":"app-system","name":"deploy-key","keys":["identity","known_hosts"]}]}}'
 notes: |
   One entry declares one resource, and the resources come back in list order.
 
@@ -45,15 +45,16 @@ notes: |
   kustomization beside the release generates that ConfigMap from, so the values
   are spelled once and Flux and this engine read one file.
 
-  A `secret` entry is flat. It carries `namespace`, `name` and `data`, where
-  each key of `data` names the environment variable holding that key's value.
-  The engine never reads a variable, so no value passes through it. The
-  resource is named `namespace/name`.
+  A `secret` entry is flat. It carries `namespace`, `name` and `keys`, a list
+  of the key names the live secret must hold, in the order the entry wrote
+  them. A secret is minted by a person and read back, never written, so the
+  entry names no value and no variable and no value passes through this
+  engine. The resource is named `namespace/name`.
 
   `spec.apiServer` sits once above the list and rides every resource. The
   manager confirms it on every kind and refuses a cluster that is not the one
-  the pipeline named, so neither a release nor a deploy key reaches the wrong
-  cluster.
+  the pipeline named, so a release never reaches the wrong cluster and a deploy
+  key is never read out of one.
 
   Every spec key is required except `createNamespace`, and an absent required
   key is refused by name. An unknown kind, a document that is not a release, a
@@ -82,5 +83,5 @@ spec:
       entry holds `kind`, one of `helm-release` or `secret`. A `helm-release`
       entry holds `helmReleaseFile` and `valuesFile`, both paths relative to
       the pipeline root, and an optional `createNamespace` flag. A `secret`
-      entry holds `namespace`, `name` and `data`, a map from each secret key
-      to the name of the environment variable holding its value.
+      entry holds `namespace`, `name` and `keys`, the list of key names the
+      live secret must hold.

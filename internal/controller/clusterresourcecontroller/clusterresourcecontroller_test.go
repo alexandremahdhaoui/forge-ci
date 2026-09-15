@@ -111,14 +111,14 @@ func TestCreateNamespaceRidesTheResourceWhenTheEntryDeclaresIt(t *testing.T) {
 	assert.Equal(t, true, out.Resources[0].Spec["createNamespace"])
 }
 
-func TestASecretDeclaresTheNameOfAnEnvironmentVariablePerKeyAndNeverReadsOne(t *testing.T) {
+func TestASecretDeclaresTheKeyNamesTheLiveSecretMustHoldAndCarriesNoValue(t *testing.T) {
 	t.Parallel()
 
 	out, err := onDisk().Declare(declaring(map[string]any{
 		"kind":      "secret",
 		"namespace": "flux-system",
 		"name":      "deploy-key",
-		"data":      map[string]any{"identity": "A_DEPLOY_KEY"},
+		"keys":      []any{"identity", "known_hosts"},
 	}))
 
 	require.NoError(t, err)
@@ -127,9 +127,22 @@ func TestASecretDeclaresTheNameOfAnEnvironmentVariablePerKeyAndNeverReadsOne(t *
 	assert.Equal(t, "flux-system/deploy-key", out.Resources[0].Name)
 	assert.Equal(t, "flux-system", out.Resources[0].Spec["namespace"])
 	assert.Equal(t, "deploy-key", out.Resources[0].Spec["name"])
-	assert.Equal(t,
-		map[string]any{"identity": "A_DEPLOY_KEY"}, out.Resources[0].Spec["data"])
+	assert.Equal(t, []any{"identity", "known_hosts"}, out.Resources[0].Spec["keys"])
 	assert.False(t, out.Resources[0].BootstrapOnly)
+}
+
+func TestTheDeclaredKeysKeepTheOrderTheEntryWroteThem(t *testing.T) {
+	t.Parallel()
+
+	out, err := onDisk().Declare(declaring(map[string]any{
+		"kind":      "secret",
+		"namespace": "flux-system",
+		"name":      "deploy-key",
+		"keys":      []any{"known_hosts", "identity"},
+	}))
+
+	require.NoError(t, err)
+	assert.Equal(t, []any{"known_hosts", "identity"}, out.Resources[0].Spec["keys"])
 }
 
 func TestTheResourcesComeBackInTheOrderTheSpecListsThem(t *testing.T) {
@@ -141,7 +154,7 @@ func TestTheResourcesComeBackInTheOrderTheSpecListsThem(t *testing.T) {
 			"kind":      "secret",
 			"namespace": "flux-system",
 			"name":      "deploy-key",
-			"data":      map[string]any{"identity": "A_DEPLOY_KEY"},
+			"keys":      []any{"identity"},
 		},
 		helmRelease(fluxRelease, fluxValues),
 	))
@@ -162,7 +175,7 @@ func TestTheApiServerSitsOnceOnTheSpecAndRidesEveryDeclaredResource(t *testing.T
 			"kind":      "secret",
 			"namespace": "flux-system",
 			"name":      "deploy-key",
-			"data":      map[string]any{"identity": "A_DEPLOY_KEY"},
+			"keys":      []any{"identity"},
 		},
 	))
 
@@ -336,47 +349,58 @@ func TestEveryMalformedSpecIsRefusedByName(t *testing.T) {
 			names: "name is required",
 		},
 		{
-			name: "a secret naming no data is refused by its id",
+			name: "a secret naming no keys is refused by its id",
 			spec: map[string]any{
 				"apiServer": theAPIServer,
 				"resources": []any{map[string]any{
 					"kind": "secret", "namespace": "flux-system", "name": "deploy-key",
 				}},
 			},
-			names: "reading the data of secret flux-system/deploy-key: data is required",
+			names: "reading the keys of secret flux-system/deploy-key: keys is required",
 		},
 		{
-			name: "a secret whose data is not a map of strings is refused by its id",
+			name: "a secret whose keys hold an empty list is refused by its id",
 			spec: map[string]any{
 				"apiServer": theAPIServer,
 				"resources": []any{map[string]any{
 					"kind": "secret", "namespace": "flux-system", "name": "deploy-key",
-					"data": map[string]any{"identity": 1},
+					"keys": []any{},
 				}},
 			},
-			names: "reading the data of secret flux-system/deploy-key",
+			names: "reading the keys of secret flux-system/deploy-key: keys is required",
 		},
 		{
-			name: "a secret key naming no environment variable is refused by that key",
+			name: "a secret whose keys are not a list is refused by its id",
 			spec: map[string]any{
 				"apiServer": theAPIServer,
 				"resources": []any{map[string]any{
 					"kind": "secret", "namespace": "flux-system", "name": "deploy-key",
-					"data": map[string]any{"identity": ""},
+					"keys": "identity",
 				}},
 			},
-			names: `key "identity" names no environment variable`,
+			names: "reading spec.keys: a list of strings is required, the spec holds a string",
 		},
 		{
-			name: "a secret data key with no name is refused by its id",
+			name: "a secret whose keys are not a list of strings is refused by its id",
 			spec: map[string]any{
 				"apiServer": theAPIServer,
 				"resources": []any{map[string]any{
 					"kind": "secret", "namespace": "flux-system", "name": "deploy-key",
-					"data": map[string]any{"": "A_DEPLOY_KEY"},
+					"keys": []any{"identity", 1},
 				}},
 			},
-			names: "data holds a key with no name",
+			names: "reading spec.keys[1]: a string is required, the spec holds a int",
+		},
+		{
+			name: "a secret key with no name is refused by its id",
+			spec: map[string]any{
+				"apiServer": theAPIServer,
+				"resources": []any{map[string]any{
+					"kind": "secret", "namespace": "flux-system", "name": "deploy-key",
+					"keys": []any{""},
+				}},
+			},
+			names: "keys holds a key with no name",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -431,28 +455,6 @@ func TestASpecWhoseResourcesAreNotAListNamesTheTypeItFoundAndAnAbsentOneKeepsIts
 	})
 
 	require.ErrorIs(t, err, clusterresourcecontroller.ErrResources)
-}
-
-func TestASecretHoldingTwoUnusableDataKeysRefusesWithTheSameMessageEveryRun(t *testing.T) {
-	t.Parallel()
-
-	input := declaring(map[string]any{
-		"kind":      "secret",
-		"namespace": "flux-system",
-		"name":      "deploy-key",
-		"data":      map[string]any{"alpha": "", "beta": ""},
-	})
-
-	_, first := onDisk().Declare(input)
-	require.Error(t, first)
-
-	for range 60 {
-		_, again := onDisk().Declare(input)
-		require.Error(t, again)
-		assert.Equal(t, first.Error(), again.Error())
-	}
-
-	assert.Contains(t, first.Error(), `key "alpha" names no environment variable`)
 }
 
 func TestARefusalOverAValuesFileNeverCarriesALineOfIt(t *testing.T) {

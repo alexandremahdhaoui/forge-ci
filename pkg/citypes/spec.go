@@ -44,28 +44,28 @@ func SpecMap(spec map[string]any, key string) (map[string]any, error) {
 	return held, nil
 }
 
-func SpecStringMap(spec map[string]any, key string) (map[string]string, error) {
+func SpecStringSlice(spec map[string]any, key string) ([]string, error) {
 	value, declared := spec[key]
 	if !declared || value == nil {
 		return nil, nil
 	}
 
-	held, isMap := value.(map[string]any)
-	if !isMap {
+	held, isList := value.([]any)
+	if !isList {
 		return nil, fmt.Errorf(
-			"reading spec.%s: a map of strings is required, the spec holds a %T", key, value)
+			"reading spec.%s: a list of strings is required, the spec holds a %T", key, value)
 	}
 
-	out := make(map[string]string, len(held))
+	out := make([]string, 0, len(held))
 
-	for name, entry := range held {
+	for index, entry := range held {
 		text, isString := entry.(string)
 		if !isString {
 			return nil, fmt.Errorf(
-				"reading spec.%s.%s: a string is required, the spec holds a %T", key, name, entry)
+				"reading spec.%s[%d]: a string is required, the spec holds a %T", key, index, entry)
 		}
 
-		out[name] = text
+		out = append(out, text)
 	}
 
 	return out, nil

@@ -120,7 +120,7 @@ func TestTheRefusalOfAMalformedResourceNeverEchoesASpecValue(t *testing.T) {
 			Spec: map[string]any{
 				"namespace": "flux-system",
 				"name":      "flux-deploy-key",
-				"data":      map[string]any{"identity": thePastedPrivateKey},
+				"keys":      []any{thePastedPrivateKey},
 			},
 		}},
 	})
@@ -129,7 +129,7 @@ func TestTheRefusalOfAMalformedResourceNeverEchoesASpecValue(t *testing.T) {
 	require.NotContains(t, err.Error(), "BEGIN OPENSSH PRIVATE KEY")
 	require.Equal(t,
 		"reconciling: resource needs a kind and a name, "+
-			"got secret/<no name> holding spec keys data, name, namespace",
+			"got secret/<no name> holding spec keys keys, name, namespace",
 		err.Error())
 }
 

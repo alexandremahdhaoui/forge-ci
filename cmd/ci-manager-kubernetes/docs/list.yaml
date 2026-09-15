@@ -7,7 +7,7 @@ baseURL: "https://raw.githubusercontent.com/alexandremahdhaoui/forge-ci/refs/hea
 docs:
   - name: "usage"
     title: "ci-manager-kubernetes usage"
-    description: "Converge a declared secret and a declared helm release in a cluster, and record what it changed."
+    description: "Confirm a declared secret and converge a declared helm release in a cluster, and record what it changed."
     url: "cmd/ci-manager-kubernetes/docs/usage.md"
     tags: ["usage", "manager"]
     required: true

@@ -2,34 +2,20 @@ package managercontroller
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"maps"
-	"slices"
-	"strconv"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 )
 
-const (
-	KindSecret = "secret"
-
-	SecretHashAnnotation = "forge-ci-secret-hash"
-
-	secretHashLength = 12
-)
+const KindSecret = "secret"
 
 type Kubernetes interface {
 	APIServer() string
 	Secret(ctx context.Context, namespace, name string) (secret *corev1.Secret, found bool, err error)
-	CreateSecret(ctx context.Context, secret *corev1.Secret) error
-	ReplaceSecret(ctx context.Context, secret *corev1.Secret) error
 }
 
 type KubernetesRealizer struct {
@@ -70,7 +56,7 @@ func (KubernetesRealizer) Kind() string {
 func (r KubernetesRealizer) Realize(res citypes.Resource, opts Options) (Action, error) {
 	switch res.Kind {
 	case KindSecret:
-		return r.realizeSecret(res, opts)
+		return r.realizeSecret(res)
 	case KindHelmRelease:
 		return r.realizeHelmRelease(res, opts)
 	default:
@@ -80,7 +66,7 @@ func (r KubernetesRealizer) Realize(res citypes.Resource, opts Options) (Action,
 	}
 }
 
-func (r KubernetesRealizer) realizeSecret(res citypes.Resource, opts Options) (Action, error) {
+func (r KubernetesRealizer) realizeSecret(res citypes.Resource) (Action, error) {
 	namespace, err := citypes.SpecString(res.Spec, "namespace")
 	if err != nil {
 		return Action{}, err
@@ -97,12 +83,10 @@ func (r KubernetesRealizer) realizeSecret(res citypes.Resource, opts Options) (A
 
 	id := namespace + "/" + name
 
-	data, err := declaredData(res.Spec, id)
+	keys, err := declaredKeys(res.Spec, id)
 	if err != nil {
 		return Action{}, err
 	}
-
-	hash := hashOfData(data)
 
 	apiServer, err := citypes.SpecString(res.Spec, "apiServer")
 	if err != nil {
@@ -119,7 +103,7 @@ func (r KubernetesRealizer) realizeSecret(res citypes.Resource, opts Options) (A
 	}
 
 	if !found {
-		return r.createSecret(namespace, name, id, data, hash, opts)
+		return Action{}, errors.New(mintingSteps(id, keys))
 	}
 
 	if live == nil {
@@ -127,134 +111,62 @@ func (r KubernetesRealizer) realizeSecret(res citypes.Resource, opts Options) (A
 			"reading secret %s: the cluster answered that it holds one and handed back nothing", id)
 	}
 
-	if live.Annotations[SecretHashAnnotation] == hash && !opts.Force {
-		return Kept("kept secret " + id), nil
+	if missing := keysTheLiveSecretLacks(live, keys); len(missing) > 0 {
+		return Action{}, fmt.Errorf(
+			"reading secret %s: it holds no %s, and this declaration needs %s. "+
+				"A person writes every key of this secret by hand, and nothing in this toolchain writes one",
+			id, strings.Join(missing, " and no "), strings.Join(keys, ", "))
 	}
 
-	return r.replaceSecret(live, id, data, hash, opts)
+	return Kept("kept secret " + id), nil
 }
 
-func (r KubernetesRealizer) createSecret(
-	namespace, name, id string, data map[string]citypes.Secret, hash string, opts Options,
-) (Action, error) {
-	text := "create secret " + id + " holding " + declaredKeys(data)
-
-	if opts.DryRun {
-		return Kept(opts.would(text)), nil
-	}
-
-	written := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace:   namespace,
-			Name:        name,
-			Annotations: map[string]string{SecretHashAnnotation: hash},
-		},
-		Type: corev1.SecretTypeOpaque,
-		Data: secretBytes(data),
-	}
-
-	if err := r.cluster.CreateSecret(r.ctx, written); err != nil {
-		return Action{}, fmt.Errorf("creating secret %s: %w", id, err)
-	}
-
-	return Did("created secret " + id + " holding " + declaredKeys(data)), nil
+func mintingSteps(id string, keys []string) string {
+	return "reading secret " + id + ": the cluster holds no secret of that name, " +
+		"and nothing in this toolchain writes one. A person mints it by hand in three steps. " +
+		"First, generate an ed25519 key pair. " +
+		"Second, register the public half as a read only deploy key on the git repository " +
+		"the cluster reads from. " +
+		"Third, write the private half and the host keys of that repository into the cluster " +
+		"as secret " + id + ", under the keys " + strings.Join(keys, ", ")
 }
 
-func (r KubernetesRealizer) replaceSecret(
-	live *corev1.Secret, id string, data map[string]citypes.Secret, hash string, opts Options,
-) (Action, error) {
-	text := "replace the data of secret " + id + " with " + declaredKeys(data)
+func keysTheLiveSecretLacks(live *corev1.Secret, keys []string) []string {
+	var missing []string
 
-	if opts.DryRun {
-		return Kept(opts.would(text)), nil
+	for _, key := range keys {
+		if _, held := live.Data[key]; held {
+			continue
+		}
+
+		if _, held := live.StringData[key]; held {
+			continue
+		}
+
+		missing = append(missing, key)
 	}
 
-	written := live.DeepCopy()
-	written.Data = secretBytes(data)
-	written.StringData = nil
-
-	if written.Annotations == nil {
-		written.Annotations = map[string]string{}
-	}
-
-	written.Annotations[SecretHashAnnotation] = hash
-
-	if err := r.cluster.ReplaceSecret(r.ctx, written); err != nil {
-		return Action{}, fmt.Errorf("replacing the data of secret %s: %w", id, err)
-	}
-
-	return Did("replaced the data of secret " + id + " with " + declaredKeys(data)), nil
+	return missing
 }
 
-func declaredData(spec map[string]any, id string) (map[string]citypes.Secret, error) {
-	variables, err := citypes.SpecStringMap(spec, "data")
+func declaredKeys(spec map[string]any, id string) ([]string, error) {
+	keys, err := citypes.SpecStringSlice(spec, "keys")
 	if err != nil {
-		return nil, fmt.Errorf("reading the data of secret %s: %w", id, err)
+		return nil, fmt.Errorf("reading the keys of secret %s: %w", id, err)
 	}
 
-	if len(variables) == 0 {
+	if len(keys) == 0 {
 		return nil, fmt.Errorf(
-			"reading the data of secret %s: spec.data is required, and it names one environment variable per key", id)
+			"reading the keys of secret %s: spec.keys is required, "+
+				"and it names every key the live secret must hold", id)
 	}
 
-	data := make(map[string]citypes.Secret, len(variables))
-
-	for _, key := range slices.Sorted(maps.Keys(variables)) {
+	for _, key := range keys {
 		if key == "" {
 			return nil, fmt.Errorf(
-				"reading the data of secret %s: spec.data holds a key with no name", id)
+				"reading the keys of secret %s: spec.keys holds a key with no name", id)
 		}
-
-		variable := variables[key]
-
-		if variable == "" {
-			return nil, fmt.Errorf(
-				"reading the data of secret %s: key %q names no environment variable", id, key)
-		}
-
-		value := citypes.SecretFromEnv(variable)
-
-		if value == "" {
-			return nil, fmt.Errorf(
-				"reading the data of secret %s: key %q must hold the name of an environment variable, "+
-					"and no variable of that name is set",
-				id, key)
-		}
-
-		data[key] = value
 	}
 
-	return data, nil
-}
-
-func secretBytes(data map[string]citypes.Secret) map[string][]byte {
-	out := make(map[string][]byte, len(data))
-	for key, value := range data {
-		out[key] = []byte(value)
-	}
-
-	return out
-}
-
-func hashOfData(data map[string]citypes.Secret) string {
-	joined := []byte{}
-
-	for _, key := range slices.Sorted(maps.Keys(data)) {
-		value := data[key]
-
-		joined = append(joined, strconv.Itoa(len(key))...)
-		joined = append(joined, ':')
-		joined = append(joined, key...)
-		joined = append(joined, strconv.Itoa(len(value))...)
-		joined = append(joined, ':')
-		joined = append(joined, value...)
-	}
-
-	sum := sha256.Sum256(joined)
-
-	return hex.EncodeToString(sum[:])[:secretHashLength]
-}
-
-func declaredKeys(data map[string]citypes.Secret) string {
-	return strings.Join(slices.Sorted(maps.Keys(data)), ", ")
+	return keys, nil
 }

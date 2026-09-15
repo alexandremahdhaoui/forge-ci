@@ -47,21 +47,3 @@ func (c Cluster) Secret(ctx context.Context, namespace, name string) (*corev1.Se
 
 	return secret, true, nil
 }
-
-func (c Cluster) CreateSecret(ctx context.Context, secret *corev1.Secret) error {
-	_, err := c.client.CoreV1().Secrets(secret.Namespace).Create(ctx, secret, metav1.CreateOptions{})
-	if err != nil {
-		return fmt.Errorf("posting secret %s/%s: %w", secret.Namespace, secret.Name, err)
-	}
-
-	return nil
-}
-
-func (c Cluster) ReplaceSecret(ctx context.Context, secret *corev1.Secret) error {
-	_, err := c.client.CoreV1().Secrets(secret.Namespace).Update(ctx, secret, metav1.UpdateOptions{})
-	if err != nil {
-		return fmt.Errorf("putting secret %s/%s: %w", secret.Namespace, secret.Name, err)
-	}
-
-	return nil
-}

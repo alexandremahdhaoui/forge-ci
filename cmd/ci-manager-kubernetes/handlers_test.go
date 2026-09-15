@@ -158,7 +158,7 @@ func TestEveryFieldOfAReconcileInputCrossesIntoTheController(t *testing.T) {
 			Spec: map[string]interface{}{
 				"namespace": "flux-system",
 				"name":      "flux-deploy-key",
-				"data":      map[string]interface{}{"identity": "FLUX_DEPLOY_KEY"},
+				"keys":      []interface{}{"identity", "known_hosts"},
 			},
 		}},
 		Owned:        []Ownership{{Resource: "secret/flux-deploy-key", Manager: "kubernetes"}},
@@ -178,7 +178,7 @@ func TestEveryFieldOfAReconcileInputCrossesIntoTheController(t *testing.T) {
 		Spec: map[string]interface{}{
 			"namespace": "flux-system",
 			"name":      "flux-deploy-key",
-			"data":      map[string]interface{}{"identity": "FLUX_DEPLOY_KEY"},
+			"keys":      []interface{}{"identity", "known_hosts"},
 		},
 	}}, out.Resources)
 	assert.Equal(t,

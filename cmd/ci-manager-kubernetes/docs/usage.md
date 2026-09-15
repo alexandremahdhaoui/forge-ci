@@ -2,27 +2,27 @@
 
 # ci-manager-kubernetes
 
-**Converge a declared secret and a declared helm release in a cluster, and record what it changed.**
+**Confirm a declared secret and converge a declared helm release in a cluster, and record what it changed.**
 
 A forge-ci `manager` engine.
 
 ## Why it exists
 
-A run time credential is declared, never pasted. The declaration names the
-environment variable that carries each value and nothing else, so git holds
-no secret and a vault edit plus a rerun is the whole rotation. The manager
-reads the live secret first, so a rerun that changes nothing answers Kept.
+A run time credential is minted by a person and never by this toolchain. The
+declaration names the keys the live secret must hold and nothing else, so git
+holds no secret and no value passes through a pipeline. The manager reads the
+live secret and answers Kept when every declared key is there.
 
 ## Tools
 
 | Tool | Does |
 |---|---|
-| `reconcile` | Converge every declared secret and helm release, and return who owns it. |
+| `reconcile` | Confirm every declared secret, converge every declared helm release, and return who owns it. |
 
 ## By hand
 
 ```sh
-echo '{"manager":"kubernetes","resources":[{"kind":"secret","name":"flux-deploy-key","spec":{"apiServer":"https://10.0.0.1:6443","namespace":"flux-system","name":"flux-deploy-key","data":{"identity":"FLUX_DEPLOY_KEY"}}}]}' \
+echo '{"manager":"kubernetes","resources":[{"kind":"secret","name":"flux-deploy-key","spec":{"apiServer":"https://10.0.0.1:6443","namespace":"flux-system","name":"flux-deploy-key","keys":["identity","known_hosts"]}}]}' \
   | ci-manager-kubernetes reconcile
 ```
 
@@ -42,56 +42,44 @@ engines:
 ## Worth knowing
 
 It knows two kinds, `secret` and `helm-release`, and it refuses any other by
-name.
+name. It reads a secret and never writes one. It installs a release.
 
 ## secret
 
-The resource name is the secret's name in the
-declaration. `spec.namespace` and `spec.name` are the namespace and the name
-in the cluster. `spec.data` maps each key of the secret to the name of the
-environment variable holding its value, never to the value itself, so a
-declaration is safe to commit and the values enter through the environment of
-one run. `spec.apiServer` is the API server the declaration expects.
+This kind is read only. Nothing in this toolchain writes a secret. The
+resource name is the secret's name in the declaration. `spec.namespace` and
+`spec.name` are the namespace and the name in the cluster. `spec.keys` is the
+list of key names the live secret must hold, never a value and never the name
+of a variable holding one, so a declaration is safe to commit and no value
+passes through a run. `spec.apiServer` is the API server the declaration
+expects.
 
 The declaration is read first and the cluster is confirmed after. A
 declaration that fails any check above is refused before `spec.apiServer` is
 read against the live cluster. A cluster that is not the one `spec.apiServer`
-names is an error carrying both, so a deploy key is never written into the
+names is an error carrying both, so a deploy key is never read out of the
 wrong cluster.
 
-A key whose variable is unset or empty is an error naming the secret and the
-key. It never names the variable, because a person who pastes a value into
-`spec.data` by mistake pastes it where the variable name belongs, and echoing
-it would put the secret in the pipeline log. The key names the declaration, so
-it is enough to find the line to fix. A declaration carrying no `spec.data`, an
-empty map, a key with no name, and a key naming no variable are each an error
-naming what was seen.
+A declaration carrying no `spec.keys`, an empty list, a value that is not a
+list of strings, and a key with no name are each an error naming what was
+seen.
 
-Kept or Did comes from one truncated hash. The manager takes SHA-256 over
-every key and its value, both length prefixed and in sorted order, keeps the
-first 12 characters, and writes it to the live secret under the annotation
-`forge-ci-secret-hash` in the same write that carries the data. The key set
-is hashed alongside the values, so dropping a key answers a different hash
-even when that key held nothing.
+Kept means the live secret exists and holds every declared key. A secret
+missing a declared key is an error naming the namespace, the name and every
+key that is absent. A secret the cluster does not hold is an error naming it
+and printing the three steps a person takes to mint it by hand: generate an
+ed25519 key pair, register the public half as a read only deploy key on the
+git repository the cluster reads from, then write the private half and the
+host keys of that repository into the cluster under the declared key names.
 
-Kept means the live secret carries that annotation already. Did on create
-means the cluster held no secret of that name. Did on update means the
-annotation named something else, and the write replaces the whole data map,
-so a key dropped from the declaration is gone from the secret. Nothing is
-merged, because a merge cannot prune. Every other field of the live secret
-is kept, so a label or an annotation someone else wrote survives.
+A dry run reads the live secret exactly as a real run does and answers the
+same thing, because neither one writes. Force changes nothing here for the
+same reason. Key names travel into an action line and into every refusal. A
+value the cluster holds never travels into either one.
 
-A dry run reads the live secret exactly as a real run does and answers Kept
-either way, with the text saying what it would write and which keys it would
-carry. It writes nothing. The key names travel into an action line and into
-every refusal. A declared value never travels into either one, whether it is
-the name of a variable or a secret somebody pasted where that name belongs.
-
-Force writes even when the annotation matches. Only a human asks for it, and
-it is the way to restore a secret someone edited in the cluster.
-
-There is no delete path. A secret dropped from a declaration stays as it is.
-It refuses a resource recorded as owned by a different manager.
+There is no create path, no update path and no delete path. A secret dropped
+from a declaration stays as it is. It refuses a resource recorded as owned by
+a different manager.
 
 ## helm-release
 

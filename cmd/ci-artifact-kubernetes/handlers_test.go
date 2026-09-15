@@ -73,7 +73,7 @@ func declaredSpec() Spec {
 				"kind":      "secret",
 				"namespace": "demo-system",
 				"name":      "deploy-key",
-				"data":      map[string]any{"identity": "A_DEPLOY_KEY"},
+				"keys":      []any{"identity", "known_hosts"},
 			},
 		},
 	}
@@ -98,7 +98,7 @@ func TestTheDeclareToolAnswersTheResourcesInTheOrderTheSpecListsThem(t *testing.
 
 	assert.Equal(t, "secret", out.Resources[1].Kind)
 	assert.Equal(t, "demo-system/deploy-key", out.Resources[1].Name)
-	assert.Equal(t, map[string]any{"identity": "A_DEPLOY_KEY"}, out.Resources[1].Spec["data"])
+	assert.Equal(t, []any{"identity", "known_hosts"}, out.Resources[1].Spec["keys"])
 }
 
 func TestTheDeclareToolAnswersTheControllersRefusalAndNoResources(t *testing.T) {
