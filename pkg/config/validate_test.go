@@ -224,3 +224,20 @@ func TestAManagerOneEngineNamesIsAccepted(t *testing.T) {
 
 	require.NoError(t, p.Validate())
 }
+
+func TestParseRefusesAnEngineNamingAnUndeclaredManager(t *testing.T) {
+	_, err := config.Parse([]byte(`
+name: demo
+state: st
+managers: [{alias: local, engine: "forge://m"}]
+engines:
+  - {alias: st, type: state, engine: "forge://x", manager: local}
+  - {alias: here, type: compute, engine: "forge://x", manager: ghost}
+targets: [{alias: t, binary: forge, args: [test-all]}]
+stages:
+  - name: prod
+    substages: [{name: default, engine: here, targets: [t]}]
+`))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), `engines[1] (here): manager "ghost" is not declared`)
+}

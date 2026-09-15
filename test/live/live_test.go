@@ -208,7 +208,8 @@ func helmStorageOfManager(pipeline config.Pipeline, alias string) (string, error
 		return storage, nil
 	}
 
-	return "", nil
+	return "", fmt.Errorf(
+		"an engine names manager %q and the pipeline declares no manager of that alias", alias)
 }
 
 func theLiveCluster(t *testing.T, declared declaration) (kubernetesadapter.Cluster, error) {

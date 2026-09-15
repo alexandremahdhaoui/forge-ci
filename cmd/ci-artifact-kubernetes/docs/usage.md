@@ -73,10 +73,12 @@ are spelled once and Flux and this engine read one file.
 
 A `secret` entry is flat. It carries `namespace`, `name` and `keys`, a list
 of the key names the live secret must hold, in the order the entry wrote
-them. A secret is written by a person and read back, never written here, so
-the entry names no value and no variable and no value passes through this
-engine. The declared resource carries `apiServer`, `namespace`, `name` and
-`keys` and nothing else. The resource is named `namespace/name`.
+them. A person writes the secret into the cluster. This toolchain only reads
+it back, so the entry names no value and no variable and no value passes
+through this engine. This entry is the one place that names what the secret
+holds, and the manager knows only that it is a secret. The declared resource
+carries `apiServer`, `namespace`, `name` and `keys` and nothing else. The
+resource is named `namespace/name`.
 
 An empty `keys` list and a key with no name are each refused by name, and a
 key name that is nothing but whitespace is a key with no name.
