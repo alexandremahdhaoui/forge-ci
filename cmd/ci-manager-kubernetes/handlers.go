@@ -3,8 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"slices"
-	"strings"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/fsadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/helmadapter"
@@ -56,17 +54,7 @@ func declaredStorage(spec map[string]any) (string, error) {
 		return "", err
 	}
 
-	if storage == "" {
-		return helmadapter.StorageSecrets, nil
-	}
-
-	if !slices.Contains(helmadapter.Storages, storage) {
-		return "", fmt.Errorf(
-			"reading spec.storage: it names %q, and helm keeps its release records in %s",
-			storage, strings.Join(helmadapter.Storages, " or "))
-	}
-
-	return storage, nil
+	return helmadapter.Storage(storage)
 }
 
 func releaseClient(in citypes.ReconcileInput, storage string) (helmadapter.Releases, error) {

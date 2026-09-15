@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -33,6 +34,20 @@ const (
 )
 
 var Storages = []string{StorageSecrets, StorageMemory}
+
+func Storage(declared string) (string, error) {
+	if declared == "" {
+		return StorageSecrets, nil
+	}
+
+	if !slices.Contains(Storages, declared) {
+		return "", fmt.Errorf(
+			"reading spec.storage: it names %q, and helm keeps its release records in %s",
+			declared, strings.Join(Storages, " or "))
+	}
+
+	return declared, nil
+}
 
 type Releases struct {
 	settings *cli.EnvSettings

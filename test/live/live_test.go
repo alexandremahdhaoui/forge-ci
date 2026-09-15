@@ -4,6 +4,7 @@ package live_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -41,6 +42,9 @@ const (
 	versionKey   = "version"
 	keysKey      = "keys"
 
+	apiServerSubject = "api server"
+	storageSubject   = "helm storage"
+
 	reachTimeout = 3 * time.Second
 
 	cli = "forge-ci"
@@ -68,6 +72,35 @@ func declaredByThePipeline(t *testing.T) declaration {
 func declaredAt(t *testing.T, path string) declaration {
 	t.Helper()
 
+	out := parsedAt(t, path)
+	require.NoError(t, atLeastOneClusterResource(out))
+
+	return out
+}
+
+func agreesWithEveryEngineBefore(alias, subject, declared, held string) error {
+	if held == "" || held == declared {
+		return nil
+	}
+
+	return fmt.Errorf(
+		"engine %s declares %s %q and an engine before it declares %q, "+
+			"and one pipeline reads one cluster back", alias, subject, declared, held)
+}
+
+func atLeastOneClusterResource(declared declaration) error {
+	if len(declared.resources) > 0 {
+		return nil
+	}
+
+	return fmt.Errorf(
+		"the pipeline at %s declares no cluster resource, "+
+			"and this stage reads back every resource a pipeline declares", declared.pipeline)
+}
+
+func parsedAt(t *testing.T, path string) declaration {
+	t.Helper()
+
 	abs, err := filepath.Abs(path)
 	require.NoError(t, err)
 
@@ -88,25 +121,22 @@ func declaredAt(t *testing.T, path string) declaration {
 			continue
 		}
 
-		if out.apiServer != "" && out.apiServer != server {
-			t.Fatalf(
-				"engine %s declares api server %q and an engine before it declares %q, "+
-					"and one pipeline reads one cluster back",
-				engine.Alias, server, out.apiServer)
-		}
+		require.NoError(t,
+			agreesWithEveryEngineBefore(engine.Alias, apiServerSubject, server, out.apiServer))
+
+		storage := helmStorageOfManager(t, pipeline, engine.Manager)
+
+		require.NoError(t,
+			agreesWithEveryEngineBefore(engine.Alias, storageSubject, storage, out.storage))
 
 		out.apiServer = server
-		out.storage = helmStorageOfManager(t, pipeline, engine.Manager)
+		out.storage = storage
 
 		declared, err := controller.Declare(
 			citypes.DeclareInput{Spec: engine.Spec, Root: out.root})
 		require.NoError(t, err, "declaring the resources of engine %s", engine.Alias)
 
 		out.resources = append(out.resources, declared.Resources...)
-	}
-
-	if len(out.resources) == 0 {
-		t.Skipf("the pipeline at %s declares no cluster resource, so this stage read nothing back", abs)
 	}
 
 	return out
@@ -120,12 +150,11 @@ func helmStorageOfManager(t *testing.T, pipeline config.Pipeline, alias string) 
 			continue
 		}
 
-		storage, err := citypes.SpecString(manager.Spec, storageKey)
+		declared, err := citypes.SpecString(manager.Spec, storageKey)
 		require.NoError(t, err, "reading the spec of manager %s", alias)
 
-		if storage == "" {
-			return helmadapter.StorageSecrets
-		}
+		storage, err := helmadapter.Storage(declared)
+		require.NoError(t, err, "reading the spec of manager %s", alias)
 
 		return storage
 	}
@@ -145,20 +174,12 @@ func theLiveCluster(t *testing.T, declared declaration) kubernetesadapter.Cluste
 	cluster, err := kubernetesadapter.New()
 	require.NoError(t, err)
 
+	if err := managercontroller.ConfirmAPIServer(
+		cluster, declared.apiServer, "the resources of "+declared.pipeline); err != nil {
+		t.Fatal(err)
+	}
+
 	live := cluster.APIServer()
-	if live == "" {
-		t.Fatalf(
-			"reading the api server holding the resources of %s: the cluster client names no api server",
-			declared.pipeline)
-	}
-
-	if live != declared.apiServer {
-		t.Fatalf(
-			"reading the api server holding the resources of %s: the pipeline names %q "+
-				"and the live cluster is %q",
-			declared.pipeline, declared.apiServer, live)
-	}
-
 	if !answers(live) {
 		t.Skipf("the api server at %s does not answer, so nothing read the cluster back", live)
 	}
@@ -370,6 +391,48 @@ func TestTheSecretArmReadsADeclaredKeyBackFromAnAPIServerStoodUpInThisTestProces
 	readBack(t, cluster, helmadapter.Releases{}, declared.resources[0])
 }
 
+func TestAPipelineDeclaringNoClusterResourceFailsThisStageInsteadOfSkippingIt(t *testing.T) {
+	root := t.TempDir()
+
+	path := filepath.Join(root, "forge-ci.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(clusterlessPipelineYAML(root)), 0o600))
+
+	parsed := parsedAt(t, path)
+	require.Empty(t, parsed.resources)
+
+	err := atLeastOneClusterResource(parsed)
+	require.Error(t, err)
+	require.Equal(t,
+		"the pipeline at "+parsed.pipeline+" declares no cluster resource, "+
+			"and this stage reads back every resource a pipeline declares", err.Error())
+}
+
+func TestTwoEnginesWhoseManagersDeclareDifferentHelmStorageAreRefusedByName(t *testing.T) {
+	err := agreesWithEveryEngineBefore(
+		"second", storageSubject, helmadapter.StorageMemory, helmadapter.StorageSecrets)
+
+	require.Error(t, err)
+	require.Equal(t,
+		`engine second declares helm storage "memory" and an engine before it declares "secrets", `+
+			"and one pipeline reads one cluster back", err.Error())
+}
+
+func TestTwoEnginesDeclaringDifferentAPIServersAreRefusedByName(t *testing.T) {
+	err := agreesWithEveryEngineBefore(
+		"second", apiServerSubject, "https://10.0.0.2:6443", "https://10.0.0.1:6443")
+
+	require.Error(t, err)
+	require.Equal(t,
+		`engine second declares api server "https://10.0.0.2:6443" and an engine before it `+
+			`declares "https://10.0.0.1:6443", and one pipeline reads one cluster back`,
+		err.Error())
+}
+
+func TestTheFirstEngineAgreesWithEveryEngineBeforeItBecauseThereIsNone(t *testing.T) {
+	require.NoError(t, agreesWithEveryEngineBefore("first", storageSubject, "memory", ""))
+	require.NoError(t, agreesWithEveryEngineBefore("second", storageSubject, "memory", "memory"))
+}
+
 func writeKubeconfig(t *testing.T, root, server string) {
 	t.Helper()
 
@@ -389,6 +452,40 @@ current-context: here
 `), 0o600))
 
 	t.Setenv(envKubeconfig, path)
+}
+
+func clusterlessPipelineYAML(root string) string {
+	return `name: live
+managers:
+  - alias: here
+    engine: "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-manager-local@v0.1.0"
+engines:
+  - alias: ci-state
+    type: state
+    engine: "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-state-git@v0.1.0"
+    manager: here
+    spec:
+      path: ` + filepath.Join(root, "state") + `
+  - alias: all-pass
+    type: promotion
+    engine: "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-promotion-all@v0.1.0"
+    manager: here
+  - alias: compute
+    type: compute
+    engine: "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-compute-local@v0.1.0"
+    manager: here
+state: ci-state
+targets:
+  - alias: noop
+    binary: "true"
+stages:
+  - name: build
+    promotion: all-pass
+    substages:
+      - name: default
+        engine: compute
+        targets: [noop]
+`
 }
 
 func secretPipelineYAML(root, server, namespace, name, key string) string {

@@ -3,6 +3,8 @@ package clusterresourcecontroller
 import (
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/fsadapter"
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
@@ -11,7 +13,11 @@ import (
 const (
 	kindHelmRelease = "helm-release"
 	kindSecret      = "secret"
+
+	staleSecretEntryKey = "data"
 )
+
+var secretEntryKeys = []string{"kind", "namespace", "name", "keys", "mint"}
 
 var (
 	ErrResources = errors.New(
@@ -93,6 +99,10 @@ func (c *Controller) declareOne(
 }
 
 func declaredSecret(index int, held map[string]any, apiServer string) (citypes.Resource, error) {
+	if err := onlySecretEntryKeys(index, held); err != nil {
+		return citypes.Resource{}, err
+	}
+
 	namespace, err := entryString(index, held, "namespace")
 	if err != nil {
 		return citypes.Resource{}, err
@@ -127,16 +137,49 @@ func declaredSecret(index int, held map[string]any, apiServer string) (citypes.R
 		keys = append(keys, key)
 	}
 
-	return citypes.Resource{
-		Kind: kindSecret,
-		Name: id,
-		Spec: map[string]any{
-			"apiServer": apiServer,
-			"namespace": namespace,
-			"name":      name,
-			"keys":      keys,
-		},
-	}, nil
+	mint, err := citypes.SpecString(held, "mint")
+	if err != nil {
+		return citypes.Resource{}, fmt.Errorf("reading the mint of secret %s: %w", id, err)
+	}
+
+	spec := map[string]any{
+		"apiServer": apiServer,
+		"namespace": namespace,
+		"name":      name,
+		"keys":      keys,
+	}
+
+	if mint != "" {
+		spec["mint"] = mint
+	}
+
+	return citypes.Resource{Kind: kindSecret, Name: id, Spec: spec}, nil
+}
+
+func onlySecretEntryKeys(index int, held map[string]any) error {
+	var unknown []string
+
+	for key := range held {
+		if !slices.Contains(secretEntryKeys, key) {
+			unknown = append(unknown, key)
+		}
+	}
+
+	if len(unknown) == 0 {
+		return nil
+	}
+
+	slices.Sort(unknown)
+
+	note := ""
+	if slices.Contains(unknown, staleSecretEntryKey) {
+		note = ". " + staleSecretEntryKey + " is no longer read, and keys names every key " +
+			"the live secret must hold, never a value"
+	}
+
+	return fmt.Errorf(
+		"reading spec.resources[%d]: a secret entry names %s, and a secret entry holds %s%s",
+		index, strings.Join(unknown, " and "), strings.Join(secretEntryKeys, ", "), note)
 }
 
 func entryString(index int, held map[string]any, key string) (string, error) {

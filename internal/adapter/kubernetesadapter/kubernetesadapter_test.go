@@ -1,18 +1,25 @@
 package kubernetesadapter
 
 import (
+	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 const (
 	theNamespace  = "flux-system"
 	theSecretName = "flux-deploy-key"
+
+	theAPIServer = "https://127.0.0.1:1"
 )
 
 func declared(data map[string][]byte) *corev1.Secret {
@@ -21,6 +28,78 @@ func declared(data map[string][]byte) *corev1.Secret {
 		Type:       corev1.SecretTypeOpaque,
 		Data:       data,
 	}
+}
+
+func writeKubeconfig(t *testing.T, body string) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "kubeconfig")
+	require.NoError(t, os.WriteFile(path, []byte(body), 0o600))
+	t.Setenv("KUBECONFIG", path)
+
+	return path
+}
+
+func TestTheClusterClientIsBuiltFromTheKubeconfigTheEnvironmentNamesAndItsHostIsTheAPIServer(t *testing.T) {
+	writeKubeconfig(t, `apiVersion: v1
+kind: Config
+clusters:
+  - name: here
+    cluster:
+      server: `+theAPIServer+`
+contexts:
+  - name: here
+    context:
+      cluster: here
+current-context: here
+`)
+
+	cluster, err := New()
+	require.NoError(t, err)
+	assert.Equal(t, theAPIServer, cluster.APIServer())
+}
+
+func TestAKubeconfigNamingNoClusterRefusesByNameInsteadOfBuildingAClientThatReachesNothing(t *testing.T) {
+	writeKubeconfig(t, "apiVersion: v1\nkind: Config\n")
+
+	_, err := New()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "reading the client configuration of the cluster")
+}
+
+func TestAKubeconfigNamingAHostTheClientCannotUseRefusesByName(t *testing.T) {
+	writeKubeconfig(t, `apiVersion: v1
+kind: Config
+clusters:
+  - name: here
+    cluster:
+      server: "://not a url"
+contexts:
+  - name: here
+    context:
+      cluster: here
+current-context: here
+`)
+
+	_, err := New()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "the cluster")
+}
+
+func TestReadingASecretTheClusterRefusesIsReportedAsAnErrorNamingTheSecret(t *testing.T) {
+	t.Parallel()
+
+	clientset := fake.NewClientset()
+	clientset.PrependReactor("get", "secrets",
+		func(k8stesting.Action) (bool, runtime.Object, error) {
+			return true, nil, errors.New("connection refused")
+		})
+
+	_, found, err := Cluster{client: clientset}.Secret(t.Context(), theNamespace, theSecretName)
+	require.Error(t, err)
+	assert.False(t, found)
+	assert.Contains(t, err.Error(), "getting secret "+theNamespace+"/"+theSecretName)
+	assert.Contains(t, err.Error(), "connection refused")
 }
 
 func TestReadingASecretTheClusterDoesNotHoldAnswersNotFoundAndNoError(t *testing.T) {

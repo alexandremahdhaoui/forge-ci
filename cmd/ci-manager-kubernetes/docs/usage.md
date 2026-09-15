@@ -52,7 +52,8 @@ resource name is the secret's name in the declaration. `spec.namespace` and
 list of key names the live secret must hold, never a value and never the name
 of a variable holding one, so a declaration is safe to commit and no value
 passes through a run. `spec.apiServer` is the API server the declaration
-expects.
+expects. `spec.mint` is optional free text the declaration wrote saying how a
+person mints this particular secret.
 
 The declaration is read first and the cluster is confirmed after. A
 declaration that fails any check above is refused before `spec.apiServer` is
@@ -64,13 +65,19 @@ A declaration carrying no `spec.keys`, an empty list, a value that is not a
 list of strings, and a key with no name are each an error naming what was
 seen.
 
-Kept means the live secret exists and holds every declared key. A secret
-missing a declared key is an error naming the namespace, the name and every
-key that is absent. A secret the cluster does not hold is an error naming it
-and printing the three steps a person takes to mint it by hand: generate an
-ed25519 key pair, register the public half as a read only deploy key on the
-git repository the cluster reads from, then write the private half and the
-host keys of that repository into the cluster under the declared key names.
+Kept means the live secret exists and holds every declared key with a value
+in it, and its action line names every key it confirmed. A secret missing a
+declared key is an error naming the namespace, the name and every key that is
+absent. A secret holding a declared key with nothing in it is a second error
+naming every key that is empty. The two are separate because a key nobody
+wrote and a key somebody wrote blank are fixed differently, and a secret that
+exists holding an empty value is useless rather than absent.
+
+A secret the cluster does not hold is an error naming it, saying nothing in
+this toolchain writes one, and naming every declared key. When the declaration
+wrote `spec.mint`, that text is printed after it. The manager names no key
+type and no product of its own, because what a secret is belongs to the
+declaration that asked for it.
 
 A dry run reads the live secret exactly as a real run does and answers the
 same thing, because neither one writes. Force changes nothing here for the

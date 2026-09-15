@@ -88,6 +88,11 @@ func (r KubernetesRealizer) realizeSecret(res citypes.Resource) (Action, error) 
 		return Action{}, err
 	}
 
+	mint, err := citypes.SpecString(res.Spec, "mint")
+	if err != nil {
+		return Action{}, err
+	}
+
 	apiServer, err := citypes.SpecString(res.Spec, "apiServer")
 	if err != nil {
 		return Action{}, err
@@ -103,7 +108,7 @@ func (r KubernetesRealizer) realizeSecret(res citypes.Resource) (Action, error) 
 	}
 
 	if !found {
-		return Action{}, errors.New(mintingSteps(id, keys))
+		return Action{}, errors.New(theClusterHoldsNoSecret(id, keys, mint))
 	}
 
 	if live == nil {
@@ -118,35 +123,50 @@ func (r KubernetesRealizer) realizeSecret(res citypes.Resource) (Action, error) 
 			id, strings.Join(missing, " and no "), strings.Join(keys, ", "))
 	}
 
-	return Kept("kept secret " + id), nil
+	if empty := keysTheLiveSecretHoldsEmpty(live, keys); len(empty) > 0 {
+		return Action{}, fmt.Errorf(
+			"reading secret %s: it holds %s with nothing in it, and this declaration needs a value "+
+				"under %s. A person writes every key of this secret by hand, "+
+				"and nothing in this toolchain writes one",
+			id, strings.Join(empty, " and "), strings.Join(keys, ", "))
+	}
+
+	return Kept("kept secret " + id + ", holding " + strings.Join(keys, ", ")), nil
 }
 
-func mintingSteps(id string, keys []string) string {
-	return "reading secret " + id + ": the cluster holds no secret of that name, " +
-		"and nothing in this toolchain writes one. A person mints it by hand in three steps. " +
-		"First, generate an ed25519 key pair. " +
-		"Second, register the public half as a read only deploy key on the git repository " +
-		"the cluster reads from. " +
-		"Third, write the private half and the host keys of that repository into the cluster " +
-		"as secret " + id + ", under the keys " + strings.Join(keys, ", ")
+func theClusterHoldsNoSecret(id string, keys []string, mint string) string {
+	text := "reading secret " + id + ": the cluster holds no secret of that name, " +
+		"nothing in this toolchain writes one, and it must hold " + strings.Join(keys, ", ")
+
+	if mint == "" {
+		return text
+	}
+
+	return text + ". " + mint
 }
 
 func keysTheLiveSecretLacks(live *corev1.Secret, keys []string) []string {
 	var missing []string
 
 	for _, key := range keys {
-		if _, held := live.Data[key]; held {
-			continue
+		if _, held := live.Data[key]; !held {
+			missing = append(missing, key)
 		}
-
-		if _, held := live.StringData[key]; held {
-			continue
-		}
-
-		missing = append(missing, key)
 	}
 
 	return missing
+}
+
+func keysTheLiveSecretHoldsEmpty(live *corev1.Secret, keys []string) []string {
+	var empty []string
+
+	for _, key := range keys {
+		if len(live.Data[key]) == 0 {
+			empty = append(empty, key)
+		}
+	}
+
+	return empty
 }
 
 func declaredKeys(spec map[string]any, id string) ([]string, error) {

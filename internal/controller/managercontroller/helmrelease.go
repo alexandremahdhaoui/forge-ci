@@ -58,11 +58,15 @@ func (r KubernetesRealizer) realizeHelmRelease(res citypes.Resource, opts Option
 }
 
 func (r KubernetesRealizer) confirmAPIServer(declared, subject string) error {
+	return ConfirmAPIServer(r.cluster, declared, subject)
+}
+
+func ConfirmAPIServer(cluster Kubernetes, declared, subject string) error {
 	if declared == "" {
 		return fmt.Errorf("reading %s: spec.apiServer is required", subject)
 	}
 
-	live := r.cluster.APIServer()
+	live := cluster.APIServer()
 	if live == "" {
 		return fmt.Errorf(
 			"reading the api server holding %s: the cluster client names no api server", subject)

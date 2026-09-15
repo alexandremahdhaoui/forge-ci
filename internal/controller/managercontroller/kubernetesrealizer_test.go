@@ -23,6 +23,8 @@ const (
 
 	theKeyMarker = "ZZZTOPSECRETZZZclientprivatekey"
 
+	theDeclaredMint = "Ask the person who holds the credential to write it into the cluster"
+
 	found    = true
 	notFound = false
 )
@@ -346,7 +348,7 @@ func TestASecretHoldingEveryDeclaredKeyIsKept(t *testing.T) {
 
 	action, err := r.Realize(twoKeys(), plain)
 	require.NoError(t, err)
-	assert.Equal(t, "kept secret "+theSecretID, action.Text)
+	assert.Equal(t, "kept secret "+theSecretID+", holding identity, known_hosts", action.Text)
 	assert.False(t, action.Changed)
 }
 
@@ -363,8 +365,49 @@ func TestASecretHoldingMoreKeysThanTheDeclarationNamesIsStillKept(t *testing.T) 
 
 	action, err := r.Realize(twoKeys(), plain)
 	require.NoError(t, err)
-	assert.Equal(t, "kept secret "+theSecretID, action.Text)
+	assert.Equal(t, "kept secret "+theSecretID+", holding identity, known_hosts", action.Text)
 	assert.False(t, action.Changed)
+}
+
+func TestTheActionLineOfAKeptSecretNamesEveryKeyItConfirmed(t *testing.T) {
+	t.Parallel()
+
+	r, cluster := kubernetesRealizer(t)
+	cluster.EXPECT().Secret(mock.Anything, theNamespace, theSecretName).Return(
+		liveSecret(map[string][]byte{"identity": []byte("a key")}), found, nil)
+
+	action, err := r.Realize(oneKey(), plain)
+	require.NoError(t, err)
+	assert.Equal(t, "kept secret "+theSecretID+", holding identity", action.Text)
+}
+
+func TestASecretHoldingADeclaredKeyWithNothingInItIsRefusedByThatKey(t *testing.T) {
+	t.Parallel()
+
+	r, cluster := kubernetesRealizer(t)
+	cluster.EXPECT().Secret(mock.Anything, theNamespace, theSecretName).Return(
+		liveSecret(map[string][]byte{
+			"identity": []byte("a key"), "known_hosts": {},
+		}), found, nil)
+
+	_, err := r.Realize(twoKeys(), plain)
+	require.Error(t, err)
+	assert.Equal(t, "reading secret "+theSecretID+
+		": it holds known_hosts with nothing in it, and this declaration needs a value "+
+		"under identity, known_hosts. A person writes every key of this secret by hand, "+
+		"and nothing in this toolchain writes one", err.Error())
+}
+
+func TestASecretHoldingEveryDeclaredKeyEmptyNamesEveryOneOfThem(t *testing.T) {
+	t.Parallel()
+
+	r, cluster := kubernetesRealizer(t)
+	cluster.EXPECT().Secret(mock.Anything, theNamespace, theSecretName).Return(
+		liveSecret(map[string][]byte{"identity": {}, "known_hosts": {}}), found, nil)
+
+	_, err := r.Realize(twoKeys(), plain)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "it holds identity and known_hosts with nothing in it")
 }
 
 func TestASecretMissingADeclaredKeyIsRefusedByThatKey(t *testing.T) {
@@ -394,21 +437,7 @@ func TestASecretMissingEveryDeclaredKeyNamesEveryOneOfThem(t *testing.T) {
 	assert.Contains(t, err.Error(), "it holds no identity and no known_hosts")
 }
 
-func TestAKeyTheClusterHoldsAsStringDataCountsAsHeld(t *testing.T) {
-	t.Parallel()
-
-	r, cluster := kubernetesRealizer(t)
-
-	live := liveSecret(nil)
-	live.StringData = map[string]string{"identity": "a key"}
-	cluster.EXPECT().Secret(mock.Anything, theNamespace, theSecretName).Return(live, found, nil)
-
-	action, err := r.Realize(oneKey(), plain)
-	require.NoError(t, err)
-	assert.Equal(t, "kept secret "+theSecretID, action.Text)
-}
-
-func TestASecretTheClusterDoesNotHoldIsRefusedWithTheThreeStepsAPersonTakes(t *testing.T) {
+func TestASecretTheClusterDoesNotHoldNamesItsKeysAndNoWayOfMintingItWhenTheDeclarationWroteNone(t *testing.T) {
 	t.Parallel()
 
 	r, cluster := kubernetesRealizer(t)
@@ -417,13 +446,51 @@ func TestASecretTheClusterDoesNotHoldIsRefusedWithTheThreeStepsAPersonTakes(t *t
 	_, err := r.Realize(twoKeys(), plain)
 	require.Error(t, err)
 	assert.Equal(t, "reading secret "+theSecretID+
-		": the cluster holds no secret of that name, and nothing in this toolchain writes one. "+
-		"A person mints it by hand in three steps. "+
-		"First, generate an ed25519 key pair. "+
-		"Second, register the public half as a read only deploy key on the git repository "+
-		"the cluster reads from. "+
-		"Third, write the private half and the host keys of that repository into the cluster "+
-		"as secret "+theSecretID+", under the keys identity, known_hosts", err.Error())
+		": the cluster holds no secret of that name, nothing in this toolchain writes one, "+
+		"and it must hold identity, known_hosts", err.Error())
+}
+
+func TestASecretTheClusterDoesNotHoldPrintsTheMintingStepsTheDeclarationWrote(t *testing.T) {
+	t.Parallel()
+
+	r, cluster := kubernetesRealizer(t)
+	cluster.EXPECT().Secret(mock.Anything, theNamespace, theSecretName).Return(nil, notFound, nil)
+
+	res := twoKeys()
+	res.Spec["mint"] = theDeclaredMint
+
+	_, err := r.Realize(res, plain)
+	require.Error(t, err)
+	assert.Equal(t, "reading secret "+theSecretID+
+		": the cluster holds no secret of that name, nothing in this toolchain writes one, "+
+		"and it must hold identity, known_hosts. "+theDeclaredMint, err.Error())
+}
+
+func TestTheManagerNamesNoKeyTypeAndNoProductOfItsOwnWhenASecretIsAbsent(t *testing.T) {
+	t.Parallel()
+
+	r, cluster := kubernetesRealizer(t)
+	cluster.EXPECT().Secret(mock.Anything, theNamespace, theSecretName).Return(nil, notFound, nil)
+
+	_, err := r.Realize(twoKeys(), plain)
+	require.Error(t, err)
+
+	for _, word := range []string{"ed25519", "deploy key", "ssh", "three steps"} {
+		assert.NotContains(t, err.Error(), word)
+	}
+}
+
+func TestAMintThatIsNotAStringIsRefusedByName(t *testing.T) {
+	t.Parallel()
+
+	r := realizerThatMustNotReachAPort(t)
+
+	res := twoKeys()
+	res.Spec["mint"] = 7
+
+	_, err := r.Realize(res, plain)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "reading spec.mint: a string is required, the spec holds a int")
 }
 
 func TestNoRefusalOverASecretEverCarriesAValueTheClusterHolds(t *testing.T) {
@@ -477,6 +544,19 @@ func TestADryRunOverASecretAnswersExactlyWhatARealRunAnswers(t *testing.T) {
 			assert.Equal(t, appliedErr.Error(), dryErr.Error())
 		})
 	}
+}
+
+func TestADryRunReadsTheClusterBecauseAPlanIsOnlyWorthReadingIfItCameFromTheComparisonARealRunMakes(t *testing.T) {
+	t.Parallel()
+
+	r, cluster := kubernetesRealizer(t)
+	cluster.EXPECT().Secret(mock.Anything, theNamespace, theSecretName).Return(
+		liveSecret(map[string][]byte{"identity": []byte("a key")}), found, nil).Once()
+
+	action, err := r.Realize(oneKey(), managercontroller.Options{DryRun: true})
+	require.NoError(t, err)
+	assert.Equal(t, "kept secret "+theSecretID+", holding identity", action.Text)
+	cluster.AssertNumberOfCalls(t, "Secret", 1)
 }
 
 func TestForceOverASecretAnswersExactlyWhatAPlainRunAnswers(t *testing.T) {

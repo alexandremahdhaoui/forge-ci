@@ -18,7 +18,7 @@ fail=0
 # The scope: production Go under cmd, internal and pkg; generated code and
 # mocks are what forge-dev and mockery wrote and are checked at their source.
 FILES=$(find cmd internal pkg -name '*.go' ! -name '*_test.go' ! -path 'internal/mocks/*' ! -name 'zz_generated*')
-FILES="$FILES $(find test/live -name '*.go' 2>/dev/null)"
+FILES="$FILES $(find test/live -name '*.go' 2>/dev/null || true)"
 
 # The words this tool must never know, anywhere.
 BANNED="golden-rust golden-go golden-python golden-typescript poe-wayfinder opends gamesync cargo rustc pnpm npm uv pytest clippy oapi-codegen mockery"

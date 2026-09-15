@@ -47,9 +47,19 @@ notes: |
 
   A `secret` entry is flat. It carries `namespace`, `name` and `keys`, a list
   of the key names the live secret must hold, in the order the entry wrote
-  them. A secret is minted by a person and read back, never written, so the
-  entry names no value and no variable and no value passes through this
-  engine. The resource is named `namespace/name`.
+  them, and an optional `mint`. A secret is minted by a person and read back,
+  never written, so the entry names no value and no variable and no value
+  passes through this engine. The resource is named `namespace/name`.
+
+  `mint` is free text saying how a person mints that particular secret. The
+  manager prints it when the cluster holds no secret of that name. It lives
+  here because this entry is the one place that knows what the secret is, and
+  the manager knows only that it is a secret.
+
+  A `secret` entry naming a key this engine does not read is refused by name,
+  naming every unknown key and every key a secret entry holds. An entry still
+  writing `data` is told that `data` is no longer read, because that spelling
+  carried values and this one names keys.
 
   `spec.apiServer` sits once above the list and rides every resource. The
   manager confirms it on every kind and refuses a cluster that is not the one
@@ -84,4 +94,5 @@ spec:
       entry holds `helmReleaseFile` and `valuesFile`, both paths relative to
       the pipeline root, and an optional `createNamespace` flag. A `secret`
       entry holds `namespace`, `name` and `keys`, the list of key names the
-      live secret must hold.
+      live secret must hold, and an optional `mint` saying how a person mints
+      it.

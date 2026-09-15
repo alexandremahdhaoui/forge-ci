@@ -9,6 +9,7 @@ import (
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/fsadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/managercontroller"
+	"github.com/alexandremahdhaoui/forge-ci/internal/mocks/fsadaptermock"
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 	"github.com/stretchr/testify/require"
 )
@@ -304,29 +305,87 @@ func TestABootstrapOnlyResourceIsOwnedButNotRealizedByAnApply(t *testing.T) {
 func TestAReconcileAttemptsEveryResourceSoItsResultNeverDependsOnDeclarationOrder(t *testing.T) {
 	t.Parallel()
 
-	tmp := t.TempDir()
+	for _, order := range []string{"the failure first", "the failure last"} {
+		t.Run(order, func(t *testing.T) {
+			t.Parallel()
 
-	blocker := filepath.Join(tmp, "blocker")
-	require.NoError(t, os.WriteFile(blocker, []byte("not a directory"), 0o600))
+			tmp := t.TempDir()
 
-	later := filepath.Join(tmp, "after-the-failure.txt")
+			blocker := filepath.Join(tmp, "blocker")
+			require.NoError(t, os.WriteFile(blocker, []byte("not a directory"), 0o600))
 
-	_, err := local(t).Reconcile(citypes.ReconcileInput{
-		Manager: "local",
-		Resources: []citypes.Resource{
-			{Kind: "directory", Name: filepath.Join(blocker, "child")},
-			{Kind: "file", Name: later, Spec: map[string]any{"content": "converged anyway"}},
-		},
+			other := filepath.Join(tmp, "beside-the-failure.txt")
+
+			fails := citypes.Resource{Kind: "directory", Name: filepath.Join(blocker, "child")}
+			converges := citypes.Resource{
+				Kind: "file", Name: other, Spec: map[string]any{"content": "converged anyway"},
+			}
+
+			resources := []citypes.Resource{fails, converges}
+			if order == "the failure last" {
+				resources = []citypes.Resource{converges, fails}
+			}
+
+			_, err := local(t).Reconcile(citypes.ReconcileInput{
+				Manager: "local", Resources: resources,
+			})
+
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "realizing directory/",
+				"the failure is still reported, so an operator sees it")
+
+			body, readErr := os.ReadFile(other)
+			require.NoError(t, readErr,
+				"a resource declared beside a failure must still be realized")
+			require.Equal(t, "converged anyway", string(body))
+		})
+	}
+}
+
+func TestAResourceThatAlreadyMatchesIsKeptBecauseAChangeReportedForOneThatNeverMovedStopsEveryRunForever(t *testing.T) {
+	t.Parallel()
+
+	dir := filepath.Join(t.TempDir(), "state")
+	require.NoError(t, os.MkdirAll(dir, 0o750))
+
+	out, err := local(t).Reconcile(citypes.ReconcileInput{
+		Manager:   "local",
+		Resources: []citypes.Resource{{Kind: "directory", Name: dir}},
 	})
 
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "realizing directory/",
-		"the failure is still reported, so an operator sees it")
+	require.NoError(t, err)
+	require.Equal(t, []string{"kept directory " + dir}, out.Actions)
+	require.False(t, out.Changed)
+}
 
-	body, readErr := os.ReadFile(later)
-	require.NoError(t, readErr,
-		"a resource declared after a failure must still be realized")
-	require.Equal(t, "converged anyway", string(body))
+func TestRecordingBytesTheStateFileAlreadyHoldsWritesNothingBecauseRewritingThemLeavesADirtyTreeTheReleaseRefuses(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	dir := filepath.Join(tmp, "state")
+	statePath := filepath.Join(tmp, "manager-local.json")
+
+	require.NoError(t, os.MkdirAll(dir, 0o750))
+
+	in := citypes.ReconcileInput{
+		Manager:   "local",
+		Resources: []citypes.Resource{{Kind: "directory", Name: dir}},
+		Spec:      map[string]any{"statePath": statePath},
+	}
+
+	_, err := local(t).Reconcile(in)
+	require.NoError(t, err)
+
+	recorded, err := os.ReadFile(statePath)
+	require.NoError(t, err)
+
+	fs := fsadaptermock.NewMockFS(t)
+	fs.EXPECT().Exists(dir).Return(true, nil)
+	fs.EXPECT().ReadFile(statePath).Return(recorded, nil)
+
+	_, err = managercontroller.New(managercontroller.NewLocalRealizer(fs), fs).Reconcile(in)
+	require.NoError(t, err)
+	fs.AssertNotCalled(t, "WriteFile", statePath, recorded)
 }
 
 // Two failures are two lines. Fixing one thing and re-running to discover the

@@ -30,6 +30,8 @@ const (
 	incomplete     = "broken/incomplete.helmrelease.yaml"
 	bentRelease    = "malformed/bent.helmrelease.yaml"
 	bentRepository = "malformed/bent.helmrepository.yaml"
+
+	theMint = "Ask the person who holds the credential to write it into the cluster"
 )
 
 func onDisk() *clusterresourcecontroller.Controller {
@@ -143,6 +145,86 @@ func TestTheDeclaredKeysKeepTheOrderTheEntryWroteThem(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, []any{"known_hosts", "identity"}, out.Resources[0].Spec["keys"])
+}
+
+func TestTheMintTheEntryWroteRidesTheDeclaredSecret(t *testing.T) {
+	t.Parallel()
+
+	out, err := onDisk().Declare(declaring(map[string]any{
+		"kind":      "secret",
+		"namespace": "flux-system",
+		"name":      "deploy-key",
+		"keys":      []any{"identity"},
+		"mint":      theMint,
+	}))
+
+	require.NoError(t, err)
+	assert.Equal(t, theMint, out.Resources[0].Spec["mint"])
+}
+
+func TestASecretEntryWritingNoMintDeclaresNoneRatherThanAnEmptyOne(t *testing.T) {
+	t.Parallel()
+
+	out, err := onDisk().Declare(declaring(map[string]any{
+		"kind":      "secret",
+		"namespace": "flux-system",
+		"name":      "deploy-key",
+		"keys":      []any{"identity"},
+	}))
+
+	require.NoError(t, err)
+	assert.NotContains(t, out.Resources[0].Spec, "mint")
+}
+
+func TestAKeyASecretEntryDoesNotHoldIsRefusedByNameAndNamesEveryKeyItHolds(t *testing.T) {
+	t.Parallel()
+
+	_, err := onDisk().Declare(declaring(map[string]any{
+		"kind":      "secret",
+		"namespace": "flux-system",
+		"name":      "deploy-key",
+		"keys":      []any{"identity"},
+		"rotate":    true,
+	}))
+
+	require.Error(t, err)
+	assert.Equal(t,
+		"reading spec.resources[0]: a secret entry names rotate, "+
+			"and a secret entry holds kind, namespace, name, keys, mint", err.Error())
+}
+
+func TestASecretEntryStillWritingDataIsToldThatDataIsNoLongerRead(t *testing.T) {
+	t.Parallel()
+
+	_, err := onDisk().Declare(declaring(map[string]any{
+		"kind":      "secret",
+		"namespace": "flux-system",
+		"name":      "deploy-key",
+		"data":      map[string]any{"identity": "a value"},
+	}))
+
+	require.Error(t, err)
+	assert.Equal(t,
+		"reading spec.resources[0]: a secret entry names data, "+
+			"and a secret entry holds kind, namespace, name, keys, mint. "+
+			"data is no longer read, and keys names every key the live secret must hold, "+
+			"never a value", err.Error())
+}
+
+func TestASecretEntryNamingSeveralKeysNoneOfThemKnownNamesEveryOneOfThem(t *testing.T) {
+	t.Parallel()
+
+	_, err := onDisk().Declare(declaring(map[string]any{
+		"kind":      "secret",
+		"namespace": "flux-system",
+		"name":      "deploy-key",
+		"keys":      []any{"identity"},
+		"rotate":    true,
+		"owner":     "a human",
+	}))
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "a secret entry names owner and rotate")
 }
 
 func TestTheResourcesComeBackInTheOrderTheSpecListsThem(t *testing.T) {
