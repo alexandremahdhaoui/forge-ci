@@ -26,7 +26,7 @@ tools:
     does: Refuse. This engine declares cluster resources and never publishes.
 example:
   tool: declare
-  input: '{"root":"/w","spec":{"apiServer":"https://10.0.0.1:6443","resources":[{"kind":"helm-release","helmReleaseFile":"gitops/platform/app/helmrelease.yaml","valuesFile":"gitops/platform/app/values.yaml","createNamespace":true},{"kind":"secret","namespace":"app-system","name":"deploy-key","keys":["identity","known_hosts"],"mint":"a person writes it by hand, once"}]}}'
+  input: '{"root":"/w","spec":{"apiServer":"https://10.0.0.1:6443","resources":[{"kind":"helm-release","helmReleaseFile":"gitops/platform/app/helmrelease.yaml","valuesFile":"gitops/platform/app/values.yaml","createNamespace":true},{"kind":"secret","namespace":"app-system","name":"deploy-key","keys":["identity","known_hosts"]}]}}'
 notes: |
   One entry declares one resource, and the resources come back in list order.
 
@@ -45,19 +45,12 @@ notes: |
   kustomization beside the release generates that ConfigMap from, so the values
   are spelled once and Flux and this engine read one file.
 
-  A `secret` entry is flat. It carries `namespace`, `name`, `keys`, a list
+  A `secret` entry is flat. It carries `namespace`, `name` and `keys`, a list
   of the key names the live secret must hold, in the order the entry wrote
-  them, and `mint`. A secret is minted by a person and read back, never
-  written, so the entry names no value and no variable and no value passes
-  through this engine. The resource is named `namespace/name`.
-
-  `mint` is required free text saying how a person mints that particular
-  secret. An entry writing none is refused by name, because a secret nobody
-  knows how to mint is a declaration with a hole. It never travels: the
-  declared resource carries `apiServer`, `namespace`, `name` and `keys` and
-  nothing else, so the manager reads no minting steps and no run log can print
-  them. It lives here because this entry is the one place that knows what the
-  secret is, and the manager knows only that it is a secret.
+  them. A secret is written by a person and read back, never written here, so
+  the entry names no value and no variable and no value passes through this
+  engine. The declared resource carries `apiServer`, `namespace`, `name` and
+  `keys` and nothing else. The resource is named `namespace/name`.
 
   An empty `keys` list and a key with no name are each refused by name, and a
   key name that is nothing but whitespace is a key with no name.
@@ -99,6 +92,5 @@ spec:
       entry holds `kind`, one of `helm-release` or `secret`. A `helm-release`
       entry holds `helmReleaseFile` and `valuesFile`, both paths relative to
       the pipeline root, and an optional `createNamespace` flag. A `secret`
-      entry holds `namespace`, `name`, `keys`, the list of key names the
-      live secret must hold, and `mint`, the required text saying how a person
-      mints it, which stays in this file and reaches no manager.
+      entry holds `namespace`, `name` and `keys`, the list of key names the
+      live secret must hold.

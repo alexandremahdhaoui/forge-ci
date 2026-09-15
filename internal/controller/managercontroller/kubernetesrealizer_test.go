@@ -459,7 +459,7 @@ func TestASecretMissingEveryDeclaredKeyNamesEveryOneOfThem(t *testing.T) {
 	assert.Contains(t, err.Error(), "it holds no identity and no known_hosts")
 }
 
-func TestASecretTheClusterDoesNotHoldNamesItsKeysAndTheEntryHoldingTheMintingSteps(t *testing.T) {
+func TestASecretTheClusterDoesNotHoldIsOneErrorNamingItAndEveryKeyItMustHold(t *testing.T) {
 	t.Parallel()
 
 	r, cluster := kubernetesRealizer(t)
@@ -469,8 +469,7 @@ func TestASecretTheClusterDoesNotHoldNamesItsKeysAndTheEntryHoldingTheMintingSte
 	require.Error(t, err)
 	assert.Equal(t, "reading secret "+theSecretID+
 		": the cluster holds no secret of that name, nothing in this toolchain writes one, "+
-		"and it must hold identity, known_hosts. The pipeline file says how a person mints it, "+
-		"under spec.mint of the secret entry naming "+theSecretID, err.Error())
+		"and it must hold identity, known_hosts", err.Error())
 }
 
 func TestTheManagerNamesNoKeyTypeAndNoProductOfItsOwnWhenASecretIsAbsent(t *testing.T) {

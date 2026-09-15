@@ -31,8 +31,6 @@ const (
 	incomplete     = "broken/incomplete.helmrelease.yaml"
 	bentRelease    = "malformed/bent.helmrelease.yaml"
 	bentRepository = "malformed/bent.helmrepository.yaml"
-
-	theMint = "Ask the person who holds the credential to write it into the cluster"
 )
 
 func onDisk() *clusterresourcecontroller.Controller {
@@ -122,7 +120,6 @@ func TestASecretDeclaresTheKeyNamesTheLiveSecretMustHoldAndCarriesNoValue(t *tes
 		"namespace": "flux-system",
 		"name":      "deploy-key",
 		"keys":      []any{"identity", "known_hosts"},
-		"mint":      theMint,
 	}))
 
 	require.NoError(t, err)
@@ -143,14 +140,13 @@ func TestTheDeclaredKeysKeepTheOrderTheEntryWroteThem(t *testing.T) {
 		"namespace": "flux-system",
 		"name":      "deploy-key",
 		"keys":      []any{"known_hosts", "identity"},
-		"mint":      theMint,
 	}))
 
 	require.NoError(t, err)
 	assert.Equal(t, []any{"known_hosts", "identity"}, out.Resources[0].Spec["keys"])
 }
 
-func TestTheMintTheEntryWroteStaysInThePipelineFileAndRidesNoDeclaredSecret(t *testing.T) {
+func TestADeclaredSecretCarriesTheApiServerTheNamespaceTheNameAndTheKeysAndNothingElse(t *testing.T) {
 	t.Parallel()
 
 	out, err := onDisk().Declare(declaring(map[string]any{
@@ -158,7 +154,6 @@ func TestTheMintTheEntryWroteStaysInThePipelineFileAndRidesNoDeclaredSecret(t *t
 		"namespace": "flux-system",
 		"name":      "deploy-key",
 		"keys":      []any{"identity"},
-		"mint":      theMint,
 	}))
 
 	require.NoError(t, err)
@@ -171,22 +166,6 @@ func TestTheMintTheEntryWroteStaysInThePipelineFileAndRidesNoDeclaredSecret(t *t
 
 	slices.Sort(keys)
 	assert.Equal(t, []string{"apiServer", "keys", "name", "namespace"}, keys)
-}
-
-func TestASecretEntryWritingNoMintIsRefusedByItsID(t *testing.T) {
-	t.Parallel()
-
-	_, err := onDisk().Declare(declaring(map[string]any{
-		"kind":      "secret",
-		"namespace": "flux-system",
-		"name":      "deploy-key",
-		"keys":      []any{"identity"},
-	}))
-
-	require.Error(t, err)
-	assert.Equal(t,
-		"reading the mint of secret flux-system/deploy-key: mint is required, "+
-			"and it says how a person mints this secret", err.Error())
 }
 
 func TestAKeyASecretEntryDoesNotHoldIsRefusedByNameAndNamesEveryKeyItHolds(t *testing.T) {
@@ -203,7 +182,7 @@ func TestAKeyASecretEntryDoesNotHoldIsRefusedByNameAndNamesEveryKeyItHolds(t *te
 	require.Error(t, err)
 	assert.Equal(t,
 		"reading spec.resources[0]: a secret entry names rotate, "+
-			"and a secret entry holds kind, namespace, name, keys, mint", err.Error())
+			"and a secret entry holds kind, namespace, name, keys", err.Error())
 }
 
 func TestASecretEntryStillWritingDataIsToldThatDataIsNoLongerRead(t *testing.T) {
@@ -219,7 +198,7 @@ func TestASecretEntryStillWritingDataIsToldThatDataIsNoLongerRead(t *testing.T) 
 	require.Error(t, err)
 	assert.Equal(t,
 		"reading spec.resources[0]: a secret entry names data, "+
-			"and a secret entry holds kind, namespace, name, keys, mint. "+
+			"and a secret entry holds kind, namespace, name, keys. "+
 			"data is no longer read, and keys names every key the live secret must hold, "+
 			"never a value", err.Error())
 }
@@ -250,7 +229,6 @@ func TestTheResourcesComeBackInTheOrderTheSpecListsThem(t *testing.T) {
 			"namespace": "flux-system",
 			"name":      "deploy-key",
 			"keys":      []any{"identity"},
-			"mint":      theMint,
 		},
 		helmRelease(fluxRelease, fluxValues),
 	))
@@ -272,7 +250,6 @@ func TestTheApiServerSitsOnceOnTheSpecAndRidesEveryDeclaredResource(t *testing.T
 			"namespace": "flux-system",
 			"name":      "deploy-key",
 			"keys":      []any{"identity"},
-			"mint":      theMint,
 		},
 	))
 

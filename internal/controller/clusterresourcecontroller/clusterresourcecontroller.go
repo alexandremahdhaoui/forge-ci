@@ -17,7 +17,7 @@ const (
 	staleSecretEntryKey = "data"
 )
 
-var secretEntryKeys = []string{"kind", "namespace", "name", "keys", "mint"}
+var secretEntryKeys = []string{"kind", "namespace", "name", "keys"}
 
 var (
 	ErrResources = errors.New(
@@ -135,17 +135,6 @@ func declaredSecret(index int, held map[string]any, apiServer string) (citypes.R
 		}
 
 		keys = append(keys, key)
-	}
-
-	mint, err := citypes.SpecString(held, "mint")
-	if err != nil {
-		return citypes.Resource{}, fmt.Errorf("reading the mint of secret %s: %w", id, err)
-	}
-
-	if mint == "" {
-		return citypes.Resource{}, fmt.Errorf(
-			"reading the mint of secret %s: mint is required, and it says how a person mints this secret",
-			id)
 	}
 
 	return citypes.Resource{Kind: kindSecret, Name: id, Spec: map[string]any{

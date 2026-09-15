@@ -49,12 +49,9 @@ notes: |
   useless rather than absent.
 
   A secret the cluster does not hold is one error naming it, saying nothing in
-  this toolchain writes one, naming every declared key, and pointing at the
-  secret entry in the pipeline file, under `spec.mint`, for the minting steps.
-  There is no second shape and no branch: the manager never receives the text,
-  so no run log can carry it, whatever anything logs. The manager names no key
-  type and no product of its own, because what a secret is belongs to the
-  declaration that asked for it.
+  this toolchain writes one, and naming every declared key. There is no second
+  shape and no branch. The manager names no key type and no product of its own,
+  because what a secret is belongs to the declaration that asked for it.
 
   A dry run reads the live secret exactly as a real run does and answers the
   same thing, because neither one writes. Force changes nothing here for the

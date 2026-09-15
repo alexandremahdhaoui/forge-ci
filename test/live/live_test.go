@@ -784,7 +784,6 @@ engines:
           namespace: a-namespace
           name: first-secret
           keys: [a-key]
-          mint: a person writes it by hand
   - alias: second
     type: artifact
     engine: "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-artifact-kubernetes@v0.1.0"
@@ -796,7 +795,6 @@ engines:
           namespace: a-namespace
           name: second-secret
           keys: [a-key]
-          mint: a person writes it by hand
   - alias: ci-state
     type: state
     engine: "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-state-git@v0.1.0"
@@ -844,7 +842,6 @@ engines:
           namespace: ` + namespace + `
           name: ` + name + `
           keys: [` + strings.Join(keys, ", ") + `]
-          mint: a person writes it by hand
   - alias: ci-state
     type: state
     engine: "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-state-git@v0.1.0"

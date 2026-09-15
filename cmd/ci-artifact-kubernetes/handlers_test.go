@@ -74,7 +74,6 @@ func declaredSpec() Spec {
 				"namespace": "demo-system",
 				"name":      "deploy-key",
 				"keys":      []any{"identity", "known_hosts"},
-				"mint":      "a person writes it by hand, once",
 			},
 		},
 	}

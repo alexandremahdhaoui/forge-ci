@@ -132,9 +132,7 @@ func (r KubernetesRealizer) realizeSecret(res citypes.Resource) (Action, error) 
 
 func theClusterHoldsNoSecret(id string, keys []string) string {
 	return "reading secret " + id + ": the cluster holds no secret of that name, " +
-		"nothing in this toolchain writes one, and it must hold " + strings.Join(keys, ", ") +
-		". The pipeline file says how a person mints it, " +
-		"under spec.mint of the secret entry naming " + id
+		"nothing in this toolchain writes one, and it must hold " + strings.Join(keys, ", ")
 }
 
 func keysTheLiveSecretLacks(live *corev1.Secret, keys []string) []string {
