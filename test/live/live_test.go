@@ -18,7 +18,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -284,49 +283,87 @@ func TestEveryResourceThePipelineDeclaresIsRealAndHealthyInTheLiveCluster(t *tes
 
 	for _, resource := range declared.resources {
 		t.Run(resource.ID(), func(t *testing.T) {
-			readBack(t, cluster, releases, resource)
+			require.NoError(t, readBack(t.Context(), cluster, releases, resource))
 		})
 	}
 }
 
 func readBack(
-	t *testing.T,
+	ctx context.Context,
 	cluster kubernetesadapter.Cluster,
 	releases helmadapter.Releases,
 	resource citypes.Resource,
-) {
-	t.Helper()
-
+) error {
 	switch resource.Kind {
 	case managercontroller.KindHelmRelease:
-		readReleaseBack(t, releases, resource)
+		return readReleaseBack(ctx, releases, resource)
 	case managercontroller.KindSecret:
-		require.NoError(t, readSecretBack(t.Context(), cluster, resource))
+		return readSecretBack(ctx, cluster, resource)
 	default:
-		t.Fatalf(
+		return fmt.Errorf(
 			"resource %s is a kind this stage cannot read back, and it reads %s and %s. "+
 				"A kind the pipeline declares needs an arm here",
 			resource.ID(), managercontroller.KindHelmRelease, managercontroller.KindSecret)
 	}
 }
 
-func readReleaseBack(t *testing.T, releases helmadapter.Releases, resource citypes.Resource) {
-	t.Helper()
+func readReleaseBack(
+	ctx context.Context,
+	releases helmadapter.Releases,
+	resource citypes.Resource,
+) error {
+	namespace, err := declaredValue(resource, namespaceKey)
+	if err != nil {
+		return err
+	}
 
-	namespace := declaredString(t, resource, namespaceKey)
-	name := declaredString(t, resource, nameKey)
-	chart := declaredString(t, resource, chartKey)
-	version := strings.TrimPrefix(declaredString(t, resource, versionKey), "v")
+	name, err := declaredValue(resource, nameKey)
+	if err != nil {
+		return err
+	}
 
-	live, found, err := releases.Release(t.Context(), namespace, name)
-	require.NoError(t, err)
-	require.True(t, found, "helm storage in namespace %s holds no release %s", namespace, name)
+	chart, err := declaredValue(resource, chartKey)
+	if err != nil {
+		return err
+	}
 
-	assert.Equal(t, managercontroller.StatusDeployed, live.Status,
-		"release %s/%s is in status %q", namespace, name, live.Status)
-	assert.Equal(t, chart, live.Chart, "release %s/%s holds another chart", namespace, name)
-	assert.Equal(t, version, live.Version,
-		"release %s/%s holds another chart version", namespace, name)
+	declaredVersion, err := declaredValue(resource, versionKey)
+	if err != nil {
+		return err
+	}
+
+	version := strings.TrimPrefix(declaredVersion, "v")
+
+	live, found, err := releases.Release(ctx, namespace, name)
+	if err != nil {
+		return fmt.Errorf("reading release %s/%s: %w", namespace, name, err)
+	}
+
+	if !found {
+		return fmt.Errorf("helm storage in namespace %s holds no release %s", namespace, name)
+	}
+
+	var drift []string
+
+	if live.Status != managercontroller.StatusDeployed {
+		drift = append(drift, fmt.Sprintf("is in status %q", live.Status))
+	}
+
+	if live.Chart != chart {
+		drift = append(drift,
+			fmt.Sprintf("holds chart %q and the pipeline declares %q", live.Chart, chart))
+	}
+
+	if live.Version != version {
+		drift = append(drift,
+			fmt.Sprintf("holds chart version %q and the pipeline declares %q", live.Version, version))
+	}
+
+	if len(drift) == 0 {
+		return nil
+	}
+
+	return fmt.Errorf("release %s/%s %s", namespace, name, strings.Join(drift, ", and "))
 }
 
 func readSecretBack(
@@ -395,15 +432,6 @@ func declaredValue(resource citypes.Resource, key string) (string, error) {
 	return value, nil
 }
 
-func declaredString(t *testing.T, resource citypes.Resource, key string) string {
-	t.Helper()
-
-	value, err := declaredValue(resource, key)
-	require.NoError(t, err)
-
-	return value
-}
-
 func TestForgeCIsOwnRunRecordSaysASecondApplyKeptEveryResourceAndThisReadsNoClusterObject(t *testing.T) {
 	declared := declaredByThePipeline(t)
 
@@ -464,7 +492,7 @@ func TestTheSecretArmReadsADeclaredKeyBackFromAnAPIServerStoodUpInThisTestProces
 	cluster, err := theLiveCluster(t, declared)
 	require.NoError(t, err)
 
-	readBack(t, cluster, helmadapter.Releases{}, declared.resources[0])
+	require.NoError(t, readBack(t.Context(), cluster, helmadapter.Releases{}, declared.resources[0]))
 }
 
 func secretServer(t *testing.T, namespace, name string, data map[string][]byte) *httptest.Server {
@@ -546,8 +574,35 @@ func TestTheSecretArmRefusesADeclaredKeyTheLiveSecretHoldsEmptyAndOneItHoldsBlan
 	cluster, err := theLiveCluster(t, declared)
 	require.NoError(t, err)
 
-	require.EqualError(t, readSecretBack(t.Context(), cluster, declared.resources[0]),
+	require.EqualError(t,
+		readBack(t.Context(), cluster, helmadapter.Releases{}, declared.resources[0]),
 		"secret "+namespace+"/"+name+" holds no value under "+empty+" and "+blank)
+}
+
+func TestTheReleaseArmRefusesAReleaseHelmStorageDoesNotHold(t *testing.T) {
+	releases, err := helmadapter.New(helmadapter.StorageMemory)
+	require.NoError(t, err)
+
+	err = readBack(t.Context(), kubernetesadapter.Cluster{}, releases, citypes.Resource{
+		Kind: managercontroller.KindHelmRelease,
+		Name: "a-namespace/a-release",
+		Spec: map[string]any{
+			namespaceKey: "a-namespace",
+			nameKey:      "a-release",
+			chartKey:     "a-chart",
+			versionKey:   "v1.2.3",
+		},
+	})
+	require.EqualError(t, err, "helm storage in namespace a-namespace holds no release a-release")
+}
+
+func TestAKindTheStageHasNoArmForIsRefusedByItsIDRatherThanReadBackWrong(t *testing.T) {
+	err := readBack(t.Context(), kubernetesadapter.Cluster{}, helmadapter.Releases{},
+		citypes.Resource{Kind: "config-map", Name: "a-namespace/a-map"})
+	require.EqualError(t, err,
+		"resource config-map/a-namespace/a-map is a kind this stage cannot read back, "+
+			"and it reads helm-release and secret. "+
+			"A kind the pipeline declares needs an arm here")
 }
 
 func TestTheRootOfTheLiveStageDefaultsToThePipelineFilesParentTheWayTheCLIDoes(t *testing.T) {
