@@ -425,7 +425,9 @@ type realizerRecordingWhatItSawAndFailingTheResourceIDsItWasTold struct {
 	changes bool
 }
 
-func (realizerRecordingWhatItSawAndFailingTheResourceIDsItWasTold) Kind() string { return "counting" }
+func (realizerRecordingWhatItSawAndFailingTheResourceIDsItWasTold) Kind() string {
+	return "recording"
+}
 
 func (c *realizerRecordingWhatItSawAndFailingTheResourceIDsItWasTold) Realize(res citypes.Resource, _ managercontroller.Options) (managercontroller.Action, error) {
 	c.seen = append(c.seen, res.Name)

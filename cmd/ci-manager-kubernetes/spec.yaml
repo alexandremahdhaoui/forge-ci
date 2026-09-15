@@ -25,8 +25,7 @@ notes: |
   list of key names the live secret must hold, never a value and never the name
   of a variable holding one, so a declaration is safe to commit and no value
   passes through a run. `spec.apiServer` is the API server the declaration
-  expects. `spec.mint` is optional free text the declaration wrote saying how a
-  person mints this particular secret.
+  expects.
 
   The declaration is read first and the cluster is confirmed after. A
   declaration that fails any check above is refused before `spec.apiServer` is
@@ -42,18 +41,19 @@ notes: |
   in it, and its action line names every key it confirmed. A secret missing a
   declared key is an error naming the namespace, the name and every key that is
   absent. A secret holding a declared key with nothing in it is a second error
-  naming every key that is empty. The two are separate because a key nobody
-  wrote and a key somebody wrote blank are fixed differently, and a secret that
-  exists holding an empty value is useless rather than absent.
+  naming every key that is empty. A value that is nothing but whitespace is
+  empty, because it exists and is as useless as one with no bytes at all. The
+  two are separate because a key nobody wrote and a key somebody wrote blank
+  are fixed differently, and a secret that exists holding an empty value is
+  useless rather than absent.
 
-  A secret the cluster does not hold is an error naming it, saying nothing in
-  this toolchain writes one, and naming every declared key. When the declaration
-  wrote `spec.mint`, the error adds that the pipeline file holds the minting
-  steps under `spec.mint` of the secret entry naming that namespace and name.
-  The text itself never travels into an error, because a run log is read by
-  everyone who reads the run and the entry is where an operator reads it. The
-  manager names no key type and no product of its own, because what a secret is
-  belongs to the declaration that asked for it.
+  A secret the cluster does not hold is one error naming it, saying nothing in
+  this toolchain writes one, naming every declared key, and pointing at the
+  secret entry in the pipeline file, under `spec.mint`, for the minting steps.
+  There is no second shape and no branch: the manager never receives the text,
+  so no run log can carry it, whatever anything logs. The manager names no key
+  type and no product of its own, because what a secret is belongs to the
+  declaration that asked for it.
 
   A dry run reads the live secret exactly as a real run does and answers the
   same thing, because neither one writes. Force changes nothing here for the

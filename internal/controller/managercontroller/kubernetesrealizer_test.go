@@ -410,6 +410,20 @@ func TestASecretHoldingEveryDeclaredKeyEmptyNamesEveryOneOfThem(t *testing.T) {
 	assert.Contains(t, err.Error(), "it holds identity and known_hosts with nothing in it")
 }
 
+func TestASecretHoldingADeclaredKeyWithNothingButWhitespaceInItIsRefusedByThatKey(t *testing.T) {
+	t.Parallel()
+
+	r, cluster := kubernetesRealizer(t)
+	cluster.EXPECT().Secret(mock.Anything, theNamespace, theSecretName).Return(
+		liveSecret(map[string][]byte{
+			"identity": []byte("a key"), "known_hosts": []byte(" \n\t "),
+		}), found, nil)
+
+	_, err := r.Realize(twoKeys(), plain)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "it holds known_hosts with nothing in it")
+}
+
 func TestASecretMissingADeclaredKeyIsRefusedByThatKey(t *testing.T) {
 	t.Parallel()
 
@@ -437,7 +451,7 @@ func TestASecretMissingEveryDeclaredKeyNamesEveryOneOfThem(t *testing.T) {
 	assert.Contains(t, err.Error(), "it holds no identity and no known_hosts")
 }
 
-func TestASecretTheClusterDoesNotHoldNamesItsKeysAndNoWayOfMintingItWhenTheDeclarationWroteNone(t *testing.T) {
+func TestASecretTheClusterDoesNotHoldNamesItsKeysAndTheEntryHoldingTheMintingSteps(t *testing.T) {
 	t.Parallel()
 
 	r, cluster := kubernetesRealizer(t)
@@ -447,10 +461,11 @@ func TestASecretTheClusterDoesNotHoldNamesItsKeysAndNoWayOfMintingItWhenTheDecla
 	require.Error(t, err)
 	assert.Equal(t, "reading secret "+theSecretID+
 		": the cluster holds no secret of that name, nothing in this toolchain writes one, "+
-		"and it must hold identity, known_hosts", err.Error())
+		"and it must hold identity, known_hosts. The pipeline file says how a person mints it, "+
+		"under spec.mint of the secret entry naming "+theSecretID, err.Error())
 }
 
-func TestASecretTheClusterDoesNotHoldNamesTheEntryHoldingTheMintingStepsAndNeverEchoesThem(t *testing.T) {
+func TestTheMintingStepsNeverReachTheManagerAndNeverReachAnError(t *testing.T) {
 	t.Parallel()
 
 	r, cluster := kubernetesRealizer(t)
@@ -461,10 +476,6 @@ func TestASecretTheClusterDoesNotHoldNamesTheEntryHoldingTheMintingStepsAndNever
 
 	_, err := r.Realize(res, plain)
 	require.Error(t, err)
-	assert.Equal(t, "reading secret "+theSecretID+
-		": the cluster holds no secret of that name, nothing in this toolchain writes one, "+
-		"and it must hold identity, known_hosts. The pipeline file says how a person mints it, "+
-		"under spec.mint of the secret entry naming "+theSecretID, err.Error())
 	assert.NotContains(t, err.Error(), theDeclaredMint)
 }
 
@@ -480,19 +491,6 @@ func TestTheManagerNamesNoKeyTypeAndNoProductOfItsOwnWhenASecretIsAbsent(t *test
 	for _, word := range []string{"ed25519", "deploy key", "ssh", "three steps"} {
 		assert.NotContains(t, err.Error(), word)
 	}
-}
-
-func TestAMintThatIsNotAStringIsRefusedByName(t *testing.T) {
-	t.Parallel()
-
-	r := realizerThatMustNotReachAPort(t)
-
-	res := twoKeys()
-	res.Spec["mint"] = 7
-
-	_, err := r.Realize(res, plain)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "reading spec.mint: a string is required, the spec holds a int")
 }
 
 func TestNoRefusalOverASecretEverCarriesAValueTheClusterHolds(t *testing.T) {

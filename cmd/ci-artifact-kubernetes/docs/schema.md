@@ -7,6 +7,6 @@ The `spec` block on this engine's entry in `forge-ci.yaml`.
 | Key | Type | Required | Means |
 |---|---|---|---|
 | `apiServer` | string | yes | The cluster's api server as a url naming a host, such as `https://10.0.0.1:6443`. It rides every declared resource. |
-| `resources` | list of objects | yes | The resources to declare, in the order the manager realizes them. Each entry holds `kind`, one of `helm-release` or `secret`. A `helm-release` entry holds `helmReleaseFile` and `valuesFile`, both paths relative to the pipeline root, and an optional `createNamespace` flag. A `secret` entry holds `namespace`, `name` and `keys`, the list of key names the live secret must hold, and an optional `mint` saying how a person mints it. |
+| `resources` | list of objects | yes | The resources to declare, in the order the manager realizes them. Each entry holds `kind`, one of `helm-release` or `secret`. A `helm-release` entry holds `helmReleaseFile` and `valuesFile`, both paths relative to the pipeline root, and an optional `createNamespace` flag. A `secret` entry holds `namespace`, `name`, `keys`, the list of key names the live secret must hold, and `mint`, the required text saying how a person mints it, which stays in this file and reaches no manager. |
 
 forge-ci never validates a spec. This engine does, because only it knows what the keys mean.

@@ -35,7 +35,7 @@ engine the release reads its behaviour from.
 ## By hand
 
 ```sh
-echo '{"root":"/w","spec":{"apiServer":"https://10.0.0.1:6443","resources":[{"kind":"helm-release","helmReleaseFile":"gitops/platform/app/helmrelease.yaml","valuesFile":"gitops/platform/app/values.yaml","createNamespace":true},{"kind":"secret","namespace":"app-system","name":"deploy-key","keys":["identity","known_hosts"]}]}}' \
+echo '{"root":"/w","spec":{"apiServer":"https://10.0.0.1:6443","resources":[{"kind":"helm-release","helmReleaseFile":"gitops/platform/app/helmrelease.yaml","valuesFile":"gitops/platform/app/values.yaml","createNamespace":true},{"kind":"secret","namespace":"app-system","name":"deploy-key","keys":["identity","known_hosts"],"mint":"a person writes it by hand, once"}]}}' \
   | ci-artifact-kubernetes declare
 ```
 
@@ -71,18 +71,19 @@ come from the `valuesFile` the pipeline names, which is the same file the
 kustomization beside the release generates that ConfigMap from, so the values
 are spelled once and Flux and this engine read one file.
 
-A `secret` entry is flat. It carries `namespace`, `name` and `keys`, a list
+A `secret` entry is flat. It carries `namespace`, `name`, `keys`, a list
 of the key names the live secret must hold, in the order the entry wrote
-them, and an optional `mint`. A secret is minted by a person and read back,
-never written, so the entry names no value and no variable and no value
-passes through this engine. The resource is named `namespace/name`.
+them, and `mint`. A secret is minted by a person and read back, never
+written, so the entry names no value and no variable and no value passes
+through this engine. The resource is named `namespace/name`.
 
-`mint` is free text saying how a person mints that particular secret. The
-manager never prints it. When the cluster holds no secret of that name, the
-manager's error points back at this entry, so an operator reads the steps
-here and the run log carries none of them. It lives here because this entry is
-the one place that knows what the secret is, and the manager knows only that
-it is a secret.
+`mint` is required free text saying how a person mints that particular
+secret. An entry writing none is refused by name, because a secret nobody
+knows how to mint is a declaration with a hole. It never travels: the
+declared resource carries `apiServer`, `namespace`, `name` and `keys` and
+nothing else, so the manager reads no minting steps and no run log can print
+them. It lives here because this entry is the one place that knows what the
+secret is, and the manager knows only that it is a secret.
 
 A `secret` entry naming a key this engine does not read is refused by name,
 naming every unknown key and every key a secret entry holds. An entry still

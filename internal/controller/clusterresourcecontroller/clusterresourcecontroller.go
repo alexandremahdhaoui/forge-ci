@@ -142,18 +142,18 @@ func declaredSecret(index int, held map[string]any, apiServer string) (citypes.R
 		return citypes.Resource{}, fmt.Errorf("reading the mint of secret %s: %w", id, err)
 	}
 
-	spec := map[string]any{
+	if mint == "" {
+		return citypes.Resource{}, fmt.Errorf(
+			"reading the mint of secret %s: mint is required, and it says how a person mints this secret",
+			id)
+	}
+
+	return citypes.Resource{Kind: kindSecret, Name: id, Spec: map[string]any{
 		"apiServer": apiServer,
 		"namespace": namespace,
 		"name":      name,
 		"keys":      keys,
-	}
-
-	if mint != "" {
-		spec["mint"] = mint
-	}
-
-	return citypes.Resource{Kind: kindSecret, Name: id, Spec: spec}, nil
+	}}, nil
 }
 
 func onlySecretEntryKeys(index int, held map[string]any) error {

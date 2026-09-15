@@ -181,6 +181,11 @@ the real cluster. An unset value skips the stage by name rather than answering
 wrong. The variable stays ambient because a `go-test` stage that declares it
 under `spec.env` would clobber what the operator exported.
 
+`FORGE_CI_LIVE_ROOT` is the directory holding the repos the pipeline's entries
+name, the same root the CLI takes from `--root`. Unset, it is the pipeline
+file's parent, exactly as the CLI derives its default. It stays ambient for the
+same reason `FORGE_CI_LIVE_CONFIG` does.
+
 ## Layout
 
 ```

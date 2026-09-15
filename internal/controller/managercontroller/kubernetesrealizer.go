@@ -1,6 +1,7 @@
 package managercontroller
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -88,11 +89,6 @@ func (r KubernetesRealizer) realizeSecret(res citypes.Resource) (Action, error) 
 		return Action{}, err
 	}
 
-	mint, err := citypes.SpecString(res.Spec, "mint")
-	if err != nil {
-		return Action{}, err
-	}
-
 	apiServer, err := citypes.SpecString(res.Spec, "apiServer")
 	if err != nil {
 		return Action{}, err
@@ -108,7 +104,7 @@ func (r KubernetesRealizer) realizeSecret(res citypes.Resource) (Action, error) 
 	}
 
 	if !found {
-		return Action{}, errors.New(theClusterHoldsNoSecret(id, keys, mint != ""))
+		return Action{}, errors.New(theClusterHoldsNoSecret(id, keys))
 	}
 
 	if live == nil {
@@ -134,15 +130,10 @@ func (r KubernetesRealizer) realizeSecret(res citypes.Resource) (Action, error) 
 	return Kept("kept secret " + id + ", holding " + strings.Join(keys, ", ")), nil
 }
 
-func theClusterHoldsNoSecret(id string, keys []string, declaresMint bool) string {
-	text := "reading secret " + id + ": the cluster holds no secret of that name, " +
-		"nothing in this toolchain writes one, and it must hold " + strings.Join(keys, ", ")
-
-	if !declaresMint {
-		return text
-	}
-
-	return text + ". The pipeline file says how a person mints it, " +
+func theClusterHoldsNoSecret(id string, keys []string) string {
+	return "reading secret " + id + ": the cluster holds no secret of that name, " +
+		"nothing in this toolchain writes one, and it must hold " + strings.Join(keys, ", ") +
+		". The pipeline file says how a person mints it, " +
 		"under spec.mint of the secret entry naming " + id
 }
 
@@ -162,7 +153,7 @@ func keysTheLiveSecretHoldsEmpty(live *corev1.Secret, keys []string) []string {
 	var empty []string
 
 	for _, key := range keys {
-		if len(live.Data[key]) == 0 {
+		if len(bytes.TrimSpace(live.Data[key])) == 0 {
 			empty = append(empty, key)
 		}
 	}

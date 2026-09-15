@@ -24,9 +24,6 @@ awk -v total="$TOTAL" -v floor="$FLOOR" 'BEGIN { exit (total + 0 >= floor + 0) ?
     exit 1
 }
 
-echo "every package clears ${PACKAGE_FLOOR}%, and that floor ratchets up and never down"
-echo "${PACKAGE_FLOOR_EXCLUDED} is out of it because a unit test never reaches a node, the adapter is proved against a VM, and the exclusion stands until its testenv-vm case lands"
-
 PER_PACKAGE=$(awk 'NR > 1 {
     statements[$1] = $2
     if ($3 + 0 > 0) hit[$1] = 1
@@ -39,17 +36,23 @@ END {
         total[pkg] += statements[block]
         if (block in hit) covered[pkg] += statements[block]
     }
-    for (pkg in total) printf "%s %.1f\n", pkg, 100 * covered[pkg] / total[pkg]
+    for (pkg in total) {
+        exact = 100 * covered[pkg] / total[pkg]
+        printf "%s %.1f %.17g\n", pkg, exact, exact
+    }
 }' "$OUT" | sort)
 
-printf '%s\n' "$PER_PACKAGE"
+printf '%s\n' "$PER_PACKAGE" | awk '{ print $1, $2 }'
 
 BELOW=$(printf '%s\n' "$PER_PACKAGE" | awk -v floor="$PACKAGE_FLOOR" -v skip="$PACKAGE_FLOOR_EXCLUDED" '
     index($1, skip) { next }
-    $2 + 0 < floor + 0 { print }')
+    $3 + 0 < floor + 0 { print $1, $2 }')
 
 if [ -n "$BELOW" ]; then
     echo "these packages are below the per package floor of ${PACKAGE_FLOOR}%:" >&2
     printf '%s\n' "$BELOW" >&2
     exit 1
 fi
+
+echo "every package clears ${PACKAGE_FLOOR}%, and that floor ratchets up and never down"
+echo "${PACKAGE_FLOOR_EXCLUDED} is out of it because a unit test never reaches a node, the adapter is proved against a VM, and the exclusion stands until its testenv-vm case lands"

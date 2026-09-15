@@ -3,6 +3,8 @@
 package live_test
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -32,6 +34,7 @@ import (
 
 const (
 	envPipeline   = "FORGE_CI_LIVE_CONFIG"
+	envRoot       = "FORGE_CI_LIVE_ROOT"
 	envKubeconfig = "KUBECONFIG"
 
 	apiServerKey = "apiServer"
@@ -124,7 +127,12 @@ func parsedAt(path string) (declaration, error) {
 		return declaration{}, fmt.Errorf("reading the pipeline at %s: %w", abs, err)
 	}
 
-	out := declaration{pipeline: abs, root: filepath.Dir(abs)}
+	root, err := rootHoldingTheRepos(abs)
+	if err != nil {
+		return declaration{}, err
+	}
+
+	out := declaration{pipeline: abs, root: root}
 	controller := clusterresourcecontroller.New(fsadapter.New())
 
 	for _, engine := range pipeline.Engines {
@@ -168,6 +176,20 @@ func parsedAt(path string) (declaration, error) {
 	return out, nil
 }
 
+func rootHoldingTheRepos(pipeline string) (string, error) {
+	named := os.Getenv(envRoot)
+	if named == "" {
+		named = filepath.Dir(pipeline)
+	}
+
+	abs, err := filepath.Abs(named)
+	if err != nil {
+		return "", fmt.Errorf("resolving %s: %w", named, err)
+	}
+
+	return abs, nil
+}
+
 func helmStorageOfManager(pipeline config.Pipeline, alias string) (string, error) {
 	for _, manager := range pipeline.Managers {
 		if manager.Alias != alias {
@@ -191,7 +213,7 @@ func helmStorageOfManager(pipeline config.Pipeline, alias string) (string, error
 		"an engine names manager %q and the pipeline declares no manager of that alias", alias)
 }
 
-func theLiveCluster(t *testing.T, declared declaration) kubernetesadapter.Cluster {
+func theLiveCluster(t *testing.T, declared declaration) (kubernetesadapter.Cluster, error) {
 	t.Helper()
 
 	if os.Getenv(envKubeconfig) == "" {
@@ -203,7 +225,7 @@ func theLiveCluster(t *testing.T, declared declaration) kubernetesadapter.Cluste
 
 	if err := managercontroller.ConfirmAPIServer(
 		cluster, declared.apiServer, "the resources of "+declared.pipeline); err != nil {
-		t.Fatal(err)
+		return kubernetesadapter.Cluster{}, err
 	}
 
 	live := cluster.APIServer()
@@ -211,7 +233,7 @@ func theLiveCluster(t *testing.T, declared declaration) kubernetesadapter.Cluste
 		t.Skipf("the api server at %s does not answer, so nothing read the cluster back", live)
 	}
 
-	return cluster
+	return cluster, nil
 }
 
 func answers(server string) bool {
@@ -254,7 +276,10 @@ func theHelmClient(t *testing.T, declared declaration) helmadapter.Releases {
 
 func TestEveryResourceThePipelineDeclaresIsRealAndHealthyInTheLiveCluster(t *testing.T) {
 	declared := declaredByThePipeline(t)
-	cluster := theLiveCluster(t, declared)
+
+	cluster, err := theLiveCluster(t, declared)
+	require.NoError(t, err)
+
 	releases := theHelmClient(t, declared)
 
 	for _, resource := range declared.resources {
@@ -276,7 +301,7 @@ func readBack(
 	case managercontroller.KindHelmRelease:
 		readReleaseBack(t, releases, resource)
 	case managercontroller.KindSecret:
-		readSecretBack(t, cluster, resource)
+		require.NoError(t, readSecretBack(t.Context(), cluster, resource))
 	default:
 		t.Fatalf(
 			"resource %s is a kind this stage cannot read back, and it reads %s and %s. "+
@@ -304,44 +329,86 @@ func readReleaseBack(t *testing.T, releases helmadapter.Releases, resource cityp
 		"release %s/%s holds another chart version", namespace, name)
 }
 
-func readSecretBack(t *testing.T, cluster kubernetesadapter.Cluster, resource citypes.Resource) {
-	t.Helper()
+func readSecretBack(
+	ctx context.Context,
+	cluster kubernetesadapter.Cluster,
+	resource citypes.Resource,
+) error {
+	namespace, err := declaredValue(resource, namespaceKey)
+	if err != nil {
+		return err
+	}
 
-	namespace := declaredString(t, resource, namespaceKey)
-	name := declaredString(t, resource, nameKey)
+	name, err := declaredValue(resource, nameKey)
+	if err != nil {
+		return err
+	}
 
 	keys, err := citypes.SpecStringSlice(resource.Spec, keysKey)
-	require.NoError(t, err, "reading the keys of secret %s/%s", namespace, name)
-	require.NotEmpty(t, keys, "secret %s/%s declares no key", namespace, name)
+	if err != nil {
+		return fmt.Errorf("reading the keys of secret %s/%s: %w", namespace, name, err)
+	}
 
-	live, found, err := cluster.Secret(t.Context(), namespace, name)
-	require.NoError(t, err)
-	require.True(t, found, "the cluster holds no secret %s/%s", namespace, name)
-	require.NotNil(t, live)
+	if len(keys) == 0 {
+		return fmt.Errorf("secret %s/%s declares no key", namespace, name)
+	}
+
+	live, found, err := cluster.Secret(ctx, namespace, name)
+	if err != nil {
+		return fmt.Errorf("reading secret %s/%s: %w", namespace, name, err)
+	}
+
+	if !found || live == nil {
+		return fmt.Errorf("the cluster holds no secret %s/%s", namespace, name)
+	}
+
+	var empty []string
 
 	for _, key := range keys {
-		assert.True(t, holdsKey(live, key),
-			"secret %s/%s holds no value under %s", namespace, name, key)
+		if !holdsKey(live, key) {
+			empty = append(empty, key)
+		}
 	}
+
+	if len(empty) == 0 {
+		return nil
+	}
+
+	return fmt.Errorf("secret %s/%s holds no value under %s",
+		namespace, name, strings.Join(empty, " and "))
 }
 
 func holdsKey(secret *corev1.Secret, key string) bool {
-	return len(secret.Data[key]) > 0
+	return len(bytes.TrimSpace(secret.Data[key])) > 0
+}
+
+func declaredValue(resource citypes.Resource, key string) (string, error) {
+	value, err := citypes.SpecString(resource.Spec, key)
+	if err != nil {
+		return "", fmt.Errorf("reading %s of resource %s: %w", key, resource.ID(), err)
+	}
+
+	if value == "" {
+		return "", fmt.Errorf("resource %s declares no %s", resource.ID(), key)
+	}
+
+	return value, nil
 }
 
 func declaredString(t *testing.T, resource citypes.Resource, key string) string {
 	t.Helper()
 
-	value, err := citypes.SpecString(resource.Spec, key)
-	require.NoError(t, err, "reading %s of resource %s", key, resource.ID())
-	require.NotEmpty(t, value, "resource %s declares no %s", resource.ID(), key)
+	value, err := declaredValue(resource, key)
+	require.NoError(t, err)
 
 	return value
 }
 
 func TestForgeCIsOwnRunRecordSaysASecondApplyKeptEveryResourceAndThisReadsNoClusterObject(t *testing.T) {
 	declared := declaredByThePipeline(t)
-	theLiveCluster(t, declared)
+
+	_, err := theLiveCluster(t, declared)
+	require.NoError(t, err)
 
 	binary, err := exec.LookPath(cli)
 	if err != nil {
@@ -381,6 +448,28 @@ func TestTheSecretArmReadsADeclaredKeyBackFromAnAPIServerStoodUpInThisTestProces
 		key       = "a-key"
 	)
 
+	server := secretServer(t, namespace, name, map[string][]byte{key: []byte("a value")})
+
+	root := t.TempDir()
+	writeKubeconfig(t, root, server.URL)
+
+	pipeline := filepath.Join(root, "forge-ci.yaml")
+	require.NoError(t, os.WriteFile(pipeline,
+		[]byte(secretPipelineYAML(root, server.URL, namespace, name, []string{key})), 0o600))
+
+	declared, err := declaredAt(pipeline)
+	require.NoError(t, err)
+	require.Len(t, declared.resources, 1)
+
+	cluster, err := theLiveCluster(t, declared)
+	require.NoError(t, err)
+
+	readBack(t, cluster, helmadapter.Releases{}, declared.resources[0])
+}
+
+func secretServer(t *testing.T, namespace, name string, data map[string][]byte) *httptest.Server {
+	t.Helper()
+
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/namespaces/"+namespace+"/secrets/"+name {
 			w.WriteHeader(http.StatusNotFound)
@@ -392,24 +481,112 @@ func TestTheSecretArmReadsADeclaredKeyBackFromAnAPIServerStoodUpInThisTestProces
 		_ = json.NewEncoder(w).Encode(&corev1.Secret{
 			TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
 			ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: name},
-			Data:       map[string][]byte{key: []byte("a value")},
+			Data:       data,
 		})
 	}))
 	t.Cleanup(server.Close)
+
+	return server
+}
+
+func TestThePipelineNamingAnAPIServerTheLiveClusterIsNotIsRefusedBeforeAnyResourceIsReadBack(t *testing.T) {
+	const (
+		namespace = "a-namespace"
+		name      = "a-secret"
+		key       = "a-key"
+	)
+
+	server := secretServer(t, namespace, name, map[string][]byte{key: []byte("a value")})
 
 	root := t.TempDir()
 	writeKubeconfig(t, root, server.URL)
 
 	pipeline := filepath.Join(root, "forge-ci.yaml")
 	require.NoError(t, os.WriteFile(pipeline,
-		[]byte(secretPipelineYAML(root, server.URL, namespace, name, key)), 0o600))
+		[]byte(secretPipelineYAML(root, theFirstAPIServer, namespace, name, []string{key})), 0o600))
+
+	declared, err := declaredAt(pipeline)
+	require.NoError(t, err)
+
+	_, err = theLiveCluster(t, declared)
+	require.Error(t, err)
+	require.Equal(t,
+		"reading the api server holding the resources of "+pipeline+
+			`: spec.apiServer names "`+theFirstAPIServer+`" and the live cluster is "`+server.URL+`"`,
+		err.Error())
+}
+
+func TestTheSecretArmRefusesADeclaredKeyTheLiveSecretHoldsEmptyAndOneItHoldsBlank(t *testing.T) {
+	const (
+		namespace = "a-namespace"
+		name      = "a-secret"
+		full      = "a-full-key"
+		empty     = "an-empty-key"
+		blank     = "a-blank-key"
+	)
+
+	server := secretServer(t, namespace, name, map[string][]byte{
+		full:  []byte("a value"),
+		empty: {},
+		blank: []byte(" \n\t "),
+	})
+
+	root := t.TempDir()
+	writeKubeconfig(t, root, server.URL)
+
+	pipeline := filepath.Join(root, "forge-ci.yaml")
+	require.NoError(t, os.WriteFile(pipeline,
+		[]byte(secretPipelineYAML(root, server.URL, namespace, name,
+			[]string{full, empty, blank})), 0o600))
 
 	declared, err := declaredAt(pipeline)
 	require.NoError(t, err)
 	require.Len(t, declared.resources, 1)
 
-	cluster := theLiveCluster(t, declared)
-	readBack(t, cluster, helmadapter.Releases{}, declared.resources[0])
+	cluster, err := theLiveCluster(t, declared)
+	require.NoError(t, err)
+
+	require.EqualError(t, readSecretBack(t.Context(), cluster, declared.resources[0]),
+		"secret "+namespace+"/"+name+" holds no value under "+empty+" and "+blank)
+}
+
+func TestTheRootOfTheLiveStageDefaultsToThePipelineFilesParentTheWayTheCLIDoes(t *testing.T) {
+	root := t.TempDir()
+
+	pipeline := filepath.Join(root, "forge-ci.yaml")
+	require.NoError(t, os.WriteFile(pipeline,
+		[]byte(secretPipelineYAML(root, theFirstAPIServer, "a-namespace", "a-secret",
+			[]string{"a-key"})), 0o600))
+
+	declared, err := declaredAt(pipeline)
+	require.NoError(t, err)
+	require.Equal(t, root, declared.root)
+}
+
+func TestTheRootOfTheLiveStageIsTheOneTheEnvironmentNamesWhenItNamesOne(t *testing.T) {
+	root := t.TempDir()
+	elsewhere := t.TempDir()
+
+	t.Setenv(envRoot, elsewhere)
+
+	pipeline := filepath.Join(root, "forge-ci.yaml")
+	require.NoError(t, os.WriteFile(pipeline,
+		[]byte(secretPipelineYAML(root, theFirstAPIServer, "a-namespace", "a-secret",
+			[]string{"a-key"})), 0o600))
+
+	declared, err := declaredAt(pipeline)
+	require.NoError(t, err)
+	require.Equal(t, elsewhere, declared.root)
+}
+
+func TestAnEngineNamingAManagerThePipelineNeverDeclaredIsRefusedByThatAlias(t *testing.T) {
+	_, err := helmStorageOfManager(config.Pipeline{
+		Managers: []config.Manager{{Alias: "here"}},
+	}, "elsewhere")
+	require.Error(t, err)
+	require.Equal(t,
+		`an engine names manager "elsewhere" and the pipeline declares no manager of that alias`,
+		err.Error())
 }
 
 func TestAPipelineFileDeclaringNoClusterResourceIsRefusedByTheFunctionTheStageReadsItThrough(t *testing.T) {
@@ -541,6 +718,7 @@ engines:
           namespace: a-namespace
           name: first-secret
           keys: [a-key]
+          mint: a person writes it by hand
   - alias: second
     type: artifact
     engine: "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-artifact-kubernetes@v0.1.0"
@@ -552,6 +730,7 @@ engines:
           namespace: a-namespace
           name: second-secret
           keys: [a-key]
+          mint: a person writes it by hand
   - alias: ci-state
     type: state
     engine: "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-state-git@v0.1.0"
@@ -580,7 +759,7 @@ stages:
 `
 }
 
-func secretPipelineYAML(root, server, namespace, name, key string) string {
+func secretPipelineYAML(root, server, namespace, name string, keys []string) string {
 	return `name: live
 managers:
   - alias: cluster
@@ -598,7 +777,8 @@ engines:
         - kind: secret
           namespace: ` + namespace + `
           name: ` + name + `
-          keys: [` + key + `]
+          keys: [` + strings.Join(keys, ", ") + `]
+          mint: a person writes it by hand
   - alias: ci-state
     type: state
     engine: "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-state-git@v0.1.0"

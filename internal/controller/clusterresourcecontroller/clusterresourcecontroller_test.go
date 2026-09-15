@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -121,6 +122,7 @@ func TestASecretDeclaresTheKeyNamesTheLiveSecretMustHoldAndCarriesNoValue(t *tes
 		"namespace": "flux-system",
 		"name":      "deploy-key",
 		"keys":      []any{"identity", "known_hosts"},
+		"mint":      theMint,
 	}))
 
 	require.NoError(t, err)
@@ -141,13 +143,14 @@ func TestTheDeclaredKeysKeepTheOrderTheEntryWroteThem(t *testing.T) {
 		"namespace": "flux-system",
 		"name":      "deploy-key",
 		"keys":      []any{"known_hosts", "identity"},
+		"mint":      theMint,
 	}))
 
 	require.NoError(t, err)
 	assert.Equal(t, []any{"known_hosts", "identity"}, out.Resources[0].Spec["keys"])
 }
 
-func TestTheMintTheEntryWroteRidesTheDeclaredSecret(t *testing.T) {
+func TestTheMintTheEntryWroteStaysInThePipelineFileAndRidesNoDeclaredSecret(t *testing.T) {
 	t.Parallel()
 
 	out, err := onDisk().Declare(declaring(map[string]any{
@@ -159,21 +162,31 @@ func TestTheMintTheEntryWroteRidesTheDeclaredSecret(t *testing.T) {
 	}))
 
 	require.NoError(t, err)
-	assert.Equal(t, theMint, out.Resources[0].Spec["mint"])
+	require.Len(t, out.Resources, 1)
+
+	keys := make([]string, 0, len(out.Resources[0].Spec))
+	for key := range out.Resources[0].Spec {
+		keys = append(keys, key)
+	}
+
+	slices.Sort(keys)
+	assert.Equal(t, []string{"apiServer", "keys", "name", "namespace"}, keys)
 }
 
-func TestASecretEntryWritingNoMintDeclaresNoneRatherThanAnEmptyOne(t *testing.T) {
+func TestASecretEntryWritingNoMintIsRefusedByItsID(t *testing.T) {
 	t.Parallel()
 
-	out, err := onDisk().Declare(declaring(map[string]any{
+	_, err := onDisk().Declare(declaring(map[string]any{
 		"kind":      "secret",
 		"namespace": "flux-system",
 		"name":      "deploy-key",
 		"keys":      []any{"identity"},
 	}))
 
-	require.NoError(t, err)
-	assert.NotContains(t, out.Resources[0].Spec, "mint")
+	require.Error(t, err)
+	assert.Equal(t,
+		"reading the mint of secret flux-system/deploy-key: mint is required, "+
+			"and it says how a person mints this secret", err.Error())
 }
 
 func TestAKeyASecretEntryDoesNotHoldIsRefusedByNameAndNamesEveryKeyItHolds(t *testing.T) {
@@ -237,6 +250,7 @@ func TestTheResourcesComeBackInTheOrderTheSpecListsThem(t *testing.T) {
 			"namespace": "flux-system",
 			"name":      "deploy-key",
 			"keys":      []any{"identity"},
+			"mint":      theMint,
 		},
 		helmRelease(fluxRelease, fluxValues),
 	))
@@ -258,6 +272,7 @@ func TestTheApiServerSitsOnceOnTheSpecAndRidesEveryDeclaredResource(t *testing.T
 			"namespace": "flux-system",
 			"name":      "deploy-key",
 			"keys":      []any{"identity"},
+			"mint":      theMint,
 		},
 	))
 
