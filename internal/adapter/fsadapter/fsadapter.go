@@ -13,15 +13,9 @@ type FS interface {
 	ReadFile(path string) ([]byte, error)
 	WriteFile(path string, data []byte) error
 	MkdirAll(path string) error
-	// Mode answers a file's permission bits, and Chmod sets them. A copy
-	// that does not carry them writes a file nothing can execute: a built
-	// binary arrives, and the run that needs it dies on "permission
-	// denied" rather than on anything about the binary.
 	Mode(path string) (os.FileMode, error)
 	Chmod(path string, mode os.FileMode) error
 	Exists(path string) (bool, error)
-	// IsDir answers whether path is a directory. A missing path is false
-	// and not an error, like Exists.
 	IsDir(path string) (bool, error)
 	List(dir string) ([]string, error)
 	Walk(dir string) ([]string, error)
@@ -120,6 +114,10 @@ func (OS) List(dir string) ([]string, error) {
 
 	names := make([]string, 0, len(entries))
 	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+
 		names = append(names, e.Name())
 	}
 
@@ -128,8 +126,6 @@ func (OS) List(dir string) ([]string, error) {
 	return names, nil
 }
 
-// Walk returns the relative slash paths of every file under dir, sorted. A
-// missing directory walks to nothing, matching List.
 func (OS) Walk(dir string) ([]string, error) {
 	var names []string
 
@@ -172,8 +168,6 @@ func (OS) Remove(path string) error {
 	return nil
 }
 
-// Digest measures one file: its sha256 hex and its size. The distribution
-// index is built from these, so it never claims a byte nobody hashed.
 func Digest(path string) (string, int64, error) {
 	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {

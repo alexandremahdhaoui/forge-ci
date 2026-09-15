@@ -36,10 +36,10 @@ func (c *Controller) Declare(in citypes.DeclareInput) (citypes.DeclareOutput, er
 		return citypes.DeclareOutput{}, err
 	}
 
-	held, named := in.Spec["resources"]
+	held := in.Spec["resources"]
 
 	declared, ok := held.([]any)
-	if named && held != nil && !ok {
+	if held != nil && !ok {
 		return citypes.DeclareOutput{}, fmt.Errorf(
 			"reading spec.resources: a list is required, the spec holds a %T", held)
 	}

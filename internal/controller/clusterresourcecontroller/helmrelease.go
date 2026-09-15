@@ -152,6 +152,8 @@ func (c *Controller) resolveRepository(
 		return "", fmt.Errorf("resolving the chart repository of release %s: %w", id, err)
 	}
 
+	matched, url := "", ""
+
 	for _, name := range names {
 		if !namesADocument(name) {
 			continue
@@ -163,6 +165,10 @@ func (c *Controller) resolveRepository(
 				"resolving the chart repository of release %s: its sourceRef names %s %s/%s "+
 					"and %s sits beside %s and cannot be read: %w",
 				id, ref.Kind, ref.Namespace, ref.Name, name, releaseFile, err)
+		}
+
+		if matched != "" {
+			continue
 		}
 
 		var candidate repositoryDocument
@@ -177,18 +183,22 @@ func (c *Controller) resolveRepository(
 			continue
 		}
 
-		if candidate.Spec.URL == "" {
-			return "", fmt.Errorf(
-				"resolving the chart repository of release %s: %s names no spec.url", id, name)
-		}
-
-		return candidate.Spec.URL, nil
+		matched, url = name, candidate.Spec.URL
 	}
 
-	return "", fmt.Errorf(
-		"resolving the chart repository of release %s: its sourceRef names %s %s/%s "+
-			"and no document beside %s is one",
-		id, ref.Kind, ref.Namespace, ref.Name, releaseFile)
+	if matched == "" {
+		return "", fmt.Errorf(
+			"resolving the chart repository of release %s: its sourceRef names %s %s/%s "+
+				"and no document beside %s is one",
+			id, ref.Kind, ref.Namespace, ref.Name, releaseFile)
+	}
+
+	if url == "" {
+		return "", fmt.Errorf(
+			"resolving the chart repository of release %s: %s names no spec.url", id, matched)
+	}
+
+	return url, nil
 }
 
 func (c *Controller) readValues(root, valuesFile, id string) (map[string]any, error) {

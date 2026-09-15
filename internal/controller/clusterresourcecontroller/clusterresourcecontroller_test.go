@@ -510,6 +510,57 @@ func TestADocumentBesideTheReleaseThatCannotBeReadRefusesByItsNameAndTheSourceRe
 	assert.Contains(t, err.Error(), "permission denied")
 }
 
+func TestARepositoryThatSortsBeforeAnUnreadableDocumentStillRefusesTheRelease(t *testing.T) {
+	t.Parallel()
+
+	dir := filepath.Join("testdata", "platform", "cilium")
+
+	release, err := os.ReadFile(filepath.Join(dir, "helmrelease.yaml"))
+	require.NoError(t, err)
+
+	repository, err := os.ReadFile(filepath.Join(dir, "helmrepository.yaml"))
+	require.NoError(t, err)
+
+	fs := fsadaptermock.NewMockFS(t)
+	fs.EXPECT().ReadFile(filepath.Join(dir, "helmrelease.yaml")).Return(release, nil)
+	fs.EXPECT().List(dir).Return([]string{"helmrepository.yaml", "zz-ghost.yaml"}, nil)
+	fs.EXPECT().ReadFile(filepath.Join(dir, "helmrepository.yaml")).Return(repository, nil)
+	fs.EXPECT().ReadFile(filepath.Join(dir, "zz-ghost.yaml")).
+		Return(nil, errors.New("permission denied"))
+
+	_, err = clusterresourcecontroller.New(fs).
+		Declare(declaring(helmRelease(ciliumRelease, ciliumValues)))
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "resolving the chart repository of release kube-system/cilium")
+	assert.Contains(t, err.Error(), "zz-ghost.yaml")
+	assert.Contains(t, err.Error(), "permission denied")
+}
+
+func TestASubdirectoryNamedLikeADocumentBesideAReleaseIsNoDocument(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	dir := filepath.Join(root, "platform", "cilium")
+
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "aaa-subdir.yaml"), 0o750))
+
+	for _, name := range []string{"helmrelease.yaml", "helmrepository.yaml", "values.yaml"} {
+		raw, err := os.ReadFile(filepath.Join("testdata", "platform", "cilium", name))
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), raw, 0o600))
+	}
+
+	in := declaring(helmRelease(ciliumRelease, ciliumValues))
+	in.Root = root
+
+	out, err := onDisk().Declare(in)
+
+	require.NoError(t, err)
+	require.Len(t, out.Resources, 1)
+	assert.Equal(t, "https://helm.cilium.io", out.Resources[0].Spec["repository"])
+}
+
 func TestThePublishToolRefusesByNameAndPublishesNothing(t *testing.T) {
 	t.Parallel()
 
