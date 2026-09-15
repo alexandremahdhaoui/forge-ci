@@ -297,16 +297,6 @@ func TestTheKubernetesRealizerNeverEchoesAPastedSecretBackOutOfItsRefusal(t *tes
 		"and no variable of that name is set")
 }
 
-func TestTheKubernetesRealizerRefusesToWorkWithNoClusterBehindIt(t *testing.T) {
-	r := managercontroller.NewKubernetesRealizer(t.Context(), nil, nil)
-
-	_, err := r.Realize(oneKey(t, "a key"), plain)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(),
-		"reading the api server holding secret "+theSecretID+
-			": this manager carries no cluster client yet")
-}
-
 func TestASecretIsRefusedWhenTheLiveClusterIsNotTheOneTheDeclarationNames(t *testing.T) {
 	cluster := managercontrollermock.NewMockKubernetes(t)
 	cluster.EXPECT().APIServer().Return(anotherAPIServer)

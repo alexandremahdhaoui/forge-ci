@@ -240,6 +240,17 @@ func TestAStoredReleaseCarryingNoInfoRefusesByNameInsteadOfPanicking(t *testing.
 			": the stored release carries no status")
 }
 
+func TestAReleaseFieldHelmRenamedRefusesLoudlyByNameInsteadOfAnsweringAbsent(t *testing.T) {
+	live := liveRelease(&chartv2.Chart{Metadata: &chartv2.Metadata{Name: theChart}}, common.StatusDeployed)
+
+	for _, renamed := range []string{"Infos", "info"} {
+		_, err := fieldAbsent(live, renamed)
+
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "holds no field named "+renamed)
+	}
+}
+
 func TestAReleasesClientNewNeverBuiltRefusesToReadByNameInsteadOfPanicking(t *testing.T) {
 	_, found, err := Releases{}.Release(context.Background(), theNamespace, theName)
 

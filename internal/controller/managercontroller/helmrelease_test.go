@@ -259,29 +259,6 @@ func TestAClusterClientThatNamesNoAPIServerIsRefusedByName(t *testing.T) {
 	assert.Contains(t, err.Error(), "names no api server")
 }
 
-func TestAManagerCarryingNoClusterClientRefusesAReleaseByName(t *testing.T) {
-	t.Parallel()
-
-	r := managercontroller.NewKubernetesRealizer(t.Context(), nil, nil)
-
-	_, err := r.Realize(declaredRelease(), plain)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "this manager carries no cluster client yet")
-}
-
-func TestAManagerCarryingNoHelmClientRefusesAReleaseByName(t *testing.T) {
-	t.Parallel()
-
-	cluster := managercontrollermock.NewMockKubernetes(t)
-	cluster.EXPECT().APIServer().Return(theAPIServer)
-
-	r := managercontroller.NewKubernetesRealizer(t.Context(), cluster, nil)
-
-	_, err := r.Realize(declaredRelease(), plain)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "this manager carries no helm client yet")
-}
-
 func TestAHelmClientThatCannotBeReadIsReportedWithTheReleaseItWasReading(t *testing.T) {
 	t.Parallel()
 

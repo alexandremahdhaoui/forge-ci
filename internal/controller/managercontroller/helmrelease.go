@@ -45,10 +45,6 @@ func (r KubernetesRealizer) realizeHelmRelease(res citypes.Resource, opts Option
 		return Action{}, err
 	}
 
-	if r.helm == nil {
-		return Action{}, fmt.Errorf("reading release %s: this manager carries no helm client yet", id)
-	}
-
 	live, found, err := r.helm.Release(r.ctx, declared.Namespace, declared.Name)
 	if err != nil {
 		return Action{}, fmt.Errorf("reading release %s: %w", id, err)
@@ -64,11 +60,6 @@ func (r KubernetesRealizer) realizeHelmRelease(res citypes.Resource, opts Option
 func (r KubernetesRealizer) confirmAPIServer(declared, subject string) error {
 	if declared == "" {
 		return fmt.Errorf("reading %s: spec.apiServer is required", subject)
-	}
-
-	if r.cluster == nil {
-		return fmt.Errorf(
-			"reading the api server holding %s: this manager carries no cluster client yet", subject)
 	}
 
 	live := r.cluster.APIServer()

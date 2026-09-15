@@ -26,10 +26,10 @@ const (
 
 	storageVariable = "HELM_DRIVER"
 
+	chartNameKey    = "Name"
 	chartVersionKey = "Version"
 
-	chartMetadataField = "Metadata"
-	releaseInfoField   = "Info"
+	releaseInfoField = "Info"
 )
 
 type Releases struct {
@@ -129,26 +129,33 @@ func (r Releases) InstallRelease(ctx context.Context, declared citypes.HelmRelea
 	return nil
 }
 
-func absent(held any, fields ...string) bool {
+func absent(held any) bool {
 	value := reflect.ValueOf(held)
 
-	for _, field := range fields {
-		if value.Kind() == reflect.Pointer {
-			if value.IsNil() {
-				return true
-			}
+	return !value.IsValid() || (value.Kind() == reflect.Pointer && value.IsNil())
+}
 
-			value = value.Elem()
+func fieldAbsent(held any, field string) (bool, error) {
+	value := reflect.ValueOf(held)
+
+	if value.Kind() == reflect.Pointer {
+		if value.IsNil() {
+			return true, nil
 		}
 
-		if value.Kind() != reflect.Struct {
-			return true
-		}
-
-		value = value.FieldByName(field)
+		value = value.Elem()
 	}
 
-	return !value.IsValid() || (value.Kind() == reflect.Pointer && value.IsNil())
+	if value.Kind() != reflect.Struct {
+		return false, fmt.Errorf("a %T holds no field named %s", held, field)
+	}
+
+	carried := value.FieldByName(field)
+	if !carried.IsValid() {
+		return false, fmt.Errorf("a %T holds no field named %s", held, field)
+	}
+
+	return carried.Kind() == reflect.Pointer && carried.IsNil(), nil
 }
 
 func chartReference(declared citypes.HelmRelease) (reference, repositoryURL string) {
@@ -192,29 +199,38 @@ func describe(live release.Releaser, namespace, name string) (citypes.HelmReleas
 			fmt.Errorf("reading the chart of release %s/%s: %w", namespace, name, err)
 	}
 
-	if absent(charter, chartMetadataField) || chrt.Name() == "" {
+	metadata := chrt.MetadataAsMap()
+
+	chartName, _ := metadata[chartNameKey].(string)
+	if chartName == "" {
 		return citypes.HelmRelease{}, fmt.Errorf(
 			"reading the chart of release %s/%s: the stored chart carries no name in its metadata",
 			namespace, name)
 	}
 
-	if absent(live, releaseInfoField) || held.Status() == "" {
+	infoAbsent, err := fieldAbsent(live, releaseInfoField)
+	if err != nil {
+		return citypes.HelmRelease{}, fmt.Errorf(
+			"reading the status of release %s/%s: %w", namespace, name, err)
+	}
+
+	if infoAbsent || held.Status() == "" {
 		return citypes.HelmRelease{}, fmt.Errorf(
 			"reading the status of release %s/%s: the stored release carries no status",
 			namespace, name)
 	}
 
-	version, _ := chrt.MetadataAsMap()[chartVersionKey].(string)
+	version, _ := metadata[chartVersionKey].(string)
 	if version == "" {
 		return citypes.HelmRelease{}, fmt.Errorf(
 			"reading the chart of release %s/%s: chart %s carries no version in its metadata",
-			namespace, name, chrt.Name())
+			namespace, name, chartName)
 	}
 
 	return citypes.HelmRelease{
 		Namespace: held.Namespace(),
 		Name:      held.Name(),
-		Chart:     chrt.Name(),
+		Chart:     chartName,
 		Version:   version,
 		Status:    held.Status(),
 	}, nil

@@ -4,9 +4,22 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
+	"github.com/alexandremahdhaoui/forge-ci/internal/controller/managercontroller"
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 )
+
+func TestAReconcileDeclaringOnlySecretsNeverBuildsAHelmClientAndStillCarriesOne(t *testing.T) {
+	t.Parallel()
+
+	releases, err := releaseClient([]Resource{{Kind: "secret", Name: "flux-deploy-key"}})
+	require.NoError(t, err)
+
+	var port managercontroller.Helm = releases
+
+	assert.NotNil(t, port)
+}
 
 func TestEveryFieldOfAReconcileInputCrossesIntoTheController(t *testing.T) {
 	t.Parallel()

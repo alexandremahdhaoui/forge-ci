@@ -21,7 +21,7 @@ func NewHandlers() Handlers {
 				return nil, fmt.Errorf("building the cluster client of manager %s: %w", in.Manager, err)
 			}
 
-			releases, err := helmadapter.New()
+			releases, err := releaseClient(in.Resources)
 			if err != nil {
 				return nil, fmt.Errorf("building the helm client of manager %s: %w", in.Manager, err)
 			}
@@ -37,6 +37,16 @@ func NewHandlers() Handlers {
 			return fromReconcileOutput(out), nil
 		},
 	}
+}
+
+func releaseClient(resources []Resource) (helmadapter.Releases, error) {
+	for _, r := range resources {
+		if r.Kind == managercontroller.KindHelmRelease {
+			return helmadapter.New()
+		}
+	}
+
+	return helmadapter.Releases{}, nil
 }
 
 func toReconcileInput(in ReconcileInput) citypes.ReconcileInput {
