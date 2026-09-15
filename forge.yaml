@@ -92,6 +92,10 @@ build:
     src: ./cmd/ci-artifact-talos
     engine: forge://forge-dev
 
+  - name: gen-ci-artifact-kubernetes
+    src: ./cmd/ci-artifact-kubernetes
+    engine: forge://forge-dev
+
   - name: generate-mocks
     src: .
     engine: forge://generic-builder
@@ -183,6 +187,12 @@ build:
 
   - name: ci-artifact-talos
     src: ./cmd/ci-artifact-talos
+    dest: ./build/bin
+    engine: forge://go-build
+    platforms: [linux/amd64, linux/arm64]
+
+  - name: ci-artifact-kubernetes
+    src: ./cmd/ci-artifact-kubernetes
     dest: ./build/bin
     engine: forge://go-build
     platforms: [linux/amd64, linux/arm64]

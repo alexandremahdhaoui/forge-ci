@@ -1,0 +1,70 @@
+name: ci-artifact-kubernetes
+port: artifact
+version: v0.1.0
+tagline: Declare one cluster resource per entry of spec.resources, in list order, read from the gitops documents under the pipeline root.
+why: |
+  A manager converges what something declares, and nothing declared a release
+  or a secret, so the cluster manager was unreachable. This engine is the
+  declaration. It reads one ordered list and hands each entry over as a
+  resource the manager owns, in the order the list names them, because a
+  release that needs a secret must reach the cluster after it.
+
+  A release is spelled once, in gitops. The engine reads the chart name, the
+  chart version and the source reference from the release document, follows
+  that reference to the repository document beside it, and takes the values
+  from the values file. Nothing about the chart is written a second time in
+  the pipeline.
+
+  It wears the artifact port because that is the port a declaring engine can
+  wear today. It publishes nothing. The publish tool refuses by name, so a
+  substage that names this engine fails loudly instead of turning it into the
+  engine the release reads its behaviour from.
+tools:
+  - name: declare
+    does: Report one cluster resource per entry of spec.resources, in list order.
+  - name: publish
+    does: Refuse. This engine declares cluster resources and never publishes.
+example:
+  tool: declare
+  input: '{"root":"/w","spec":{"apiServer":"https://10.0.0.1:6443","resources":[{"kind":"helm-release","helmReleaseFile":"gitops/platform/app/helmrelease.yaml","valuesFile":"gitops/platform/app/values.yaml","createNamespace":true},{"kind":"secret","namespace":"app-system","name":"deploy-key","data":{"identity":"DEPLOY_KEY"}}]}}'
+notes: |
+  One entry declares one resource, and the resources come back in list order.
+
+  A `helm-release` entry names two files under the pipeline root. The release
+  document gives `metadata.namespace` as the resource's `namespace`,
+  `metadata.name` as its `release`, `spec.chart.spec.chart` as its `chart` and
+  `spec.chart.spec.version` as its `version`. Its `spec.chart.spec.sourceRef`
+  names a repository document by kind, name and namespace, and the engine
+  resolves it against the documents sitting in the directory of the release
+  file, taking that document's `spec.url` as the resource's `repository`. The
+  values file becomes the resource's `values`. The resource is named
+  `namespace/release`.
+
+  A `secret` entry is flat. It carries `namespace`, `name` and `data`, where
+  each key of `data` names the environment variable holding that key's value.
+  The engine never reads a variable, so no value passes through it. The
+  resource is named `namespace/name`.
+
+  `spec.apiServer` sits once above the list and rides every resource, so the
+  manager refuses a cluster that is not the one the pipeline named, per
+  resource.
+
+  Every spec key is required and an absent one is refused by name. An unknown
+  kind, a document that is not a release, a source reference that resolves to
+  nothing and a file that cannot be read are each refused by name. No refusal
+  and no resource description ever prints the contents of a values file.
+spec:
+  - key: apiServer
+    type: string
+    required: true
+    means: The cluster's api server as a url naming a host, such as `https://10.0.0.1:6443`. It rides every declared resource.
+  - key: resources
+    type: list of objects
+    required: true
+    means: >-
+      The resources to declare, in the order the manager realizes them. Each
+      entry holds `kind`, one of `helm-release` or `secret`. A `helm-release`
+      entry holds `helmReleaseFile` and `valuesFile`, both paths relative to
+      the pipeline root, and an optional `createNamespace` flag. A `secret`
+      entry holds `namespace`, `name` and `data`, a map from each secret key
+      to the name of the environment variable holding its value.
