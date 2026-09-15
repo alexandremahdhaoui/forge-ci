@@ -382,6 +382,22 @@ func TestAVPrefixedVersionIsExactAndIsAcceptedAgainstALiveReleaseThatDropsThePre
 	assert.Equal(t, "kept release "+theReleaseID, action.Text)
 }
 
+func TestADriftTextPrintsTheVersionTheDeclarationWroteAndKeepsItsLeadingV(t *testing.T) {
+	t.Parallel()
+
+	r, cluster, helm := helmRealizer(t)
+
+	cluster.EXPECT().APIServer().Return(theAPIServer)
+	helm.EXPECT().Release(mock.Anything, theNamespace, theReleaseName).
+		Return(liveRelease(theChart, theOlderVersion, managercontroller.StatusDeployed), found, nil)
+
+	action, err := r.Realize(declaredReleaseWith(map[string]any{"version": "v" + theVersion}), plain)
+	require.NoError(t, err)
+	assert.False(t, action.Changed)
+	assert.Equal(t, "kept release "+theReleaseID+", the cluster holds chart "+theChart+" "+
+		theOlderVersion+" and the declaration names v"+theVersion, action.Text)
+}
+
 func TestAVPrefixedVersionReachesTheHelmClientWithoutItsPrefix(t *testing.T) {
 	t.Parallel()
 
@@ -396,9 +412,10 @@ func TestAVPrefixedVersionReachesTheHelmClientWithoutItsPrefix(t *testing.T) {
 		Run(func(_ context.Context, release managercontroller.HelmRelease) { written = release }).
 		Return(nil)
 
-	_, err := r.Realize(declaredReleaseWith(map[string]any{"version": "v" + theVersion}), plain)
+	action, err := r.Realize(declaredReleaseWith(map[string]any{"version": "v" + theVersion}), plain)
 	require.NoError(t, err)
 	assert.Equal(t, theVersion, written.Version)
+	assert.Equal(t, "installed release "+theReleaseID+" from chart "+theChart+" "+theVersion, action.Text)
 }
 
 func TestAPrereleaseChartVersionIsExactAndIsAccepted(t *testing.T) {

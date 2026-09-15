@@ -1,0 +1,5 @@
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata: the name of this repository belongs in a mapping
+spec:
+  url: https://charts.example.test

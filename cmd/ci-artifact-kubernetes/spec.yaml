@@ -61,10 +61,14 @@ notes: |
   each refused by name. Resolving a source reference refuses by name any
   document beside the release that cannot be read, naming the file and the
   reference, because a permission error is not a missing repository. It passes
-  over a document that does not parse as a repository, because a values file or
-  a kustomization sits beside a release and is neither. A reference that matches
-  nothing is refused by name at the end. No refusal and no resource description
-  ever prints the contents of a values file.
+  over a document whose top level is not a mapping, and over one whose `kind` is
+  not the kind the reference names, because a values file and a kustomization
+  both sit beside a release and are neither. A document that carries the kind
+  the reference names and is otherwise malformed is refused by name, naming the
+  file and the reference and never the parse cause, because a document beside a
+  release can hold anything. A reference that matches nothing is refused by name
+  at the end. No refusal and no resource description ever prints the contents of
+  a values file.
 spec:
   - key: apiServer
     type: string

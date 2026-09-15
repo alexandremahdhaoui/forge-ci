@@ -39,7 +39,6 @@ type releaseDocument struct {
 }
 
 type repositoryDocument struct {
-	Kind     string           `json:"kind"`
 	Metadata documentMetadata `json:"metadata"`
 	Spec     struct {
 		URL string `json:"url"`
@@ -171,14 +170,20 @@ func (c *Controller) resolveRepository(
 			continue
 		}
 
-		var candidate repositoryDocument
-
-		if err := yaml.Unmarshal(raw, &candidate); err != nil {
+		if !namesKind(raw, ref.Kind) {
 			continue
 		}
 
-		if candidate.Kind != ref.Kind ||
-			candidate.Metadata.Name != ref.Name ||
+		var candidate repositoryDocument
+
+		if err := yaml.Unmarshal(raw, &candidate); err != nil {
+			return "", fmt.Errorf(
+				"resolving the chart repository of release %s: its sourceRef names %s %s/%s "+
+					"and %s names that kind and does not parse as one",
+				id, ref.Kind, ref.Namespace, ref.Name, name)
+		}
+
+		if candidate.Metadata.Name != ref.Name ||
 			candidate.Metadata.Namespace != ref.Namespace {
 			continue
 		}
@@ -215,6 +220,18 @@ func (c *Controller) readValues(root, valuesFile, id string) (map[string]any, er
 	}
 
 	return values, nil
+}
+
+func namesKind(raw []byte, kind string) bool {
+	var top map[string]any
+
+	if err := yaml.Unmarshal(raw, &top); err != nil {
+		return false
+	}
+
+	named, _ := top["kind"].(string)
+
+	return named == kind
 }
 
 func namesADocument(name string) bool {

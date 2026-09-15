@@ -97,6 +97,8 @@ func (r KubernetesRealizer) confirmAPIServer(declared, subject string) error {
 }
 
 func (r KubernetesRealizer) installRelease(declared HelmRelease, id string, opts Options) (Action, error) {
+	declared.Version = strings.TrimPrefix(declared.Version, "v")
+
 	text := "install release " + id + " from chart " + declared.Chart + " " + declared.Version
 
 	if opts.DryRun {
@@ -125,7 +127,7 @@ func keptRelease(live, declared HelmRelease, id string) (Action, error) {
 			id, live.Chart, declared.Chart)
 	}
 
-	if live.Version != declared.Version {
+	if live.Version != strings.TrimPrefix(declared.Version, "v") {
 		return Kept(fmt.Sprintf(
 			"kept release %s, the cluster holds chart %s %s and the declaration names %s",
 			id, live.Chart, live.Version, declared.Version)), nil
@@ -227,5 +229,5 @@ func declaredVersion(spec map[string]any, id string) (string, error) {
 			id, version)
 	}
 
-	return strings.TrimPrefix(version, "v"), nil
+	return version, nil
 }

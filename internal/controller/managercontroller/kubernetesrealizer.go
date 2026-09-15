@@ -6,7 +6,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -179,7 +180,7 @@ func declaredData(spec map[string]any, id string) (map[string]citypes.Secret, er
 
 	data := make(map[string]citypes.Secret, len(variables))
 
-	for _, key := range sortedStringKeys(variables) {
+	for _, key := range slices.Sorted(maps.Keys(variables)) {
 		if key == "" {
 			return nil, fmt.Errorf(
 				"reading the data of secret %s: spec.data holds a key with no name", id)
@@ -219,7 +220,7 @@ func secretBytes(data map[string]citypes.Secret) map[string][]byte {
 func hashOfData(data map[string]citypes.Secret) string {
 	joined := []byte{}
 
-	for _, key := range sortedDataKeys(data) {
+	for _, key := range slices.Sorted(maps.Keys(data)) {
 		value := data[key]
 
 		joined = append(joined, strconv.Itoa(len(key))...)
@@ -236,27 +237,5 @@ func hashOfData(data map[string]citypes.Secret) string {
 }
 
 func declaredKeys(data map[string]citypes.Secret) string {
-	return strings.Join(sortedDataKeys(data), ", ")
-}
-
-func sortedDataKeys(data map[string]citypes.Secret) []string {
-	keys := make([]string, 0, len(data))
-	for key := range data {
-		keys = append(keys, key)
-	}
-
-	sort.Strings(keys)
-
-	return keys
-}
-
-func sortedStringKeys(held map[string]string) []string {
-	keys := make([]string, 0, len(held))
-	for key := range held {
-		keys = append(keys, key)
-	}
-
-	sort.Strings(keys)
-
-	return keys
+	return strings.Join(slices.Sorted(maps.Keys(data)), ", ")
 }

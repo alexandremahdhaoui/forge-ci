@@ -28,6 +28,8 @@ const (
 	urllessRelease = "broken/urlless.helmrelease.yaml"
 	kustomization  = "broken/not-a-release.yaml"
 	incomplete     = "broken/incomplete.helmrelease.yaml"
+	bentRelease    = "malformed/bent.helmrelease.yaml"
+	bentRepository = "malformed/bent.helmrepository.yaml"
 )
 
 func onDisk() *clusterresourcecontroller.Controller {
@@ -294,6 +296,14 @@ func TestEveryMalformedSpecIsRefusedByName(t *testing.T) {
 			names: "urlless.helmrepository.yaml names no spec.url",
 		},
 		{
+			name: "a document carrying the referenced kind that does not parse as one is refused by its file",
+			spec: map[string]any{
+				"apiServer": theAPIServer,
+				"resources": []any{helmRelease(bentRelease, ciliumValues)},
+			},
+			names: "bent.helmrepository.yaml names that kind and does not parse as one",
+		},
+		{
 			name: "a values file the checkout does not hold is refused by its path",
 			spec: map[string]any{
 				"apiServer": theAPIServer,
@@ -463,6 +473,35 @@ func TestARefusalOverAValuesFileNeverCarriesALineOfIt(t *testing.T) {
 
 		assert.NotContains(t, err.Error(), trimmed)
 	}
+}
+
+func TestARefusalOverAMalformedRepositoryNeverCarriesALineOfIt(t *testing.T) {
+	t.Parallel()
+
+	raw, err := os.ReadFile(filepath.Join("testdata", filepath.FromSlash(bentRepository)))
+	require.NoError(t, err)
+
+	_, err = onDisk().Declare(declaring(helmRelease(bentRelease, ciliumValues)))
+
+	require.Error(t, err)
+
+	for _, line := range strings.Split(string(raw), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+
+		assert.NotContains(t, err.Error(), trimmed)
+	}
+}
+
+func TestAValuesFileAndAKustomizationBesideAReleaseArePassedOverAndTheRepositoryStillResolves(t *testing.T) {
+	t.Parallel()
+
+	out, err := onDisk().Declare(declaring(helmRelease(demoRelease, fluxValues)))
+	require.NoError(t, err)
+	require.Len(t, out.Resources, 1)
+	assert.Equal(t, "https://charts.example.test", out.Resources[0].Spec["repository"])
 }
 
 func TestADirectoryThatCannotBeListedRefusesTheReleaseByName(t *testing.T) {

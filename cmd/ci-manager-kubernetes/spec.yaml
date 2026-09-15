@@ -82,7 +82,9 @@ notes: |
   what a run installs is written in the declaration and nowhere else. The
   leading `v` is dropped before the version reaches the helm client and before
   it is compared to a live release, so a declaration of `v2.13.0` against a
-  cluster holding `2.13.0` answers Kept and names no drift.
+  cluster holding `2.13.0` answers Kept and names no drift. A drift text prints
+  the version the way the declaration wrote it, so an operator who wrote
+  `v2.13.0` reads `v2.13.0` back.
 
   The declaration is read first and the cluster is confirmed after. A declaration
   that fails any check above is refused before `spec.apiServer` is read against
