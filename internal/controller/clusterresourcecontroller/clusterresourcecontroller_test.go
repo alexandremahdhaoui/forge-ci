@@ -576,6 +576,44 @@ func TestARepositoryThatSortsBeforeAnUnreadableDocumentStillRefusesTheRelease(t 
 	assert.Contains(t, err.Error(), "permission denied")
 }
 
+func TestAMalformedDocumentCarryingTheReferencedKindRefusesWhereverItsNameFalls(t *testing.T) {
+	t.Parallel()
+
+	dir := filepath.Join("testdata", "platform", "cilium")
+
+	release, err := os.ReadFile(filepath.Join(dir, "helmrelease.yaml"))
+	require.NoError(t, err)
+
+	repository, err := os.ReadFile(filepath.Join(dir, "helmrepository.yaml"))
+	require.NoError(t, err)
+
+	bent, err := os.ReadFile(filepath.Join("testdata", filepath.FromSlash(bentRepository)))
+	require.NoError(t, err)
+
+	for _, listed := range [][]string{
+		{"helmrepository.yaml", "zz-bent.yaml"},
+		{"aa-bent.yaml", "helmrepository.yaml"},
+	} {
+		fs := fsadaptermock.NewMockFS(t)
+		fs.EXPECT().ReadFile(filepath.Join(dir, "helmrelease.yaml")).Return(release, nil)
+		fs.EXPECT().List(dir).Return(listed, nil)
+		fs.EXPECT().ReadFile(filepath.Join(dir, "helmrepository.yaml")).Return(repository, nil)
+
+		for _, name := range listed {
+			if strings.HasSuffix(name, "bent.yaml") {
+				fs.EXPECT().ReadFile(filepath.Join(dir, name)).Return(bent, nil)
+			}
+		}
+
+		_, err = clusterresourcecontroller.New(fs).
+			Declare(declaring(helmRelease(ciliumRelease, ciliumValues)))
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "resolving the chart repository of release kube-system/cilium")
+		assert.Contains(t, err.Error(), "bent.yaml names that kind and does not parse as one")
+	}
+}
+
 func TestASubdirectoryNamedLikeADocumentBesideAReleaseIsNoDocument(t *testing.T) {
 	t.Parallel()
 

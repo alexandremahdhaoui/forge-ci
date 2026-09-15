@@ -151,7 +151,7 @@ func (c *Controller) resolveRepository(
 		return "", fmt.Errorf("resolving the chart repository of release %s: %w", id, err)
 	}
 
-	matched, url := "", ""
+	matched, url, malformed := "", "", ""
 
 	for _, name := range names {
 		if !namesADocument(name) {
@@ -166,10 +166,6 @@ func (c *Controller) resolveRepository(
 				id, ref.Kind, ref.Namespace, ref.Name, name, releaseFile, err)
 		}
 
-		if matched != "" {
-			continue
-		}
-
 		if !namesKind(raw, ref.Kind) {
 			continue
 		}
@@ -177,10 +173,11 @@ func (c *Controller) resolveRepository(
 		var candidate repositoryDocument
 
 		if err := yaml.Unmarshal(raw, &candidate); err != nil {
-			return "", fmt.Errorf(
-				"resolving the chart repository of release %s: its sourceRef names %s %s/%s "+
-					"and %s names that kind and does not parse as one",
-				id, ref.Kind, ref.Namespace, ref.Name, name)
+			if malformed == "" {
+				malformed = name
+			}
+
+			continue
 		}
 
 		if candidate.Metadata.Name != ref.Name ||
@@ -188,7 +185,16 @@ func (c *Controller) resolveRepository(
 			continue
 		}
 
-		matched, url = name, candidate.Spec.URL
+		if matched == "" {
+			matched, url = name, candidate.Spec.URL
+		}
+	}
+
+	if malformed != "" {
+		return "", fmt.Errorf(
+			"resolving the chart repository of release %s: its sourceRef names %s %s/%s "+
+				"and %s names that kind and does not parse as one",
+			id, ref.Kind, ref.Namespace, ref.Name, malformed)
 	}
 
 	if matched == "" {

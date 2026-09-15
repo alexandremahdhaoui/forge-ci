@@ -216,3 +216,47 @@ func TestAStoredReleaseCarryingNoChartRefusesNamingTheRelease(t *testing.T) {
 		"reading the chart of release "+theNamespace+"/"+theName+
 			": the stored release carries no chart")
 }
+
+func TestAStoredChartCarryingNoMetadataRefusesByNameInsteadOfPanicking(t *testing.T) {
+	_, err := describe(liveRelease(&chartv2.Chart{}, common.StatusDeployed), theNamespace, theName)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(),
+		"reading the chart of release "+theNamespace+"/"+theName+
+			": the stored chart carries no name in its metadata")
+}
+
+func TestAStoredReleaseCarryingNoInfoRefusesByNameInsteadOfPanicking(t *testing.T) {
+	_, err := describe(&releasev1.Release{
+		Name:      theName,
+		Namespace: theNamespace,
+		Version:   1,
+		Chart:     &chartv2.Chart{Metadata: &chartv2.Metadata{Name: theChart, Version: theVersion}},
+	}, theNamespace, theName)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(),
+		"reading the status of release "+theNamespace+"/"+theName+
+			": the stored release carries no status")
+}
+
+func TestAReleasesClientNewNeverBuiltRefusesToReadByNameInsteadOfPanicking(t *testing.T) {
+	_, found, err := Releases{}.Release(context.Background(), theNamespace, theName)
+
+	require.Error(t, err)
+	require.False(t, found)
+	require.Contains(t, err.Error(),
+		"opening helm storage in namespace "+theNamespace+
+			": this helm client was never built by New")
+}
+
+func TestAReleasesClientNewNeverBuiltRefusesToInstallByNameInsteadOfPanicking(t *testing.T) {
+	err := Releases{}.InstallRelease(context.Background(), citypes.HelmRelease{
+		Namespace: theNamespace, Name: theName, Chart: theChart, Version: theVersion,
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(),
+		"opening helm storage in namespace "+theNamespace+
+			": this helm client was never built by New")
+}

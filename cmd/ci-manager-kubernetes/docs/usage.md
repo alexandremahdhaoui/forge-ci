@@ -133,12 +133,19 @@ A dry run reads the live release exactly as a real run does and answers Kept,
 with the text beginning `would install` when nothing is there. It writes
 nothing.
 
-The helm client is not wired yet. Until it is, a `helm-release` resource that
-passes every check above is an error saying this manager carries no helm client
-yet.
+The helm client is the helm go sdk. It reads one release from helm storage in
+the namespace and installs one there.
 
 ## the cluster
 
 The cluster it reaches comes from the standard client configuration
 resolution, so `KUBECONFIG`, the user's default configuration file and an
 in-cluster service account each work with nothing declared here.
+
+An install waits for the release to come up and gives up after ten minutes,
+so one reconcile blocks that long at most for each release it installs. The
+wait and its limit are fixed and nothing declares them.
+
+`HELM_DRIVER` is helm's own environment variable and it picks where helm
+keeps its release records. The manager reads it and hands it to helm
+unchanged. An unset variable leaves helm on its own default.
