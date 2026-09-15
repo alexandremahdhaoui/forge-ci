@@ -61,7 +61,7 @@ func TestAReleaseTakesItsChartVersionAndRepositoryFromTheDocumentsInGitopsAndNev
 	assert.Equal(t, "helm-release", resource.Kind)
 	assert.Equal(t, "kube-system/cilium", resource.Name)
 	assert.Equal(t, "kube-system", resource.Spec["namespace"])
-	assert.Equal(t, "cilium", resource.Spec["release"])
+	assert.Equal(t, "cilium", resource.Spec["name"])
 	assert.Equal(t, "cilium", resource.Spec["chart"])
 	assert.Equal(t, "1.20.1", resource.Spec["version"])
 	assert.Equal(t, "https://helm.cilium.io", resource.Spec["repository"])
@@ -486,7 +486,7 @@ func TestADirectoryThatCannotBeListedRefusesTheReleaseByName(t *testing.T) {
 	assert.Contains(t, err.Error(), "resolving the chart repository of release kube-system/cilium")
 }
 
-func TestADocumentThatCannotBeReadIsPassedOverAndTheNextOneResolvesTheSourceReference(t *testing.T) {
+func TestADocumentBesideTheReleaseThatCannotBeReadRefusesByItsNameAndTheSourceReference(t *testing.T) {
 	t.Parallel()
 
 	dir := filepath.Join("testdata", "platform", "cilium")
@@ -494,24 +494,20 @@ func TestADocumentThatCannotBeReadIsPassedOverAndTheNextOneResolvesTheSourceRefe
 	release, err := os.ReadFile(filepath.Join(dir, "helmrelease.yaml"))
 	require.NoError(t, err)
 
-	repository, err := os.ReadFile(filepath.Join(dir, "helmrepository.yaml"))
-	require.NoError(t, err)
-
-	values, err := os.ReadFile(filepath.Join(dir, "values.yaml"))
-	require.NoError(t, err)
-
 	fs := fsadaptermock.NewMockFS(t)
 	fs.EXPECT().ReadFile(filepath.Join(dir, "helmrelease.yaml")).Return(release, nil)
 	fs.EXPECT().List(dir).Return([]string{"ghost.yaml", "notes.txt", "helmrepository.yaml"}, nil)
-	fs.EXPECT().ReadFile(filepath.Join(dir, "ghost.yaml")).Return(nil, errors.New("no such file"))
-	fs.EXPECT().ReadFile(filepath.Join(dir, "helmrepository.yaml")).Return(repository, nil)
-	fs.EXPECT().ReadFile(filepath.Join(dir, "values.yaml")).Return(values, nil)
+	fs.EXPECT().ReadFile(filepath.Join(dir, "ghost.yaml")).
+		Return(nil, errors.New("permission denied"))
 
-	out, err := clusterresourcecontroller.New(fs).
+	_, err = clusterresourcecontroller.New(fs).
 		Declare(declaring(helmRelease(ciliumRelease, ciliumValues)))
 
-	require.NoError(t, err)
-	assert.Equal(t, "https://helm.cilium.io", out.Resources[0].Spec["repository"])
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "resolving the chart repository of release kube-system/cilium")
+	assert.Contains(t, err.Error(), "sourceRef names HelmRepository kube-system/cilium")
+	assert.Contains(t, err.Error(), "ghost.yaml")
+	assert.Contains(t, err.Error(), "permission denied")
 }
 
 func TestThePublishToolRefusesByNameAndPublishesNothing(t *testing.T) {

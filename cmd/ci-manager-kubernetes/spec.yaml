@@ -12,7 +12,7 @@ tools:
     does: Converge every declared secret and helm release, and return who owns it.
 example:
   tool: reconcile
-  input: '{"manager":"kubernetes","resources":[{"kind":"secret","name":"flux-deploy-key","spec":{"namespace":"flux-system","name":"flux-deploy-key","data":{"identity":"FLUX_DEPLOY_KEY"}}}]}'
+  input: '{"manager":"kubernetes","resources":[{"kind":"secret","name":"flux-deploy-key","spec":{"apiServer":"https://10.0.0.1:6443","namespace":"flux-system","name":"flux-deploy-key","data":{"identity":"FLUX_DEPLOY_KEY"}}}]}'
 notes: |
   It knows two kinds, `secret` and `helm-release`, and it refuses any other by
   name.
@@ -24,7 +24,13 @@ notes: |
   in the cluster. `spec.data` maps each key of the secret to the name of the
   environment variable holding its value, never to the value itself, so a
   declaration is safe to commit and the values enter through the environment of
-  one run.
+  one run. `spec.apiServer` is the API server the declaration expects.
+
+  The declaration is read first and the cluster is confirmed after. A
+  declaration that fails any check above is refused before `spec.apiServer` is
+  read against the live cluster. A cluster that is not the one `spec.apiServer`
+  names is an error carrying both, so a deploy key is never written into the
+  wrong cluster.
 
   A key whose variable is unset or empty is an error naming the secret and the
   key. It never names the variable, because a person who pastes a value into
@@ -62,7 +68,7 @@ notes: |
 
   ## helm-release
 
-  `spec.namespace` and `spec.release` are the namespace and the release name in
+  `spec.namespace` and `spec.name` are the namespace and the release name in
   the cluster. `spec.chart`, `spec.repository` and `spec.version` name the chart
   to install. `spec.values` is an optional map handed to the chart.
   `spec.createNamespace` is an optional bool. `spec.apiServer` is the API server
@@ -71,9 +77,12 @@ notes: |
 
   `spec.repository` is refused by name unless it starts with `oci://` or
   `https://`. `spec.version` is one exact chart version written as
-  `major.minor.patch` with no leading `v`, so `2.13.0` is taken and `v2.13.0` is
-  refused by name. A range such as `^2.13.0` or `2.13.x` is refused the same way,
-  so what a run installs is written in the declaration and nowhere else.
+  `major.minor.patch` with an optional leading `v`, so `2.13.0` and `v2.13.0`
+  are both taken. A range such as `^2.13.0` or `2.13.x` is refused by name, so
+  what a run installs is written in the declaration and nowhere else. The
+  leading `v` is dropped before the version reaches the helm client and before
+  it is compared to a live release, so a declaration of `v2.13.0` against a
+  cluster holding `2.13.0` answers Kept and names no drift.
 
   The declaration is read first and the cluster is confirmed after. A declaration
   that fails any check above is refused before `spec.apiServer` is read against

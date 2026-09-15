@@ -16,7 +16,7 @@ const (
 )
 
 var (
-	exactChartVersion = regexp.MustCompile(`^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)` +
+	exactChartVersion = regexp.MustCompile(`^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)` +
 		`(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$`)
 
 	chartRepositorySchemes = []string{"oci://", "https://"}
@@ -51,7 +51,7 @@ func (r KubernetesRealizer) realizeHelmRelease(res citypes.Resource, opts Option
 		return Action{}, err
 	}
 
-	if err := r.confirmAPIServer(apiServer, id); err != nil {
+	if err := r.confirmAPIServer(apiServer, "release "+id); err != nil {
 		return Action{}, err
 	}
 
@@ -71,26 +71,26 @@ func (r KubernetesRealizer) realizeHelmRelease(res citypes.Resource, opts Option
 	return keptRelease(live, declared, id)
 }
 
-func (r KubernetesRealizer) confirmAPIServer(declared, id string) error {
+func (r KubernetesRealizer) confirmAPIServer(declared, subject string) error {
 	if declared == "" {
-		return fmt.Errorf("reading release %s: spec.apiServer is required", id)
+		return fmt.Errorf("reading %s: spec.apiServer is required", subject)
 	}
 
 	if r.cluster == nil {
 		return fmt.Errorf(
-			"reading the api server holding release %s: this manager carries no cluster client yet", id)
+			"reading the api server holding %s: this manager carries no cluster client yet", subject)
 	}
 
 	live := r.cluster.APIServer()
 	if live == "" {
 		return fmt.Errorf(
-			"reading the api server holding release %s: the cluster client names no api server", id)
+			"reading the api server holding %s: the cluster client names no api server", subject)
 	}
 
 	if live != declared {
 		return fmt.Errorf(
-			"reading the api server holding release %s: spec.apiServer names %q and the live cluster is %q",
-			id, declared, live)
+			"reading the api server holding %s: spec.apiServer names %q and the live cluster is %q",
+			subject, declared, live)
 	}
 
 	return nil
@@ -140,7 +140,7 @@ func declaredRelease(spec map[string]any) (HelmRelease, error) {
 		return HelmRelease{}, err
 	}
 
-	name, err := citypes.SpecString(spec, "release")
+	name, err := citypes.SpecString(spec, "name")
 	if err != nil {
 		return HelmRelease{}, err
 	}
@@ -152,7 +152,7 @@ func declaredRelease(spec map[string]any) (HelmRelease, error) {
 
 	if namespace == "" || name == "" || chart == "" {
 		return HelmRelease{}, fmt.Errorf(
-			"reading release %s/%s: spec.namespace, spec.release and spec.chart are required",
+			"reading release %s/%s: spec.namespace, spec.name and spec.chart are required",
 			namespace, name)
 	}
 
@@ -223,9 +223,9 @@ func declaredVersion(spec map[string]any, id string) (string, error) {
 	if !exactChartVersion.MatchString(version) {
 		return "", fmt.Errorf(
 			"reading release %s: spec.version is %q, and one exact chart version written as "+
-				"major.minor.patch with no leading v is required, such as 2.13.0",
+				"major.minor.patch with an optional leading v is required, such as 2.13.0 or v2.13.0",
 			id, version)
 	}
 
-	return version, nil
+	return strings.TrimPrefix(version, "v"), nil
 }

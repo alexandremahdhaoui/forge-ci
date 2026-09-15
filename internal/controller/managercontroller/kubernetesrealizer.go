@@ -84,8 +84,13 @@ func (r KubernetesRealizer) realizeSecret(res citypes.Resource, opts Options) (A
 
 	hash := hashOfData(data)
 
-	if r.cluster == nil {
-		return Action{}, fmt.Errorf("reading secret %s: this manager carries no cluster client yet", id)
+	apiServer, err := citypes.SpecString(res.Spec, "apiServer")
+	if err != nil {
+		return Action{}, err
+	}
+
+	if err := r.confirmAPIServer(apiServer, "secret "+id); err != nil {
+		return Action{}, err
 	}
 
 	live, found, err := r.cluster.Secret(r.ctx, namespace, name)

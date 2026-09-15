@@ -41,6 +41,7 @@ func kubernetesRealizer(t *testing.T) (managercontroller.KubernetesRealizer, *ma
 	t.Helper()
 
 	cluster := managercontrollermock.NewMockKubernetes(t)
+	cluster.EXPECT().APIServer().Return(theAPIServer)
 
 	return managercontroller.NewKubernetesRealizer(t.Context(), cluster, nil), cluster
 }
@@ -53,6 +54,7 @@ func declaredSecret(data map[string]any) citypes.Resource {
 			"namespace": theNamespace,
 			"name":      theSecretName,
 			"data":      data,
+			"apiServer": theAPIServer,
 		},
 	}
 }
@@ -301,7 +303,56 @@ func TestTheKubernetesRealizerRefusesToWorkWithNoClusterBehindIt(t *testing.T) {
 	_, err := r.Realize(oneKey(t, "a key"), plain)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(),
-		"reading secret "+theSecretID+": this manager carries no cluster client yet")
+		"reading the api server holding secret "+theSecretID+
+			": this manager carries no cluster client yet")
+}
+
+func TestASecretIsRefusedWhenTheLiveClusterIsNotTheOneTheDeclarationNames(t *testing.T) {
+	cluster := managercontrollermock.NewMockKubernetes(t)
+	cluster.EXPECT().APIServer().Return(anotherAPIServer)
+
+	r := managercontroller.NewKubernetesRealizer(t.Context(), cluster, nil)
+
+	_, err := r.Realize(oneKey(t, "a key"), plain)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "reading the api server holding secret "+theSecretID)
+	assert.Contains(t, err.Error(), theAPIServer)
+	assert.Contains(t, err.Error(), anotherAPIServer)
+	cluster.AssertNotCalled(t, "Secret", mock.Anything, mock.Anything, mock.Anything)
+}
+
+func TestASecretDeclarationCarryingNoAPIServerIsRefusedByName(t *testing.T) {
+	r := managercontroller.NewKubernetesRealizer(t.Context(), nil, nil)
+
+	res := oneKey(t, "a key")
+	delete(res.Spec, "apiServer")
+
+	_, err := r.Realize(res, plain)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "reading secret "+theSecretID+": spec.apiServer is required")
+}
+
+func TestASecretAPIServerKeyThatIsNotAStringIsRefusedByName(t *testing.T) {
+	r := managercontroller.NewKubernetesRealizer(t.Context(), nil, nil)
+
+	res := oneKey(t, "a key")
+	res.Spec["apiServer"] = 7
+
+	_, err := r.Realize(res, plain)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "reading spec.apiServer: a string is required, the spec holds a int")
+}
+
+func TestAClusterClientThatNamesNoAPIServerRefusesASecretByName(t *testing.T) {
+	cluster := managercontrollermock.NewMockKubernetes(t)
+	cluster.EXPECT().APIServer().Return("")
+
+	r := managercontroller.NewKubernetesRealizer(t.Context(), cluster, nil)
+
+	_, err := r.Realize(oneKey(t, "a key"), plain)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "reading the api server holding secret "+theSecretID+
+		": the cluster client names no api server")
 }
 
 func TestTheKubernetesRealizerReportsTheSecretItCouldNotRead(t *testing.T) {

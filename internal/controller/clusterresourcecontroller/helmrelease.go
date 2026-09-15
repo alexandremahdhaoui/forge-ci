@@ -87,7 +87,7 @@ func (c *Controller) helmRelease(
 		Spec: map[string]any{
 			"apiServer":       apiServer,
 			"namespace":       document.Metadata.Namespace,
-			"release":         document.Metadata.Name,
+			"name":            document.Metadata.Name,
 			"chart":           document.Spec.Chart.Spec.Chart,
 			"version":         document.Spec.Chart.Spec.Version,
 			"repository":      repository,
@@ -159,7 +159,10 @@ func (c *Controller) resolveRepository(
 
 		raw, err := c.fs.ReadFile(filepath.Join(dir, name))
 		if err != nil {
-			continue
+			return "", fmt.Errorf(
+				"resolving the chart repository of release %s: its sourceRef names %s %s/%s "+
+					"and %s sits beside %s and cannot be read: %w",
+				id, ref.Kind, ref.Namespace, ref.Name, name, releaseFile, err)
 		}
 
 		var candidate repositoryDocument

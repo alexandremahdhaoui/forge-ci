@@ -45,7 +45,7 @@ func helmRealizer(t *testing.T) (
 func declaredReleaseWith(overrides map[string]any) citypes.Resource {
 	spec := map[string]any{
 		"namespace":  theNamespace,
-		"release":    theReleaseName,
+		"name":       theReleaseName,
 		"chart":      theChart,
 		"repository": theRepository,
 		"version":    theVersion,
@@ -362,22 +362,43 @@ func TestAVersionThatIsNotMajorMinorPatchIsRefusedByName(t *testing.T) {
 		_, err := r.Realize(declaredReleaseWith(map[string]any{"version": version}), plain)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(),
-			"one exact chart version written as major.minor.patch with no leading v is required, "+
-				"such as 2.13.0")
+			"one exact chart version written as major.minor.patch with an optional leading v "+
+				"is required, such as 2.13.0 or v2.13.0")
 	}
 }
 
-func TestAVPrefixedVersionIsRefusedForItsPrefixAndNeverForBeingARange(t *testing.T) {
+func TestAVPrefixedVersionIsExactAndIsAcceptedAgainstALiveReleaseThatDropsThePrefix(t *testing.T) {
 	t.Parallel()
 
-	r := managercontroller.NewKubernetesRealizer(t.Context(), nil, nil)
+	r, cluster, helm := helmRealizer(t)
 
-	_, err := r.Realize(declaredReleaseWith(map[string]any{"version": "v2.13.0"}), plain)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(),
-		`spec.version is "v2.13.0", and one exact chart version written as major.minor.patch `+
-			"with no leading v is required, such as 2.13.0")
-	assert.NotContains(t, err.Error(), "range")
+	cluster.EXPECT().APIServer().Return(theAPIServer)
+	helm.EXPECT().Release(mock.Anything, theNamespace, theReleaseName).
+		Return(liveRelease(theChart, theVersion, managercontroller.StatusDeployed), found, nil)
+
+	action, err := r.Realize(declaredReleaseWith(map[string]any{"version": "v" + theVersion}), plain)
+	require.NoError(t, err)
+	assert.False(t, action.Changed)
+	assert.Equal(t, "kept release "+theReleaseID, action.Text)
+}
+
+func TestAVPrefixedVersionReachesTheHelmClientWithoutItsPrefix(t *testing.T) {
+	t.Parallel()
+
+	r, cluster, helm := helmRealizer(t)
+
+	var written managercontroller.HelmRelease
+
+	cluster.EXPECT().APIServer().Return(theAPIServer)
+	helm.EXPECT().Release(mock.Anything, theNamespace, theReleaseName).
+		Return(managercontroller.HelmRelease{}, notFound, nil)
+	helm.EXPECT().InstallRelease(mock.Anything, mock.Anything).
+		Run(func(_ context.Context, release managercontroller.HelmRelease) { written = release }).
+		Return(nil)
+
+	_, err := r.Realize(declaredReleaseWith(map[string]any{"version": "v" + theVersion}), plain)
+	require.NoError(t, err)
+	assert.Equal(t, theVersion, written.Version)
 }
 
 func TestAPrereleaseChartVersionIsExactAndIsAccepted(t *testing.T) {
@@ -411,22 +432,22 @@ func TestADeclarationMissingTheNamespaceTheReleaseOrTheChartIsRefusedByName(t *t
 
 	r := managercontroller.NewKubernetesRealizer(t.Context(), nil, nil)
 
-	for _, key := range []string{"namespace", "release", "chart"} {
+	for _, key := range []string{"namespace", "name", "chart"} {
 		_, err := r.Realize(declaredReleaseWith(map[string]any{key: nil}), plain)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(),
-			"spec.namespace, spec.release and spec.chart are required")
+			"spec.namespace, spec.name and spec.chart are required")
 	}
 }
 
-func TestAReleaseKeyThatIsNotAStringIsRefusedByName(t *testing.T) {
+func TestAReleaseNameThatIsNotAStringIsRefusedByName(t *testing.T) {
 	t.Parallel()
 
 	r := managercontroller.NewKubernetesRealizer(t.Context(), nil, nil)
 
-	_, err := r.Realize(declaredReleaseWith(map[string]any{"release": 7}), plain)
+	_, err := r.Realize(declaredReleaseWith(map[string]any{"name": 7}), plain)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "reading spec.release: a string is required, the spec holds a int")
+	assert.Contains(t, err.Error(), "reading spec.name: a string is required, the spec holds a int")
 }
 
 func TestAValuesBlockThatIsNotAMapIsRefusedByName(t *testing.T) {

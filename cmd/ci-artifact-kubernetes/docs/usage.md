@@ -58,13 +58,18 @@ One entry declares one resource, and the resources come back in list order.
 
 A `helm-release` entry names two files under the pipeline root. The release
 document gives `metadata.namespace` as the resource's `namespace`,
-`metadata.name` as its `release`, `spec.chart.spec.chart` as its `chart` and
+`metadata.name` as its `name`, `spec.chart.spec.chart` as its `chart` and
 `spec.chart.spec.version` as its `version`. Its `spec.chart.spec.sourceRef`
 names a repository document by kind, name and namespace, and the engine
 resolves it against the documents sitting in the directory of the release
 file, taking that document's `spec.url` as the resource's `repository`. The
 values file becomes the resource's `values`. The resource is named
-`namespace/release`.
+`namespace/name`.
+
+`spec.valuesFrom` in the release document is read and not used. The values
+come from the `valuesFile` the pipeline names, which is the same file the
+kustomization beside the release generates that ConfigMap from, so the values
+are spelled once and Flux and this engine read one file.
 
 A `secret` entry is flat. It carries `namespace`, `name` and `data`, where
 each key of `data` names the environment variable holding that key's value.
@@ -72,13 +77,17 @@ The engine never reads a variable, so no value passes through it. The
 resource is named `namespace/name`.
 
 `spec.apiServer` sits once above the list and rides every resource. The
-manager confirms it on a `helm-release` and refuses a cluster that is not the
-one the pipeline named. It does not confirm it on a `secret`.
+manager confirms it on every kind and refuses a cluster that is not the one
+the pipeline named, so neither a release nor a deploy key reaches the wrong
+cluster.
 
 Every spec key is required except `createNamespace`, and an absent required
 key is refused by name. An unknown kind, a document that is not a release, a
 release file that cannot be read and a values file that cannot be read are
-each refused by name. Resolving a source reference passes over any document
-beside the release that cannot be read or parsed, and a reference that
-matches nothing is refused by name at the end. No refusal and no resource
-description ever prints the contents of a values file.
+each refused by name. Resolving a source reference refuses by name any
+document beside the release that cannot be read, naming the file and the
+reference, because a permission error is not a missing repository. It passes
+over a document that does not parse as a repository, because a values file or
+a kustomization sits beside a release and is neither. A reference that matches
+nothing is refused by name at the end. No refusal and no resource description
+ever prints the contents of a values file.
