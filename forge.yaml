@@ -327,6 +327,13 @@ test:
       packages: [./test/e2e/...]
       timeout: "15m"
 
+  - name: live
+    runner: forge://go-test
+    spec:
+      tags: [live]
+      packages: [./test/live/...]
+      timeout: "10m"
+
   - name: coverage
     runner: forge://generic-test-runner
     spec:
