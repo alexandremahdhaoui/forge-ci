@@ -173,6 +173,14 @@ refuses it by name.
 **apply must never delete the trigger or the seed.** Break that and a bad
 pipeline file leaves you back at the laptop.
 
+## The live stage
+
+`FORGE_CI_LIVE_CONFIG` is the input of the `live` stage. The stage reads the
+pipeline file that variable names and checks every declared resource against
+the real cluster. An unset value skips the stage by name rather than answering
+wrong. The variable stays ambient because a `go-test` stage that declares it
+under `spec.env` would clobber what the operator exported.
+
 ## Layout
 
 ```

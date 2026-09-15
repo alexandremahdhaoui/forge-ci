@@ -358,3 +358,34 @@ func TestASettleStagingNothingOfItsOwnIgnoresSomebodyElsesIndex(t *testing.T) {
 	assert.Contains(t, out(t, member, "diff", "--cached", "--name-only"), "half-finished.go",
 		"and the human's file is untouched, still staged")
 }
+
+func TestARunStopsOnlyForAPublishedChangeAndNeverForOneNobodyPublished(t *testing.T) {
+	res := []citypes.Resource{fileContent("member/.github/workflows/ci.yaml", "on: push\n")}
+
+	t.Run("a push delivers the change off this machine, so the run may stop superseded", func(t *testing.T) {
+		root, _, _ := workspace(t)
+
+		pushed, err := settling(t, root).Reconcile(citypes.ReconcileInput{Manager: "github", Resources: res})
+		require.NoError(t, err)
+		assert.True(t, pushed.Changed, "the file was missing, so this converged it")
+		assert.True(t, pushed.Published,
+			"the commit reached the remote, which is what re-fires the pipeline")
+	})
+
+	t.Run("a checkout with no remote publishes nothing, so nothing can re-fire the pipeline", func(t *testing.T) {
+		root := t.TempDir()
+		member := filepath.Join(root, "member")
+		require.NoError(t, os.MkdirAll(member, 0o750))
+
+		run(t, member, "init", "-q", "-b", "main")
+		require.NoError(t, os.WriteFile(filepath.Join(member, "README"), []byte("x\n"), 0o600))
+		run(t, member, "add", "README")
+		run(t, member, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "first")
+
+		unpushed, err := settling(t, root).Reconcile(citypes.ReconcileInput{Manager: "github", Resources: res})
+		require.NoError(t, err)
+		assert.True(t, unpushed.Changed, "the same file was converged and committed")
+		assert.False(t, unpushed.Published,
+			"nothing left this machine, and a run that stopped for it would strand the pipeline")
+	})
+}

@@ -301,34 +301,32 @@ func TestABootstrapOnlyResourceIsOwnedButNotRealizedByAnApply(t *testing.T) {
 	})
 }
 
-// One failing resource must not decide the fate of the ones after it.
-//
-// Realization stopped at the first error, so a reconcile's result depended on
-// declaration order: a 403 on a credential left every later resource
-// untouched, including files that cannot fail for a network reason. The
-// operator fixed one thing, re-ran, met the next, and the checkout stayed
-// stale throughout - which is indistinguishable from a generator that
-// produced nothing.
-func TestOneFailedResourceStillConvergesTheRest(t *testing.T) {
+func TestAReconcileAttemptsEveryResourceSoItsResultNeverDependsOnDeclarationOrder(t *testing.T) {
 	t.Parallel()
 
-	realizer := &countingRealizer{
-		fail: map[string]error{"actions-secret/o/r/A_TOKEN": errBoom},
-	}
+	tmp := t.TempDir()
 
-	_, err := managercontroller.New(realizer, fsadapter.New()).Reconcile(citypes.ReconcileInput{
-		Manager:   "m",
-		Bootstrap: true,
+	blocker := filepath.Join(tmp, "blocker")
+	require.NoError(t, os.WriteFile(blocker, []byte("not a directory"), 0o600))
+
+	later := filepath.Join(tmp, "after-the-failure.txt")
+
+	_, err := local(t).Reconcile(citypes.ReconcileInput{
+		Manager: "local",
 		Resources: []citypes.Resource{
-			{Kind: "file-content", Name: "first"},
-			{Kind: "actions-secret", Name: "o/r/A_TOKEN"},
-			{Kind: "file-content", Name: "after-the-failure"},
+			{Kind: "directory", Name: filepath.Join(blocker, "child")},
+			{Kind: "file", Name: later, Spec: map[string]any{"content": "converged anyway"}},
 		},
 	})
 
-	require.ErrorIs(t, err, errBoom)
-	require.Equal(t, []string{"first", "o/r/A_TOKEN", "after-the-failure"}, realizer.seen,
-		"every resource must be attempted, whatever happened to the ones before it")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "realizing directory/",
+		"the failure is still reported, so an operator sees it")
+
+	body, readErr := os.ReadFile(later)
+	require.NoError(t, readErr,
+		"a resource declared after a failure must still be realized")
+	require.Equal(t, "converged anyway", string(body))
 }
 
 // Two failures are two lines. Fixing one thing and re-running to discover the
