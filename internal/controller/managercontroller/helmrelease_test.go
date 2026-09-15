@@ -353,7 +353,7 @@ func TestADeclarationCarryingNoRepositoryIsRefusedByName(t *testing.T) {
 	assert.Contains(t, err.Error(), "spec.repository is required")
 }
 
-func TestAVersionRangeIsRefusedByName(t *testing.T) {
+func TestAVersionThatIsNotMajorMinorPatchIsRefusedByName(t *testing.T) {
 	t.Parallel()
 
 	r := managercontroller.NewKubernetesRealizer(t.Context(), nil, nil)
@@ -361,8 +361,23 @@ func TestAVersionRangeIsRefusedByName(t *testing.T) {
 	for _, version := range []string{"^2.13.0", "~2.13.0", "2.13.x", ">=2.13.0", "2.13"} {
 		_, err := r.Realize(declaredReleaseWith(map[string]any{"version": version}), plain)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "one exact chart version is required, never a range")
+		assert.Contains(t, err.Error(),
+			"one exact chart version written as major.minor.patch with no leading v is required, "+
+				"such as 2.13.0")
 	}
+}
+
+func TestAVPrefixedVersionIsRefusedForItsPrefixAndNeverForBeingARange(t *testing.T) {
+	t.Parallel()
+
+	r := managercontroller.NewKubernetesRealizer(t.Context(), nil, nil)
+
+	_, err := r.Realize(declaredReleaseWith(map[string]any{"version": "v2.13.0"}), plain)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(),
+		`spec.version is "v2.13.0", and one exact chart version written as major.minor.patch `+
+			"with no leading v is required, such as 2.13.0")
+	assert.NotContains(t, err.Error(), "range")
 }
 
 func TestAPrereleaseChartVersionIsExactAndIsAccepted(t *testing.T) {

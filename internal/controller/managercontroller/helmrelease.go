@@ -222,8 +222,8 @@ func declaredVersion(spec map[string]any, id string) (string, error) {
 
 	if !exactChartVersion.MatchString(version) {
 		return "", fmt.Errorf(
-			"reading release %s: spec.version is %q, and one exact chart version is required, "+
-				"never a range",
+			"reading release %s: spec.version is %q, and one exact chart version written as "+
+				"major.minor.patch with no leading v is required, such as 2.13.0",
 			id, version)
 	}
 

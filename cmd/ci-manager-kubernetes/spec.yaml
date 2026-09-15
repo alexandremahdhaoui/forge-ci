@@ -70,14 +70,16 @@ notes: |
   is an error naming the key.
 
   `spec.repository` is refused by name unless it starts with `oci://` or
-  `https://`. `spec.version` is one exact chart version. A range such as
-  `^2.13.0` or `2.13.x` is refused by name, so what a run installs is written in
-  the declaration and nowhere else.
+  `https://`. `spec.version` is one exact chart version written as
+  `major.minor.patch` with no leading `v`, so `2.13.0` is taken and `v2.13.0` is
+  refused by name. A range such as `^2.13.0` or `2.13.x` is refused the same way,
+  so what a run installs is written in the declaration and nowhere else.
 
-  `spec.apiServer` is read against the live cluster before anything else, and a
-  cluster that is not the one it names is an error carrying both. A declaration
-  therefore says which cluster it belongs to, the same way a machine config names
-  its node.
+  The declaration is read first and the cluster is confirmed after. A declaration
+  that fails any check above is refused before `spec.apiServer` is read against
+  the live cluster. A cluster that is not the one `spec.apiServer` names is an
+  error carrying both. A declaration therefore says which cluster it belongs to,
+  the same way a machine config names its node.
 
   Kept means the release exists and is healthy. It never means the release equals
   the declaration. A healthy release whose chart version differs answers Kept and
