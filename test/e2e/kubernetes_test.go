@@ -153,8 +153,8 @@ func TestADeclaredReleaseReachesTheKubernetesManagerAndTheManagerAsksHelmForIt(t
 	out, err := run(t, root, "forge-ci", "bootstrap", "--config", "forge-ci.yaml", "--root", root)
 
 	require.Error(t, err, out)
-	require.NotContains(t, out, "carries no helm client yet",
-		"the manager builds a real helm client, or this case proves nothing")
+	require.NotContains(t, out, "this helm client was never built by New",
+		"the manager carries a helm client New built, or this case proves nothing")
 	require.Contains(t, out,
 		"realizing helm-release/"+theReleaseNamespace+"/"+theReleaseName+
 			": installing release "+theReleaseNamespace+"/"+theReleaseName,

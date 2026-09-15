@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -10,15 +11,67 @@ import (
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 )
 
-func TestAReconcileDeclaringOnlySecretsNeverBuildsAHelmClientAndStillCarriesOne(t *testing.T) {
+const refusalOfAClientNeverBuiltByNew = "this helm client was never built by New"
+
+func TestOnlyAReconcileDeclaringAReleaseCarriesAHelmClientThatCanReachHelm(t *testing.T) {
 	t.Parallel()
 
-	releases, err := releaseClient([]Resource{{Kind: "secret", Name: "flux-deploy-key"}})
-	require.NoError(t, err)
+	for _, c := range []struct {
+		declaration string
+		resources   []Resource
+		refuses     bool
+	}{
+		{
+			declaration: "only secrets",
+			resources:   []Resource{{Kind: "secret", Name: "flux-deploy-key"}},
+			refuses:     true,
+		},
+		{
+			declaration: "only a release",
+			resources: []Resource{
+				{Kind: managercontroller.KindHelmRelease, Name: "flux"},
+			},
+			refuses: false,
+		},
+		{
+			declaration: "a secret and a release",
+			resources: []Resource{
+				{Kind: "secret", Name: "flux-deploy-key"},
+				{Kind: managercontroller.KindHelmRelease, Name: "flux"},
+			},
+			refuses: false,
+		},
+	} {
+		t.Run(c.declaration, func(t *testing.T) {
+			t.Parallel()
 
-	var port managercontroller.Helm = releases
+			releases, err := releaseClient(c.resources)
+			require.NoError(t, err)
 
-	assert.NotNil(t, port)
+			var port managercontroller.Helm = releases
+
+			err = port.InstallRelease(context.Background(), citypes.HelmRelease{
+				Namespace: "flux-system",
+				Name:      "flux",
+				Chart:     "flux2",
+				Version:   "2.0.0",
+			})
+			require.Error(t, err)
+
+			if c.refuses {
+				assert.ErrorContains(t, err, refusalOfAClientNeverBuiltByNew,
+					"a declaration holding no release carries a client New never built")
+
+				return
+			}
+
+			assert.NotContains(t, err.Error(), refusalOfAClientNeverBuiltByNew,
+				"a declaration holding a release carries a client New built")
+			assert.ErrorContains(t, err,
+				"locating chart flux2 2.0.0 for release flux-system/flux",
+				"the client opened helm storage and went on to look the chart up")
+		})
+	}
 }
 
 func TestEveryFieldOfAReconcileInputCrossesIntoTheController(t *testing.T) {
