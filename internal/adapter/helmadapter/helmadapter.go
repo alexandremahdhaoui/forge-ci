@@ -56,13 +56,18 @@ type Releases struct {
 }
 
 func New(storage, kubeconfigPath string) (Releases, error) {
+	if strings.TrimSpace(kubeconfigPath) == "" {
+		return Releases{}, errors.New(
+			"building the helm client: it was handed no kubeconfig file, " +
+				"and the cluster credential is declared. nothing ambient names the cluster")
+	}
+
 	client, err := registry.NewClient()
 	if err != nil {
 		return Releases{}, fmt.Errorf("building the chart registry client: %w", err)
 	}
 
-	settings := cli.New()
-	settings.KubeConfig = kubeconfigPath
+	settings := declaredCluster(kubeconfigPath)
 
 	return Releases{
 		settings: settings,
@@ -71,6 +76,22 @@ func New(storage, kubeconfigPath string) (Releases, error) {
 			return openStorage(settings, client, storage, namespace)
 		},
 	}, nil
+}
+
+func declaredCluster(kubeconfigPath string) *cli.EnvSettings {
+	settings := cli.New()
+
+	settings.KubeConfig = kubeconfigPath
+	settings.KubeContext = ""
+	settings.KubeToken = ""
+	settings.KubeAsUser = ""
+	settings.KubeAsGroups = nil
+	settings.KubeAPIServer = ""
+	settings.KubeCaFile = ""
+	settings.KubeTLSServerName = ""
+	settings.KubeInsecureSkipTLSVerify = false
+
+	return settings
 }
 
 func (r Releases) storage(namespace string) (*action.Configuration, error) {

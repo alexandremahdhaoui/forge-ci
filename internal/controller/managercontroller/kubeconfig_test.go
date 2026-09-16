@@ -164,7 +164,48 @@ func TestATalosKeyThatIsNotAStringIsRefusedByTheHelperThatReadsTheSpec(t *testin
 
 	_, err := managercontroller.Kubeconfig(talosSpec(map[string]any{"node": 7}))
 	require.Error(t, err)
-	assert.Equal(t, "reading spec.node: a string is required, the spec holds a int", err.Error())
+	assert.Equal(t,
+		"reading spec.kubeconfig.talos.node: a string is required, the spec holds a int", err.Error())
+}
+
+func TestAPathThatIsNotAStringIsRefusedNamingTheKeyTheSchemaDeclares(t *testing.T) {
+	t.Parallel()
+
+	_, err := managercontroller.Kubeconfig(
+		map[string]any{"kubeconfig": map[string]any{"path": 7}})
+	require.Error(t, err)
+	assert.Equal(t,
+		"reading spec.kubeconfig.path: a string is required, the spec holds a int", err.Error())
+}
+
+func TestATalosBlockThatIsNotAMapIsRefusedNamingTheKeyTheSchemaDeclares(t *testing.T) {
+	t.Parallel()
+
+	_, err := managercontroller.Kubeconfig(
+		map[string]any{"kubeconfig": map[string]any{"talos": "10.0.0.1"}})
+	require.Error(t, err)
+	assert.Equal(t,
+		"reading spec.kubeconfig.talos: a map is required, the spec holds a string", err.Error())
+}
+
+func TestAKindBlockThatIsNotAMapIsRefusedNamingTheKeyTheSchemaDeclares(t *testing.T) {
+	t.Parallel()
+
+	_, err := managercontroller.Kubeconfig(
+		map[string]any{"kubeconfig": map[string]any{"kind": theKindCluster}})
+	require.Error(t, err)
+	assert.Equal(t,
+		"reading spec.kubeconfig.kind: a map is required, the spec holds a string", err.Error())
+}
+
+func TestAKindClusterThatIsNotAStringIsRefusedNamingTheKeyTheSchemaDeclares(t *testing.T) {
+	t.Parallel()
+
+	_, err := managercontroller.Kubeconfig(
+		map[string]any{"kubeconfig": map[string]any{"kind": map[string]any{"cluster": 7}}})
+	require.Error(t, err)
+	assert.Equal(t,
+		"reading spec.kubeconfig.kind.cluster: a string is required, the spec holds a int", err.Error())
 }
 
 func TestAKindSourceNamingNoClusterIsRefusedByName(t *testing.T) {
@@ -235,7 +276,7 @@ func TestAKindDeclarationPicksTheAdapterThatAsksTheBinaryForThatCluster(t *testi
 func TestATalosDeclarationPicksTheNodeAndHandsItTheSecretTheDeclaredVariableHolds(t *testing.T) {
 	t.Setenv(theVariable, "/home/a-person/talosconfig")
 
-	talos := managercontrollermock.NewMockTalos(t)
+	talos := managercontrollermock.NewMockTalosKubeconfig(t)
 	talos.EXPECT().
 		Kubeconfig(context.Background(), theNode, theEndpoint,
 			citypes.Secret("/home/a-person/talosconfig")).
@@ -266,7 +307,7 @@ func TestATalosDeclarationWhoseVariableHoldsNothingIsRefusedNamingTheNodeAndTheV
 func TestANodeThatRefusesToHandBackAKubeconfigIsReportedAsAnErrorNamingTheNode(t *testing.T) {
 	t.Setenv(theVariable, "/home/a-person/talosconfig")
 
-	talos := managercontrollermock.NewMockTalos(t)
+	talos := managercontrollermock.NewMockTalosKubeconfig(t)
 	talos.EXPECT().
 		Kubeconfig(context.Background(), theNode, theEndpoint,
 			citypes.Secret("/home/a-person/talosconfig")).

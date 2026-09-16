@@ -49,6 +49,7 @@ packages:
       Helm:
       Kubernetes:
       Talos:
+      TalosKubeconfig:
       Terraform:
 
   github.com/alexandremahdhaoui/forge-ci/internal/controller/machineconfigcontroller:

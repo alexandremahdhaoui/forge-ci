@@ -24,6 +24,8 @@ const (
 	theName      = "cilium"
 	theChart     = "cilium"
 	theVersion   = "1.18.2"
+
+	theDeclaredServer = "https://127.0.0.1:1"
 )
 
 func hermetic(t *testing.T, storage string) Releases {
@@ -35,7 +37,7 @@ kind: Config
 clusters:
   - name: here
     cluster:
-      server: https://127.0.0.1:1
+      server: `+theDeclaredServer+`
 contexts:
   - name: here
     context:
@@ -47,6 +49,55 @@ current-context: here
 	require.NoError(t, err)
 
 	return releases
+}
+
+func TestAHelmClientHandedNoKubeconfigFileIsRefusedByNameInsteadOfReadingTheEnvironment(t *testing.T) {
+	for _, path := range []string{"", "   "} {
+		_, err := New(StorageMemory, path)
+
+		require.Error(t, err)
+		require.Equal(t,
+			"building the helm client: it was handed no kubeconfig file, "+
+				"and the cluster credential is declared. nothing ambient names the cluster",
+			err.Error())
+	}
+}
+
+func TestAnExportedHelmAPIServerNeverBeatsTheServerTheDeclaredKubeconfigNames(t *testing.T) {
+	t.Setenv("HELM_KUBEAPISERVER", "https://198.51.100.7:6443")
+
+	config, err := hermetic(t, StorageMemory).settings.RESTClientGetter().ToRESTConfig()
+
+	require.NoError(t, err)
+	require.Equal(t, theDeclaredServer, config.Host)
+}
+
+func TestAnExportedHelmKubeTokenNeverReachesTheClientTheDeclaredKubeconfigBuilds(t *testing.T) {
+	t.Setenv("HELM_KUBETOKEN", "a-token-nobody-declared")
+
+	config, err := hermetic(t, StorageMemory).settings.RESTClientGetter().ToRESTConfig()
+
+	require.NoError(t, err)
+	require.Empty(t, config.BearerToken)
+}
+
+func TestEveryAmbientClusterVariableHelmReadsIsClearedSoOnlyTheDeclaredFileIsObeyed(t *testing.T) {
+	t.Setenv("HELM_KUBECONTEXT", "a-context-nobody-declared")
+	t.Setenv("HELM_KUBEASUSER", "a-person-nobody-declared")
+	t.Setenv("HELM_KUBEASGROUPS", "a-group-nobody-declared")
+	t.Setenv("HELM_KUBECAFILE", "/a/ca/nobody/declared")
+	t.Setenv("HELM_KUBETLS_SERVER_NAME", "a-name-nobody-declared")
+	t.Setenv("HELM_KUBEINSECURE_SKIP_TLS_VERIFY", "true")
+
+	config, err := hermetic(t, StorageMemory).settings.RESTClientGetter().ToRESTConfig()
+
+	require.NoError(t, err)
+	require.Equal(t, theDeclaredServer, config.Host)
+	require.Empty(t, config.Impersonate.UserName)
+	require.Empty(t, config.Impersonate.Groups)
+	require.Empty(t, config.CAFile)
+	require.Empty(t, config.ServerName)
+	require.False(t, config.Insecure)
 }
 
 func liveRelease(chart *chartv2.Chart, status common.Status) *releasev1.Release {

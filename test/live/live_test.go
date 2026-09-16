@@ -251,10 +251,8 @@ func kubeconfigOfManager(
 func theCredential(t *testing.T, declared declaration) string {
 	t.Helper()
 
-	node, err := talosadapter.New(talosadapter.ApplyModeAuto)
-	require.NoError(t, err)
-
-	source, err := managercontroller.NewKubeconfigSource(declared.kubeconfig, node, execadapter.New())
+	source, err := managercontroller.NewKubeconfigSource(
+		declared.kubeconfig, talosadapter.NewKubeconfig(), execadapter.New())
 	require.NoError(t, err)
 
 	raw, err := source.Kubeconfig(t.Context())

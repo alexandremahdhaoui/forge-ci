@@ -56,7 +56,13 @@ func New(mode string) (Node, error) {
 	return Node{mode: chosen}, nil
 }
 
-func (n Node) Kubeconfig(
+type Credential struct{}
+
+func NewKubeconfig() Credential {
+	return Credential{}
+}
+
+func (Credential) Kubeconfig(
 	ctx context.Context, node, endpoint string, talosconfig citypes.Secret,
 ) ([]byte, error) {
 	held, err := clientConfiguration(talosconfig)

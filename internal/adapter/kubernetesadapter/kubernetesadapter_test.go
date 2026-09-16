@@ -39,6 +39,20 @@ func writeKubeconfig(t *testing.T, body string) string {
 	return path
 }
 
+func TestAClusterClientHandedNoKubeconfigFileIsRefusedByNameInsteadOfFallingBackInCluster(t *testing.T) {
+	t.Parallel()
+
+	for _, path := range []string{"", "   "} {
+		_, err := New(path)
+
+		require.Error(t, err)
+		assert.Equal(t,
+			"building the client of the cluster: it was handed no kubeconfig file, "+
+				"and the cluster credential is declared. nothing ambient names the cluster",
+			err.Error())
+	}
+}
+
 func TestTheClusterClientIsBuiltFromTheKubeconfigTheCallerNamesAndItsHostIsTheAPIServer(t *testing.T) {
 	t.Parallel()
 

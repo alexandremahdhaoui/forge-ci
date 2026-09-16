@@ -96,12 +96,8 @@ func releaseClient(
 func credentialAt(
 	ctx context.Context, dir string, declared managercontroller.DeclaredKubeconfig,
 ) (string, error) {
-	node, err := talosadapter.New(talosadapter.ApplyModeAuto)
-	if err != nil {
-		return "", err
-	}
-
-	source, err := managercontroller.NewKubeconfigSource(declared, node, execadapter.New())
+	source, err := managercontroller.NewKubeconfigSource(
+		declared, talosadapter.NewKubeconfig(), execadapter.New())
 	if err != nil {
 		return "", err
 	}

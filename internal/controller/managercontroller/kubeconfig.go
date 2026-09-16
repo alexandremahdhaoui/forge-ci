@@ -24,6 +24,8 @@ const (
 	endpointKey       = "endpoint"
 	talosconfigEnvKey = "talosconfigEnv"
 	clusterKey        = "cluster"
+
+	kubeconfigPath = "spec." + KubeconfigKey
 )
 
 var (
@@ -34,6 +36,10 @@ var (
 
 type KubeconfigSource interface {
 	Kubeconfig(ctx context.Context) ([]byte, error)
+}
+
+type TalosKubeconfig interface {
+	Kubeconfig(ctx context.Context, node, endpoint string, talosconfig citypes.Secret) ([]byte, error)
 }
 
 type DeclaredKubeconfig struct {
@@ -115,8 +121,38 @@ func eachSource() string {
 	return strings.Join(KubeconfigSources, " or ")
 }
 
+func declaredString(block map[string]any, prefix, key string) (string, error) {
+	value, declared := block[key]
+	if !declared || value == nil {
+		return "", nil
+	}
+
+	text, isString := value.(string)
+	if !isString {
+		return "", fmt.Errorf(
+			"reading %s.%s: a string is required, the spec holds a %T", prefix, key, value)
+	}
+
+	return text, nil
+}
+
+func declaredBlock(block map[string]any, prefix, key string) (map[string]any, error) {
+	value, declared := block[key]
+	if !declared || value == nil {
+		return nil, nil
+	}
+
+	held, isMap := value.(map[string]any)
+	if !isMap {
+		return nil, fmt.Errorf(
+			"reading %s.%s: a map is required, the spec holds a %T", prefix, key, value)
+	}
+
+	return held, nil
+}
+
 func declaredPath(held map[string]any) (DeclaredKubeconfig, error) {
-	path, err := citypes.SpecString(held, SourcePath)
+	path, err := declaredString(held, kubeconfigPath, SourcePath)
 	if err != nil {
 		return DeclaredKubeconfig{}, err
 	}
@@ -130,7 +166,7 @@ func declaredPath(held map[string]any) (DeclaredKubeconfig, error) {
 }
 
 func declaredTalos(held map[string]any) (DeclaredKubeconfig, error) {
-	block, err := citypes.SpecMap(held, SourceTalos)
+	block, err := declaredBlock(held, kubeconfigPath, SourceTalos)
 	if err != nil {
 		return DeclaredKubeconfig{}, err
 	}
@@ -145,7 +181,7 @@ func declaredTalos(held map[string]any) (DeclaredKubeconfig, error) {
 	missing := make([]string, 0, len(talosKeys))
 
 	for _, key := range talosKeys {
-		value, err := citypes.SpecString(block, key)
+		value, err := declaredString(block, kubeconfigPath+"."+SourceTalos, key)
 		if err != nil {
 			return DeclaredKubeconfig{}, err
 		}
@@ -169,12 +205,12 @@ func declaredTalos(held map[string]any) (DeclaredKubeconfig, error) {
 }
 
 func declaredKind(held map[string]any) (DeclaredKubeconfig, error) {
-	block, err := citypes.SpecMap(held, SourceKind)
+	block, err := declaredBlock(held, kubeconfigPath, SourceKind)
 	if err != nil {
 		return DeclaredKubeconfig{}, err
 	}
 
-	cluster, err := citypes.SpecString(block, clusterKey)
+	cluster, err := declaredString(block, kubeconfigPath+"."+SourceKind, clusterKey)
 	if err != nil {
 		return DeclaredKubeconfig{}, err
 	}
@@ -188,7 +224,7 @@ func declaredKind(held map[string]any) (DeclaredKubeconfig, error) {
 }
 
 func NewKubeconfigSource(
-	declared DeclaredKubeconfig, talos Talos, runner execadapter.Runner,
+	declared DeclaredKubeconfig, talos TalosKubeconfig, runner execadapter.Runner,
 ) (KubeconfigSource, error) {
 	switch declared.Source {
 	case SourcePath:
@@ -210,7 +246,7 @@ func NewKubeconfigSource(
 }
 
 type talosKubeconfig struct {
-	talos          Talos
+	talos          TalosKubeconfig
 	node           string
 	endpoint       string
 	talosconfigEnv string

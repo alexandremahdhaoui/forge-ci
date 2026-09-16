@@ -19,7 +19,6 @@ const (
 )
 
 type Talos interface {
-	Kubeconfig(ctx context.Context, node, endpoint string, talosconfig citypes.Secret) ([]byte, error)
 	MachineConfig(ctx context.Context, node string, talosconfig citypes.Secret) (string, error)
 	ApplyMachineConfig(ctx context.Context, node string, talosconfig citypes.Secret, config string) error
 }

@@ -2,7 +2,9 @@ package kubernetesadapter
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -17,6 +19,12 @@ type Cluster struct {
 }
 
 func New(kubeconfigPath string) (Cluster, error) {
+	if strings.TrimSpace(kubeconfigPath) == "" {
+		return Cluster{}, errors.New(
+			"building the client of the cluster: it was handed no kubeconfig file, " +
+				"and the cluster credential is declared. nothing ambient names the cluster")
+	}
+
 	config, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
 	if err != nil {
 		return Cluster{}, fmt.Errorf("reading the client configuration of the cluster: %w", err)
