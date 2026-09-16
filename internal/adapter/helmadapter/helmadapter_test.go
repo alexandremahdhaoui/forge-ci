@@ -2,10 +2,12 @@ package helmadapter
 
 import (
 	"context"
+	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -217,6 +219,157 @@ func TestTheScratchDirectoryAChartIsFetchedIntoIsRemovedWhenTheInstallReturns(t 
 		"locating chart "+theChart+" "+theVersion+" for release "+theNamespace+"/"+theName)
 
 	left, err := os.ReadDir(temporary)
+
+	require.NoError(t, err)
+	require.Empty(t, left)
+}
+
+func indexing(t *testing.T) *httptest.Server {
+	t.Helper()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/index.yaml" {
+			http.Error(w, "only the index is served here", http.StatusNotFound)
+
+			return
+		}
+
+		_, _ = w.Write([]byte(`apiVersion: v1
+generated: "2026-01-01T00:00:00Z"
+entries:
+  ` + theChart + `:
+    - apiVersion: v2
+      name: ` + theChart + `
+      version: ` + theVersion + `
+      urls:
+        - ` + theChart + `-` + theVersion + `.tgz
+`))
+	}))
+
+	t.Cleanup(server.Close)
+
+	return server
+}
+
+func installing(t *testing.T, repositoryURL string) error {
+	t.Helper()
+
+	return hermetic(t, StorageMemory).InstallRelease(context.Background(), citypes.HelmRelease{
+		Namespace:  theNamespace,
+		Name:       theName,
+		Chart:      theChart,
+		Version:    theVersion,
+		Repository: repositoryURL,
+	})
+}
+
+func plantedCredentialStore(t *testing.T) string {
+	t.Helper()
+
+	ran := filepath.Join(t.TempDir(), "the-helper-ran")
+	helpers := t.TempDir()
+
+	require.NoError(t, os.WriteFile(
+		filepath.Join(helpers, "docker-credential-planted"),
+		[]byte("#!/bin/sh\ntouch "+ran+"\nprintf '{\"Username\":\"planted\",\"Secret\":\"planted\"}'\n"),
+		0o755))
+
+	t.Setenv("PATH", helpers+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	config := t.TempDir()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(config, "config.json"), []byte(`{"credsStore":"planted"}`), 0o600))
+
+	t.Setenv("DOCKER_CONFIG", config)
+
+	return ran
+}
+
+func TestAPlantedDockerCredentialStoreRunsNoHelperWhenAPrivateChartRegistryDemandsACredential(t *testing.T) {
+	ran := plantedCredentialStore(t)
+
+	carried := make(chan string, 8)
+
+	private := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		carried <- r.Header.Get("Authorization")
+		w.Header().Set("Www-Authenticate", `Basic realm="planted"`)
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer private.Close()
+
+	trusted := filepath.Join(t.TempDir(), "trusted.pem")
+	require.NoError(t, os.WriteFile(trusted, pem.EncodeToMemory(&pem.Block{
+		Type: "CERTIFICATE", Bytes: private.Certificate().Raw,
+	}), 0o600))
+	t.Setenv("SSL_CERT_FILE", trusted)
+
+	err := installing(t, "oci://"+strings.TrimPrefix(private.URL, "https://")+"/charts")
+
+	require.Error(t, err)
+	require.NoFileExists(t, ran)
+
+	close(carried)
+
+	reached := 0
+
+	for header := range carried {
+		reached++
+
+		require.Empty(t, header)
+	}
+
+	require.Positive(t, reached)
+}
+
+func TestAMalformedCredentialsFileAnExportedHelmConfigHomeNamesNeverStopsAChartFromBeingFetched(t *testing.T) {
+	planted := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(planted, "registry"), 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(planted, "registry", "config.json"), []byte("not json at all"), 0o600))
+
+	t.Setenv("HELM_CONFIG_HOME", planted)
+
+	err := installing(t, indexing(t).URL)
+
+	require.Error(t, err)
+	require.NotContains(t, err.Error(), "building the chart registry client")
+}
+
+func TestAMalformedCredentialsFileAnExportedXDGConfigHomeNamesNeverStopsAChartFromBeingFetched(t *testing.T) {
+	planted := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(planted, "helm", "registry"), 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(planted, "helm", "registry", "config.json"), []byte("not json at all"), 0o600))
+
+	t.Setenv("HELM_CONFIG_HOME", "")
+	t.Setenv("XDG_CONFIG_HOME", planted)
+
+	err := installing(t, indexing(t).URL)
+
+	require.Error(t, err)
+	require.NotContains(t, err.Error(), "building the chart registry client")
+}
+
+func TestAnExportedHelmCacheHomeNeverHoldsTheRepositoryIndexAChartIsFoundIn(t *testing.T) {
+	planted := t.TempDir()
+	t.Setenv("HELM_CACHE_HOME", planted)
+
+	require.Error(t, installing(t, indexing(t).URL))
+
+	left, err := os.ReadDir(planted)
+
+	require.NoError(t, err)
+	require.Empty(t, left)
+}
+
+func TestAnExportedXDGCacheHomeNeverHoldsTheRepositoryIndexAChartIsFoundIn(t *testing.T) {
+	planted := t.TempDir()
+	t.Setenv("HELM_CACHE_HOME", "")
+	t.Setenv("XDG_CACHE_HOME", planted)
+
+	require.Error(t, installing(t, indexing(t).URL))
+
+	left, err := os.ReadDir(planted)
 
 	require.NoError(t, err)
 	require.Empty(t, left)

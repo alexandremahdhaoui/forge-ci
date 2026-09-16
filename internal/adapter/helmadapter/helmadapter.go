@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -15,10 +16,13 @@ import (
 	"helm.sh/helm/v4/pkg/chart"
 	"helm.sh/helm/v4/pkg/chart/loader"
 	"helm.sh/helm/v4/pkg/cli"
+	"helm.sh/helm/v4/pkg/getter"
 	"helm.sh/helm/v4/pkg/kube"
 	"helm.sh/helm/v4/pkg/registry"
 	"helm.sh/helm/v4/pkg/release"
+	repo "helm.sh/helm/v4/pkg/repo/v1"
 	"helm.sh/helm/v4/pkg/storage/driver"
+	"oras.land/oras-go/v2/registry/remote/auth"
 
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 )
@@ -34,11 +38,12 @@ const (
 
 	releaseInfoField = "Info"
 
-	scratchRepositoryFile  = "repositories.yaml"
-	scratchRepositoryCache = "repository"
-	scratchContentCache    = "content"
-	scratchRegistryFile    = "registry.json"
-	scratchPlugins         = "plugins"
+	scratchRepositoryFile      = "repositories.yaml"
+	scratchRepositoryCache     = "repository"
+	scratchContentCache        = "content"
+	scratchRegistryFile        = "registry.json"
+	scratchRegistryCredentials = "registry-credentials.json"
+	scratchPlugins             = "plugins"
 )
 
 var Storages = []string{StorageSecrets, StorageMemory}
@@ -59,7 +64,6 @@ func Storage(declared string) (string, error) {
 
 type Releases struct {
 	kubeconfigPath string
-	registry       *registry.Client
 	open           func(namespace string) (*action.Configuration, error)
 }
 
@@ -70,18 +74,32 @@ func New(storage, kubeconfigPath string) (Releases, error) {
 				"and the cluster credential is declared. nothing ambient names the cluster")
 	}
 
-	client, err := registry.NewClient()
-	if err != nil {
-		return Releases{}, fmt.Errorf("building the chart registry client: %w", err)
-	}
-
 	return Releases{
 		kubeconfigPath: kubeconfigPath,
-		registry:       client,
 		open: func(namespace string) (*action.Configuration, error) {
-			return openStorage(kubeconfigPath, client, storage, namespace)
+			return openStorage(kubeconfigPath, storage, namespace)
 		},
 	}, nil
+}
+
+func declaredCredential() auth.Client {
+	return auth.Client{
+		Client: &http.Client{Transport: registry.NewTransport(false)},
+		Credential: func(context.Context, string) (auth.Credential, error) {
+			return auth.EmptyCredential, nil
+		},
+	}
+}
+
+func declaredRegistry(scratch string) (*registry.Client, error) {
+	client, err := registry.NewClient(
+		registry.ClientOptCredentialsFile(filepath.Join(scratch, scratchRegistryCredentials)),
+		registry.ClientOptAuthorizer(declaredCredential()))
+	if err != nil {
+		return nil, fmt.Errorf("building the chart registry client: %w", err)
+	}
+
+	return client, nil
 }
 
 func declaredCluster(kubeconfigPath, namespace string) *cli.EnvSettings {
@@ -162,6 +180,11 @@ func (r Releases) InstallRelease(ctx context.Context, declared citypes.HelmRelea
 
 	defer func() { _ = os.RemoveAll(scratch) }()
 
+	chartRegistry, err := declaredRegistry(scratch)
+	if err != nil {
+		return err
+	}
+
 	install := action.NewInstall(cfg)
 	install.Namespace = declared.Namespace
 	install.ReleaseName = declared.Name
@@ -169,13 +192,21 @@ func (r Releases) InstallRelease(ctx context.Context, declared citypes.HelmRelea
 	install.Version = declared.Version
 	install.WaitStrategy = kube.StatusWatcherStrategy
 	install.Timeout = installTimeout
-	install.SetRegistryClient(r.registry)
+	install.SetRegistryClient(chartRegistry)
+
+	settings := chartFetch(r.kubeconfigPath, declared.Namespace, scratch)
 
 	reference, repositoryURL := chartReference(declared)
-	install.RepoURL = repositoryURL
 
-	path, err := install.LocateChart(
-		reference, chartFetch(r.kubeconfigPath, declared.Namespace, scratch))
+	if repositoryURL != "" {
+		reference, err = indexedChartURL(repositoryURL, declared, settings)
+		if err != nil {
+			return fmt.Errorf("locating chart %s %s for release %s: %w",
+				declared.Chart, declared.Version, id, err)
+		}
+	}
+
+	path, err := install.LocateChart(reference, settings)
 	if err != nil {
 		return fmt.Errorf("locating chart %s %s for release %s: %w",
 			reference, declared.Version, id, err)
@@ -224,6 +255,42 @@ func fieldAbsent(held any, field string) (bool, error) {
 	return carried.Kind() == reflect.Pointer && carried.IsNil(), nil
 }
 
+func indexedChartURL(
+	repositoryURL string, declared citypes.HelmRelease, settings *cli.EnvSettings,
+) (string, error) {
+	repository, err := repo.NewChartRepository(
+		&repo.Entry{Name: declared.Chart, URL: repositoryURL}, getter.All(settings))
+	if err != nil {
+		return "", fmt.Errorf("reading repository %s: %w", repositoryURL, err)
+	}
+
+	repository.CachePath = settings.RepositoryCache
+
+	index, err := repository.DownloadIndexFile()
+	if err != nil {
+		return "", fmt.Errorf("fetching the index of repository %s: %w", repositoryURL, err)
+	}
+
+	listed, err := repo.LoadIndexFile(index)
+	if err != nil {
+		return "", fmt.Errorf("reading the index of repository %s: %w", repositoryURL, err)
+	}
+
+	found, err := listed.Get(declared.Chart, declared.Version)
+	if err != nil {
+		return "", fmt.Errorf("finding chart %s %s in the index of repository %s: %w",
+			declared.Chart, declared.Version, repositoryURL, err)
+	}
+
+	if len(found.URLs) == 0 {
+		return "", fmt.Errorf("finding chart %s %s in the index of repository %s: "+
+			"the index lists it with no download url",
+			declared.Chart, declared.Version, repositoryURL)
+	}
+
+	return repo.ResolveReferenceURL(repositoryURL, found.URLs[0])
+}
+
 func chartReference(declared citypes.HelmRelease) (reference, repositoryURL string) {
 	if registry.IsOCI(declared.Repository) {
 		return strings.TrimSuffix(declared.Repository, "/") + "/" + declared.Chart, ""
@@ -232,9 +299,7 @@ func chartReference(declared citypes.HelmRelease) (reference, repositoryURL stri
 	return declared.Chart, declared.Repository
 }
 
-func openStorage(
-	kubeconfigPath string, client *registry.Client, storage, namespace string,
-) (*action.Configuration, error) {
+func openStorage(kubeconfigPath, storage, namespace string) (*action.Configuration, error) {
 	settings := declaredCluster(kubeconfigPath, namespace)
 
 	cfg := new(action.Configuration)
@@ -242,8 +307,6 @@ func openStorage(
 	if err := cfg.Init(settings.RESTClientGetter(), namespace, storage); err != nil {
 		return nil, fmt.Errorf("opening helm storage in namespace %s: %w", namespace, err)
 	}
-
-	cfg.RegistryClient = client
 
 	return cfg, nil
 }
