@@ -174,9 +174,9 @@ repository cache, no repository file, no registry configuration and no
 downloader plugin named by an environment variable reaches that fetch, so no
 environment variable decides which bytes a chart is made of. An `https://`
 repository is read with no credential of any kind, so a private one over
-https is out of reach. An `oci://` repository is still read through the
-container credential store in the operator's home, which the declaration does
-not name.
+https is out of reach. The manager reads no credential store from the
+operator's home, so it reaches an `oci://` repository with no credential and a
+private one over oci is out of reach too.
 
 An install waits for the release to come up and gives up after ten minutes,
 so one reconcile blocks that long at most for each release it installs. The
