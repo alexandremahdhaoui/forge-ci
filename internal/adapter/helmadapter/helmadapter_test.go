@@ -3,6 +3,7 @@ package helmadapter
 import (
 	"context"
 	"encoding/pem"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,9 +13,12 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"helm.sh/helm/v4/pkg/action"
+	chartcommon "helm.sh/helm/v4/pkg/chart/common"
 	chartv2 "helm.sh/helm/v4/pkg/chart/v2"
+	chartutil "helm.sh/helm/v4/pkg/chart/v2/util"
 	"helm.sh/helm/v4/pkg/cli"
 	"helm.sh/helm/v4/pkg/kube"
+	kubefake "helm.sh/helm/v4/pkg/kube/fake"
 	"helm.sh/helm/v4/pkg/release/common"
 	releasev1 "helm.sh/helm/v4/pkg/release/v1"
 	"helm.sh/helm/v4/pkg/storage"
@@ -227,14 +231,15 @@ func TestTheScratchDirectoryAChartIsFetchedIntoIsRemovedWhenTheInstallReturns(t 
 func indexing(t *testing.T) *httptest.Server {
 	t.Helper()
 
+	archive, err := chartutil.Save(&chartv2.Chart{Metadata: &chartv2.Metadata{
+		APIVersion: chartv2.APIVersionV2, Name: theChart, Version: theVersion,
+	}}, t.TempDir())
+	require.NoError(t, err)
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/index.yaml" {
-			http.Error(w, "only the index is served here", http.StatusNotFound)
-
-			return
-		}
-
-		_, _ = w.Write([]byte(`apiVersion: v1
+		switch r.URL.Path {
+		case "/index.yaml":
+			_, _ = w.Write([]byte(`apiVersion: v1
 generated: "2026-01-01T00:00:00Z"
 entries:
   ` + theChart + `:
@@ -244,6 +249,11 @@ entries:
       urls:
         - ` + theChart + `-` + theVersion + `.tgz
 `))
+		case "/" + theChart + "-" + theVersion + ".tgz":
+			http.ServeFile(w, r, archive)
+		default:
+			http.Error(w, "only the index and the chart it lists are served here", http.StatusNotFound)
+		}
 	}))
 
 	t.Cleanup(server.Close)
@@ -397,8 +407,48 @@ func holding(t *testing.T, stored ...*releasev1.Release) Releases {
 	}
 
 	return Releases{open: func(string) (*action.Configuration, error) {
-		return &action.Configuration{Releases: store}, nil
+		return &action.Configuration{
+			Releases:     store,
+			KubeClient:   &kubefake.PrintingKubeClient{Out: io.Discard, LogOutput: io.Discard},
+			Capabilities: chartcommon.DefaultCapabilities,
+		}, nil
 	}}
+}
+
+func TestTheChartURLResolvedFromARepositoryIndexIsTheAbsoluteURLTheIndexListsUnderThatRepository(t *testing.T) {
+	repository := indexing(t)
+
+	resolved, err := indexedChartURL(
+		repository.URL,
+		citypes.HelmRelease{Chart: theChart, Version: theVersion},
+		chartFetchSettings(t, t.TempDir()))
+
+	require.NoError(t, err)
+	require.Equal(t, repository.URL+"/"+theChart+"-"+theVersion+".tgz", resolved)
+}
+
+func TestAChartTheRepositoryIndexPointsAtIsFetchedInstalledAndLeftDeployedInHelmStorage(t *testing.T) {
+	releases := holding(t)
+
+	require.NoError(t, releases.InstallRelease(context.Background(), citypes.HelmRelease{
+		Namespace:  theNamespace,
+		Name:       theName,
+		Chart:      theChart,
+		Version:    theVersion,
+		Repository: indexing(t).URL,
+	}))
+
+	described, found, err := releases.Release(context.Background(), theNamespace, theName)
+
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, citypes.HelmRelease{
+		Namespace: theNamespace,
+		Name:      theName,
+		Chart:     theChart,
+		Version:   theVersion,
+		Status:    common.StatusDeployed.String(),
+	}, described)
 }
 
 func TestAReleaseHelmStorageHoldsComesBackFoundAndDescribed(t *testing.T) {

@@ -209,7 +209,7 @@ func (r Releases) InstallRelease(ctx context.Context, declared citypes.HelmRelea
 	path, err := install.LocateChart(reference, settings)
 	if err != nil {
 		return fmt.Errorf("locating chart %s %s for release %s: %w",
-			reference, declared.Version, id, err)
+			declared.Chart, declared.Version, id, err)
 	}
 
 	chrt, err := loader.Load(path)
