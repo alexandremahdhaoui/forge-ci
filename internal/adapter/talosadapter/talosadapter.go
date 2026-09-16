@@ -56,6 +56,29 @@ func New(mode string) (Node, error) {
 	return Node{mode: chosen}, nil
 }
 
+func (n Node) Kubeconfig(
+	ctx context.Context, node, endpoint string, talosconfig citypes.Secret,
+) ([]byte, error) {
+	held, err := clientConfiguration(talosconfig)
+	if err != nil {
+		return nil, fmt.Errorf("dialing node %s through endpoint %s: %w", node, endpoint, err)
+	}
+
+	nodeClient, err := client.New(ctx, client.WithConfig(held), client.WithEndpoints(endpoint))
+	if err != nil {
+		return nil, fmt.Errorf("dialing node %s through endpoint %s: %w", node, endpoint, err)
+	}
+
+	defer func() { _ = nodeClient.Close() }()
+
+	raw, err := nodeClient.Kubeconfig(client.WithNode(ctx, node))
+	if err != nil {
+		return nil, fmt.Errorf("getting the kubeconfig of node %s: %w", node, err)
+	}
+
+	return raw, nil
+}
+
 func (n Node) MachineConfig(ctx context.Context, node string, talosconfig citypes.Secret) (string, error) {
 	nodeClient, err := n.dial(ctx, node, talosconfig)
 	if err != nil {

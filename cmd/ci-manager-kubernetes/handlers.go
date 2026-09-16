@@ -3,10 +3,14 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 
+	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/execadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/fsadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/helmadapter"
+	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/kubeconfigadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/kubernetesadapter"
+	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/talosadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/managercontroller"
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 )
@@ -16,9 +20,9 @@ func NewHandlers() Handlers {
 
 	return Handlers{
 		Reconcile: func(ctx context.Context, in ReconcileInput) (*ReconcileOutput, error) {
-			cluster, err := kubernetesadapter.New()
+			declared, err := managercontroller.Kubeconfig(in.Spec)
 			if err != nil {
-				return nil, fmt.Errorf("building the cluster client of manager %s: %w", in.Manager, err)
+				return nil, fmt.Errorf("reading the spec of manager %s: %w", in.Manager, err)
 			}
 
 			storage, err := declaredStorage(in.Spec)
@@ -26,9 +30,29 @@ func NewHandlers() Handlers {
 				return nil, fmt.Errorf("reading the spec of manager %s: %w", in.Manager, err)
 			}
 
+			dir, err := os.MkdirTemp("", "forge-ci-kubeconfig")
+			if err != nil {
+				return nil, fmt.Errorf(
+					"holding the cluster credential of manager %s: %w", in.Manager, err)
+			}
+
+			defer func() { _ = os.RemoveAll(dir) }()
+
+			path, err := credentialAt(ctx, dir, declared)
+			if err != nil {
+				return nil, fmt.Errorf(
+					"reading the cluster credential of manager %s from %s: %w",
+					in.Manager, declared.Names(), err)
+			}
+
+			cluster, err := kubernetesadapter.New(path)
+			if err != nil {
+				return nil, fmt.Errorf("building the cluster client of manager %s: %w", in.Manager, err)
+			}
+
 			input := toReconcileInput(in)
 
-			releases, err := releaseClient(input, storage)
+			releases, err := releaseClient(input, storage, path)
 			if err != nil {
 				return nil, fmt.Errorf("building the helm client of manager %s: %w", in.Manager, err)
 			}
@@ -57,14 +81,37 @@ func declaredStorage(spec map[string]any) (string, error) {
 	return helmadapter.Storage(storage)
 }
 
-func releaseClient(in citypes.ReconcileInput, storage string) (helmadapter.Releases, error) {
+func releaseClient(
+	in citypes.ReconcileInput, storage, kubeconfigPath string,
+) (helmadapter.Releases, error) {
 	for _, r := range in.Resources {
 		if managercontroller.Realizes(in, r) && r.Kind == managercontroller.KindHelmRelease {
-			return helmadapter.New(storage)
+			return helmadapter.New(storage, kubeconfigPath)
 		}
 	}
 
 	return helmadapter.Releases{}, nil
+}
+
+func credentialAt(
+	ctx context.Context, dir string, declared managercontroller.DeclaredKubeconfig,
+) (string, error) {
+	node, err := talosadapter.New(talosadapter.ApplyModeAuto)
+	if err != nil {
+		return "", err
+	}
+
+	source, err := managercontroller.NewKubeconfigSource(declared, node, execadapter.New())
+	if err != nil {
+		return "", err
+	}
+
+	raw, err := source.Kubeconfig(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	return kubeconfigadapter.Write(dir, raw)
 }
 
 func toReconcileInput(in ReconcileInput) citypes.ReconcileInput {

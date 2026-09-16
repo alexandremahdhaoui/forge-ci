@@ -66,6 +66,8 @@ managers:
     spec:
       statePath: ` + filepath.Join(root, "manager-kubernetes.json") + `
       storage: memory
+      kubeconfig:
+        path: ` + filepath.Join(root, "kubeconfig") + `
 engines:
   - alias: here
     type: compute
@@ -128,8 +130,7 @@ func clusterWorkspace(t *testing.T) (root string) {
 	require.NoError(t, os.WriteFile(filepath.Join(root, "forge-ci.yaml"),
 		[]byte(clusterPipelineYAML(root, statePath)), 0o600))
 
-	kubeconfig := filepath.Join(root, "kubeconfig")
-	require.NoError(t, os.WriteFile(kubeconfig, []byte(`apiVersion: v1
+	require.NoError(t, os.WriteFile(filepath.Join(root, "kubeconfig"), []byte(`apiVersion: v1
 kind: Config
 clusters:
   - name: here
@@ -141,8 +142,6 @@ contexts:
       cluster: here
 current-context: here
 `), 0o600))
-
-	t.Setenv("KUBECONFIG", kubeconfig)
 
 	return root
 }

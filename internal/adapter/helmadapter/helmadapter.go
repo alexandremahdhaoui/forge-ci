@@ -55,13 +55,14 @@ type Releases struct {
 	open     func(namespace string) (*action.Configuration, error)
 }
 
-func New(storage string) (Releases, error) {
+func New(storage, kubeconfigPath string) (Releases, error) {
 	client, err := registry.NewClient()
 	if err != nil {
 		return Releases{}, fmt.Errorf("building the chart registry client: %w", err)
 	}
 
 	settings := cli.New()
+	settings.KubeConfig = kubeconfigPath
 
 	return Releases{
 		settings: settings,

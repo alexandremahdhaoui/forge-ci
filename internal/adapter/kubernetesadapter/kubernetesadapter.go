@@ -16,9 +16,8 @@ type Cluster struct {
 	apiServer string
 }
 
-func New() (Cluster, error) {
-	config, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
-		clientcmd.NewDefaultClientConfigLoadingRules(), &clientcmd.ConfigOverrides{}).ClientConfig()
+func New(kubeconfigPath string) (Cluster, error) {
+	config, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
 	if err != nil {
 		return Cluster{}, fmt.Errorf("reading the client configuration of the cluster: %w", err)
 	}

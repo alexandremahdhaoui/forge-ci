@@ -35,13 +35,14 @@ func writeKubeconfig(t *testing.T, body string) string {
 
 	path := filepath.Join(t.TempDir(), "kubeconfig")
 	require.NoError(t, os.WriteFile(path, []byte(body), 0o600))
-	t.Setenv("KUBECONFIG", path)
 
 	return path
 }
 
-func TestTheClusterClientIsBuiltFromTheKubeconfigTheEnvironmentNamesAndItsHostIsTheAPIServer(t *testing.T) {
-	writeKubeconfig(t, `apiVersion: v1
+func TestTheClusterClientIsBuiltFromTheKubeconfigTheCallerNamesAndItsHostIsTheAPIServer(t *testing.T) {
+	t.Parallel()
+
+	path := writeKubeconfig(t, `apiVersion: v1
 kind: Config
 clusters:
   - name: here
@@ -54,21 +55,32 @@ contexts:
 current-context: here
 `)
 
-	cluster, err := New()
+	cluster, err := New(path)
 	require.NoError(t, err)
 	assert.Equal(t, theAPIServer, cluster.APIServer())
 }
 
 func TestAKubeconfigNamingNoClusterRefusesByNameInsteadOfBuildingAClientThatReachesNothing(t *testing.T) {
-	writeKubeconfig(t, "apiVersion: v1\nkind: Config\n")
+	t.Parallel()
 
-	_, err := New()
+	_, err := New(writeKubeconfig(t, "apiVersion: v1\nkind: Config\n"))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "reading the client configuration of the cluster")
 }
 
+func TestAPathNamingNoKubeconfigFileRefusesInsteadOfFallingBackToAnAmbientOne(t *testing.T) {
+	t.Parallel()
+
+	_, err := New(filepath.Join(t.TempDir(), "nothing-is-here"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "reading the client configuration of the cluster")
+	assert.Contains(t, err.Error(), "nothing-is-here")
+}
+
 func TestAKubeconfigNamingAHostTheClientCannotUseRefusesSayingItWasBuildingTheClientAndNamingTheHost(t *testing.T) {
-	writeKubeconfig(t, `apiVersion: v1
+	t.Parallel()
+
+	path := writeKubeconfig(t, `apiVersion: v1
 kind: Config
 clusters:
   - name: here
@@ -81,7 +93,7 @@ contexts:
 current-context: here
 `)
 
-	_, err := New()
+	_, err := New(path)
 	require.Error(t, err)
 	assert.Equal(t,
 		`building the client of the cluster: host must be a URL or a host:port pair: "://not a url"`,

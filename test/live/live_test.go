@@ -22,9 +22,12 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/execadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/fsadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/helmadapter"
+	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/kubeconfigadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/kubernetesadapter"
+	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/talosadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/clusterresourcecontroller"
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/managercontroller"
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
@@ -32,9 +35,8 @@ import (
 )
 
 const (
-	envPipeline   = "FORGE_CI_LIVE_CONFIG"
-	envRoot       = "FORGE_CI_LIVE_ROOT"
-	envKubeconfig = "KUBECONFIG"
+	envPipeline = "FORGE_CI_LIVE_CONFIG"
+	envRoot     = "FORGE_CI_LIVE_ROOT"
 
 	apiServerKey = "apiServer"
 	storageKey   = "storage"
@@ -44,8 +46,9 @@ const (
 	versionKey   = "version"
 	keysKey      = "keys"
 
-	apiServerSubject = "api server"
-	storageSubject   = "helm storage"
+	apiServerSubject  = "api server"
+	storageSubject    = "helm storage"
+	kubeconfigSubject = "cluster credential"
 
 	reachTimeout = 3 * time.Second
 
@@ -56,11 +59,12 @@ const (
 )
 
 type declaration struct {
-	pipeline  string
-	root      string
-	apiServer string
-	storage   string
-	resources []citypes.Resource
+	pipeline   string
+	root       string
+	apiServer  string
+	storage    string
+	kubeconfig managercontroller.DeclaredKubeconfig
+	resources  []citypes.Resource
 }
 
 func declaredByThePipeline(t *testing.T) declaration {
@@ -159,8 +163,19 @@ func parsedAt(path string) (declaration, error) {
 			return declaration{}, err
 		}
 
+		kubeconfig, err := kubeconfigOfManager(pipeline, engine.Manager)
+		if err != nil {
+			return declaration{}, err
+		}
+
+		if err := agreesWithEveryEngineBefore(
+			engine.Alias, kubeconfigSubject, kubeconfig.Names(), out.kubeconfig.Names()); err != nil {
+			return declaration{}, err
+		}
+
 		out.apiServer = server
 		out.storage = storage
+		out.kubeconfig = kubeconfig
 
 		declared, err := controller.Declare(
 			citypes.DeclareInput{Spec: engine.Spec, Root: out.root})
@@ -212,14 +227,51 @@ func helmStorageOfManager(pipeline config.Pipeline, alias string) (string, error
 		"an engine names manager %q and the pipeline declares no manager of that alias", alias)
 }
 
-func theLiveCluster(t *testing.T, declared declaration) (kubernetesadapter.Cluster, error) {
-	t.Helper()
+func kubeconfigOfManager(
+	pipeline config.Pipeline, alias string,
+) (managercontroller.DeclaredKubeconfig, error) {
+	for _, manager := range pipeline.Managers {
+		if manager.Alias != alias {
+			continue
+		}
 
-	if os.Getenv(envKubeconfig) == "" {
-		t.Skipf("%s is unset, so nothing read the cluster at %s back", envKubeconfig, declared.apiServer)
+		declared, err := managercontroller.Kubeconfig(manager.Spec)
+		if err != nil {
+			return managercontroller.DeclaredKubeconfig{},
+				fmt.Errorf("reading the spec of manager %s: %w", alias, err)
+		}
+
+		return declared, nil
 	}
 
-	cluster, err := kubernetesadapter.New()
+	return managercontroller.DeclaredKubeconfig{}, fmt.Errorf(
+		"an engine names manager %q and the pipeline declares no manager of that alias", alias)
+}
+
+func theCredential(t *testing.T, declared declaration) string {
+	t.Helper()
+
+	node, err := talosadapter.New(talosadapter.ApplyModeAuto)
+	require.NoError(t, err)
+
+	source, err := managercontroller.NewKubeconfigSource(declared.kubeconfig, node, execadapter.New())
+	require.NoError(t, err)
+
+	raw, err := source.Kubeconfig(t.Context())
+	require.NoError(t, err)
+
+	path, err := kubeconfigadapter.Write(t.TempDir(), raw)
+	require.NoError(t, err)
+
+	return path
+}
+
+func theLiveCluster(
+	t *testing.T, declared declaration, kubeconfigPath string,
+) (kubernetesadapter.Cluster, error) {
+	t.Helper()
+
+	cluster, err := kubernetesadapter.New(kubeconfigPath)
 	require.NoError(t, err)
 
 	if err := managercontroller.ConfirmAPIServer(
@@ -256,7 +308,7 @@ func answers(server string) bool {
 	return true
 }
 
-func theHelmClient(t *testing.T, declared declaration) helmadapter.Releases {
+func theHelmClient(t *testing.T, declared declaration, kubeconfigPath string) helmadapter.Releases {
 	t.Helper()
 
 	for _, resource := range declared.resources {
@@ -264,7 +316,7 @@ func theHelmClient(t *testing.T, declared declaration) helmadapter.Releases {
 			continue
 		}
 
-		releases, err := helmadapter.New(declared.storage)
+		releases, err := helmadapter.New(declared.storage, kubeconfigPath)
 		require.NoError(t, err)
 
 		return releases
@@ -276,10 +328,12 @@ func theHelmClient(t *testing.T, declared declaration) helmadapter.Releases {
 func TestEveryResourceThePipelineDeclaresIsRealAndHealthyInTheLiveCluster(t *testing.T) {
 	declared := declaredByThePipeline(t)
 
-	cluster, err := theLiveCluster(t, declared)
+	path := theCredential(t, declared)
+
+	cluster, err := theLiveCluster(t, declared, path)
 	require.NoError(t, err)
 
-	releases := theHelmClient(t, declared)
+	releases := theHelmClient(t, declared, path)
 
 	for _, resource := range declared.resources {
 		t.Run(resource.ID(), func(t *testing.T) {
@@ -427,7 +481,7 @@ func declaredValue(resource citypes.Resource, key string) (string, error) {
 func TestForgeCIsOwnRunRecordSaysASecondApplyKeptEveryResourceAndThisReadsNoClusterObject(t *testing.T) {
 	declared := declaredByThePipeline(t)
 
-	_, err := theLiveCluster(t, declared)
+	_, err := theLiveCluster(t, declared, theCredential(t, declared))
 	require.NoError(t, err)
 
 	binary, err := exec.LookPath(cli)
@@ -481,7 +535,7 @@ func TestTheSecretArmReadsADeclaredKeyBackFromAnAPIServerStoodUpInThisTestProces
 	require.NoError(t, err)
 	require.Len(t, declared.resources, 1)
 
-	cluster, err := theLiveCluster(t, declared)
+	cluster, err := theLiveCluster(t, declared, theCredential(t, declared))
 	require.NoError(t, err)
 
 	require.NoError(t, readBack(t.Context(), cluster, helmadapter.Releases{}, declared.resources[0]))
@@ -528,7 +582,7 @@ func TestThePipelineNamingAnAPIServerTheLiveClusterIsNotIsRefusedBeforeAnyResour
 	declared, err := declaredAt(pipeline)
 	require.NoError(t, err)
 
-	_, err = theLiveCluster(t, declared)
+	_, err = theLiveCluster(t, declared, theCredential(t, declared))
 	require.Error(t, err)
 	require.Equal(t,
 		"reading the api server holding the resources of "+pipeline+
@@ -563,7 +617,7 @@ func TestTheSecretArmRefusesADeclaredKeyTheLiveSecretHoldsEmptyAndOneItHoldsBlan
 	require.NoError(t, err)
 	require.Len(t, declared.resources, 1)
 
-	cluster, err := theLiveCluster(t, declared)
+	cluster, err := theLiveCluster(t, declared, theCredential(t, declared))
 	require.NoError(t, err)
 
 	require.EqualError(t,
@@ -572,7 +626,10 @@ func TestTheSecretArmRefusesADeclaredKeyTheLiveSecretHoldsEmptyAndOneItHoldsBlan
 }
 
 func TestTheReleaseArmRefusesAReleaseHelmStorageDoesNotHold(t *testing.T) {
-	releases, err := helmadapter.New(helmadapter.StorageMemory)
+	root := t.TempDir()
+	writeKubeconfig(t, root, theFirstAPIServer)
+
+	releases, err := helmadapter.New(helmadapter.StorageMemory, filepath.Join(root, "kubeconfig"))
 	require.NoError(t, err)
 
 	err = readBack(t.Context(), kubernetesadapter.Cluster{}, releases, citypes.Resource{
@@ -711,8 +768,6 @@ contexts:
       cluster: here
 current-context: here
 `), 0o600))
-
-	t.Setenv(envKubeconfig, path)
 }
 
 func clusterlessPipelineYAML(root string) string {
@@ -756,10 +811,14 @@ managers:
     engine: "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-manager-kubernetes@v0.1.0"
     spec:
       storage: ` + firstStorage + `
+      kubeconfig:
+        path: ` + filepath.Join(root, "kubeconfig") + `
   - alias: cluster-second
     engine: "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-manager-kubernetes@v0.1.0"
     spec:
       storage: ` + secondStorage + `
+      kubeconfig:
+        path: ` + filepath.Join(root, "kubeconfig") + `
   - alias: here
     engine: "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-manager-local@v0.1.0"
 engines:
@@ -818,6 +877,9 @@ func secretPipelineYAML(root, server, namespace, name string, keys []string) str
 managers:
   - alias: cluster
     engine: "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-manager-kubernetes@v0.1.0"
+    spec:
+      kubeconfig:
+        path: ` + filepath.Join(root, "kubeconfig") + `
   - alias: here
     engine: "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-manager-local@v0.1.0"
 engines:

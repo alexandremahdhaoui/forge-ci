@@ -107,6 +107,86 @@ func (_c *MockTalos_ApplyMachineConfig_Call) RunAndReturn(run func(ctx context.C
 	return _c
 }
 
+// Kubeconfig provides a mock function for the type MockTalos
+func (_mock *MockTalos) Kubeconfig(ctx context.Context, node string, endpoint string, talosconfig citypes.Secret) ([]byte, error) {
+	ret := _mock.Called(ctx, node, endpoint, talosconfig)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Kubeconfig")
+	}
+
+	var r0 []byte
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, citypes.Secret) ([]byte, error)); ok {
+		return returnFunc(ctx, node, endpoint, talosconfig)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, citypes.Secret) []byte); ok {
+		r0 = returnFunc(ctx, node, endpoint, talosconfig)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]byte)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string, citypes.Secret) error); ok {
+		r1 = returnFunc(ctx, node, endpoint, talosconfig)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockTalos_Kubeconfig_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Kubeconfig'
+type MockTalos_Kubeconfig_Call struct {
+	*mock.Call
+}
+
+// Kubeconfig is a helper method to define mock.On call
+//   - ctx context.Context
+//   - node string
+//   - endpoint string
+//   - talosconfig citypes.Secret
+func (_e *MockTalos_Expecter) Kubeconfig(ctx any, node any, endpoint any, talosconfig any) *MockTalos_Kubeconfig_Call {
+	return &MockTalos_Kubeconfig_Call{Call: _e.mock.On("Kubeconfig", ctx, node, endpoint, talosconfig)}
+}
+
+func (_c *MockTalos_Kubeconfig_Call) Run(run func(ctx context.Context, node string, endpoint string, talosconfig citypes.Secret)) *MockTalos_Kubeconfig_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		var arg3 citypes.Secret
+		if args[3] != nil {
+			arg3 = args[3].(citypes.Secret)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+			arg3,
+		)
+	})
+	return _c
+}
+
+func (_c *MockTalos_Kubeconfig_Call) Return(bytes []byte, err error) *MockTalos_Kubeconfig_Call {
+	_c.Call.Return(bytes, err)
+	return _c
+}
+
+func (_c *MockTalos_Kubeconfig_Call) RunAndReturn(run func(ctx context.Context, node string, endpoint string, talosconfig citypes.Secret) ([]byte, error)) *MockTalos_Kubeconfig_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // MachineConfig provides a mock function for the type MockTalos
 func (_mock *MockTalos) MachineConfig(ctx context.Context, node string, talosconfig citypes.Secret) (string, error) {
 	ret := _mock.Called(ctx, node, talosconfig)

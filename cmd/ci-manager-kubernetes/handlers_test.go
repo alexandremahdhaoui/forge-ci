@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -13,6 +15,62 @@ import (
 )
 
 const refusalOfAClientNeverBuiltByNew = "this helm client was never built by New"
+
+const theKubeconfigDocument = `apiVersion: v1
+kind: Config
+clusters:
+  - name: here
+    cluster:
+      server: https://127.0.0.1:1
+contexts:
+  - name: here
+    context:
+      cluster: here
+current-context: here
+`
+
+func theKubeconfigPath(t *testing.T) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "kubeconfig")
+	require.NoError(t, os.WriteFile(path, []byte(theKubeconfigDocument), 0o600))
+
+	return path
+}
+
+func declaring(spec map[string]any) ReconcileInput {
+	return ReconcileInput{Manager: "kubernetes", Spec: spec}
+}
+
+func TestAManagerDeclaringNoKubeconfigIsRefusedByNameBeforeAnyClientThatReachesAClusterIsBuilt(t *testing.T) {
+	_, err := NewHandlers().Reconcile(context.Background(), declaring(nil))
+	require.Error(t, err)
+	assert.Equal(t,
+		"reading the spec of manager kubernetes: reading spec.kubeconfig: it declares no source, "+
+			"and the cluster credential comes from path or talos or kind", err.Error())
+}
+
+func TestTheKubeconfigTheManagerSpecDeclaresIsTheOneItReadsAndNoAmbientFileTakesItsPlace(t *testing.T) {
+	decoy := theKubeconfigPath(t)
+	t.Setenv("KUBECONFIG", decoy)
+
+	declared := filepath.Join(t.TempDir(), "nothing-is-here")
+
+	_, err := NewHandlers().Reconcile(context.Background(),
+		declaring(map[string]any{"kubeconfig": map[string]any{"path": declared}}))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(),
+		"reading the cluster credential of manager kubernetes from path "+declared)
+	assert.NotContains(t, err.Error(), decoy,
+		"the manager read the file the declaration names, never the one the environment names")
+}
+
+func TestAKubeconfigTheManagerSpecDeclaresReachesTheClusterClientAndItsHostIsTheDeclaredServer(t *testing.T) {
+	out, err := NewHandlers().Reconcile(context.Background(),
+		declaring(map[string]any{"kubeconfig": map[string]any{"path": theKubeconfigPath(t)}}))
+	require.NoError(t, err)
+	assert.Equal(t, []string{}, out.Actions)
+}
 
 func TestOnlyAReconcileThatWillRealizeAReleaseCarriesAHelmClientThatCanReachHelm(t *testing.T) {
 	t.Parallel()
@@ -81,7 +139,7 @@ func TestOnlyAReconcileThatWillRealizeAReleaseCarriesAHelmClientThatCanReachHelm
 		t.Run(c.declaration, func(t *testing.T) {
 			t.Parallel()
 
-			releases, err := releaseClient(c.in, helmadapter.StorageMemory)
+			releases, err := releaseClient(c.in, helmadapter.StorageMemory, theKubeconfigPath(t))
 			require.NoError(t, err)
 
 			var port managercontroller.Helm = releases

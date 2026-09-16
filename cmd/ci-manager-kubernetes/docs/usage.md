@@ -37,6 +37,7 @@ engines:
     spec:
       statePath: <string>
       storage: <string>
+      kubeconfig: <object>
 ```
 
 ## Worth knowing
@@ -140,9 +141,31 @@ the namespace and installs one there.
 
 ## the cluster
 
-The cluster it reaches comes from the standard client configuration
-resolution, so `KUBECONFIG`, the user's default configuration file and an
-in-cluster service account each work with nothing declared here.
+The credential that reaches the cluster is declared under `spec.kubeconfig`
+and the manager reads nothing ambient. No environment variable and no file in
+the operator's home decide which cluster a run converges.
+
+`spec.kubeconfig` declares exactly one source of three. `path` names a
+kubeconfig file on disk. `talos` holds `node`, `endpoint` and
+`talosconfigEnv`, and the manager fetches the kubeconfig through the talos
+machine api of that node. `kind` holds `cluster`, and the manager asks the
+kind binary to export the kubeconfig of that cluster.
+
+`talosconfigEnv` names the variable holding the path of the talosconfig file.
+It is required. Nothing is read when it is absent and no variable name is
+assumed.
+
+Every refusal names what it saw. An absent `spec.kubeconfig` is refused
+naming the three sources. Two sources at once are refused naming the ones it
+found. A key that is none of the three is refused naming it and the three it
+could have been. An empty `path` is refused. A `talos` block is refused
+naming every one of `node`, `endpoint` and `talosconfigEnv` it lacks. A
+`kind` block with no `cluster` is refused. A `talosconfigEnv` naming a
+variable with nothing set in it is refused naming the node and the variable.
+
+The manager writes the credential to one temporary file for the life of one
+reconcile and removes it after. The cluster client and the helm client both
+read that file.
 
 An install waits for the release to come up and gives up after ten minutes,
 so one reconcile blocks that long at most for each release it installs. The

@@ -8,5 +8,6 @@ The `spec` block on this engine's entry in `forge-ci.yaml`.
 |---|---|---|---|
 | `statePath` | string | no | Where to record what was converged. Omit it and nothing is recorded. |
 | `storage` | string | no | Where helm keeps its release records, `secrets` or `memory`. Omit it and it is `secrets`. |
+| `kubeconfig` | object | yes | Where the cluster credential comes from. Exactly one source: `path` naming a kubeconfig file, `talos` holding `node`, `endpoint` and `talosconfigEnv`, or `kind` holding `cluster`. |
 
 forge-ci never validates a spec. This engine does, because only it knows what the keys mean.

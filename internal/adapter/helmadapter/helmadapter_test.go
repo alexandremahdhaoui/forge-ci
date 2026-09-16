@@ -43,9 +43,7 @@ contexts:
 current-context: here
 `), 0o600))
 
-	t.Setenv("KUBECONFIG", kubeconfig)
-
-	releases, err := New(storage)
+	releases, err := New(storage, kubeconfig)
 	require.NoError(t, err)
 
 	return releases
