@@ -13,10 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Publishing a draft is one PATCH on the release's id with draft false:
-// the last write of a release, after every asset is attached and every tag
-// is on its remote.
-func TestPublishReleasePatchesTheDraftById(t *testing.T) {
+func TestPublishReleaseIsOnePatchOnTheDraftsIdTurningDraftOff(t *testing.T) {
 	t.Parallel()
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -32,16 +29,14 @@ func TestPublishReleasePatchesTheDraftById(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	release, err := githubadapter.New(nil, srv.URL, "pat").PublishRelease(context.Background(), "o/r", 42)
+	release, err := githubadapter.New(srv.Client(), srv.URL, "pat").PublishRelease(context.Background(), "o/r", 42)
 	require.NoError(t, err)
 	assert.Equal(t, int64(42), release.ID)
 	assert.False(t, release.Draft)
 	assert.Equal(t, "http://releases/42", release.HTMLURL)
 }
 
-// A draft that is gone is an error a caller must see, never a silent
-// nothing: the release it was going to publish does not exist.
-func TestPublishReleaseFailsOnAMissingDraft(t *testing.T) {
+func TestPublishReleaseOnADraftThatIsGoneIsAnErrorTheCallerSeesAndNeverASilentNothing(t *testing.T) {
 	t.Parallel()
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -49,7 +44,7 @@ func TestPublishReleaseFailsOnAMissingDraft(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := githubadapter.New(nil, srv.URL, "pat").PublishRelease(context.Background(), "o/r", 42)
+	_, err := githubadapter.New(srv.Client(), srv.URL, "pat").PublishRelease(context.Background(), "o/r", 42)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "publishing release 42")
 }

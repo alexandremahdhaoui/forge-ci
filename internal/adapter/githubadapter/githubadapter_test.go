@@ -66,7 +66,7 @@ func TestPublicKeyAndPutSecret(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := githubadapter.New(nil, srv.URL, "tok")
+	c := githubadapter.New(srv.Client(), srv.URL, "tok")
 
 	keyID, keyB64, err := c.PublicKey(t.Context(), "o/r")
 	require.NoError(t, err)
@@ -98,7 +98,7 @@ func TestEnableAndDispatch(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := githubadapter.New(nil, srv.URL, "tok")
+	c := githubadapter.New(srv.Client(), srv.URL, "tok")
 
 	require.NoError(t, c.EnableWorkflow(t.Context(), "o/r", "ci.yaml"))
 	require.NoError(t, c.Dispatch(t.Context(), "o/r", "runner.yaml", "main",
@@ -126,7 +126,7 @@ func TestListRunsAndRun(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := githubadapter.New(nil, srv.URL, "tok")
+	c := githubadapter.New(srv.Client(), srv.URL, "tok")
 
 	runs, err := c.ListRuns(t.Context(), "o/r", "runner.yaml", time.Unix(0, 0))
 	require.NoError(t, err)
@@ -155,7 +155,7 @@ func TestNotFoundAndErrors(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := githubadapter.New(nil, srv.URL, "tok")
+	c := githubadapter.New(srv.Client(), srv.URL, "tok")
 
 	err := c.EnableWorkflow(t.Context(), "o/r", "gone.yaml")
 	require.ErrorIs(t, err, githubadapter.ErrNotFound)
@@ -165,10 +165,7 @@ func TestNotFoundAndErrors(t *testing.T) {
 	require.ErrorContains(t, err, "not accessible")
 }
 
-// A workflow file written but not yet pushed to the default branch is 403
-// "not active", not 404. That is the answer a first bootstrap actually gets,
-// and reading it as a hard failure killed the run on its first repo.
-func TestAnInactiveWorkflowIsItsOwnErrorAndNotAPermissionDenial(t *testing.T) {
+func TestAWorkflowNotYetOnTheDefaultBranchAnswers403NotActiveAndIsItsOwnErrorNotAPermissionDenial(t *testing.T) {
 	t.Parallel()
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -184,16 +181,15 @@ func TestAnInactiveWorkflowIsItsOwnErrorAndNotAPermissionDenial(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := githubadapter.New(nil, srv.URL, "tok")
+	c := githubadapter.New(srv.Client(), srv.URL, "tok")
 
 	err := c.EnableWorkflow(t.Context(), "o/r", "fresh.yaml")
 	require.ErrorIs(t, err, githubadapter.ErrInactive)
 	require.ErrorContains(t, err, "not active")
 
-	// The same status with a different body is a real denial and must stay
-	// fatal. 403 alone cannot tell the two apart, so the body decides.
 	err = c.EnableWorkflow(t.Context(), "o/r", "denied.yaml")
-	require.NotErrorIs(t, err, githubadapter.ErrInactive)
+	require.NotErrorIs(t, err, githubadapter.ErrInactive,
+		"the same status with a different body is a real denial and stays fatal, because 403 alone cannot tell the two apart and the body decides")
 	require.NotErrorIs(t, err, githubadapter.ErrNotFound)
 	require.ErrorContains(t, err, "status 403")
 }

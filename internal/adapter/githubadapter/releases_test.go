@@ -16,11 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// A release's upload_url is on a DIFFERENT host from the API base. This test
-// serves the two from two servers on purpose: joining the upload path onto
-// the base gives a URL that 404s, which reads like a missing release rather
-// than like a bug in the client, and only two hosts can catch it.
-func TestItUploadsToTheHostTheReleaseNames(t *testing.T) {
+func TestItUploadsToTheHostTheReleaseNamesAndNeverToTheAPIBase(t *testing.T) {
 	t.Parallel()
 
 	var (
@@ -52,7 +48,7 @@ func TestItUploadsToTheHostTheReleaseNames(t *testing.T) {
 	}))
 	defer api.Close()
 
-	client := githubadapter.New(nil, api.URL, "pat")
+	client := githubadapter.New(api.Client(), api.URL, "pat")
 
 	release, err := client.CreateDraftRelease(context.Background(), "o/r", "v0.2.0")
 	require.NoError(t, err)
@@ -63,9 +59,8 @@ func TestItUploadsToTheHostTheReleaseNames(t *testing.T) {
 
 	require.NoError(t, client.UploadAsset(context.Background(), release.UploadURL, file, ""))
 
-	// The RFC 6570 template is trimmed at the brace and the name is the file's
-	// own, or GitHub attaches an asset nobody can find by name.
-	assert.Equal(t, "/assets?name=a-tool_linux_amd64", gotPath)
+	assert.Equal(t, "/assets?name=a-tool_linux_amd64", gotPath,
+		"the RFC 6570 template is trimmed at the brace and the name is the file's own, or GitHub attaches an asset nobody can find by name")
 	assert.Equal(t, "application/octet-stream", gotType)
 	assert.Equal(t, "payload", string(gotBody))
 }
@@ -79,10 +74,7 @@ func TestUploadRefusesAReleaseThatAnsweredNoURL(t *testing.T) {
 	assert.Contains(t, err.Error(), "no upload URL")
 }
 
-// A tag with no release is the ordinary case on a first publish, so it is
-// found=false and not an error. Anything else and the release workflow would
-// refuse to do the job it exists for.
-func TestReleaseByTagAnswersAbsentRatherThanFailing(t *testing.T) {
+func TestReleaseByTagAnswersAbsentRatherThanFailingBecauseAFirstPublishHasNoRelease(t *testing.T) {
 	t.Parallel()
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -90,7 +82,7 @@ func TestReleaseByTagAnswersAbsentRatherThanFailing(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, found, err := githubadapter.New(nil, srv.URL, "pat").
+	_, found, err := githubadapter.New(srv.Client(), srv.URL, "pat").
 		ReleaseByTag(context.Background(), "o/r", "v0.2.0")
 	require.NoError(t, err)
 	assert.False(t, found)
