@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"helm.sh/helm/v4/pkg/action"
 	chartv2 "helm.sh/helm/v4/pkg/chart/v2"
+	"helm.sh/helm/v4/pkg/kube"
 	"helm.sh/helm/v4/pkg/release/common"
 	releasev1 "helm.sh/helm/v4/pkg/release/v1"
 	"helm.sh/helm/v4/pkg/storage"
@@ -98,6 +99,22 @@ func TestEveryAmbientClusterVariableHelmReadsIsClearedSoOnlyTheDeclaredFileIsObe
 	require.Empty(t, config.CAFile)
 	require.Empty(t, config.ServerName)
 	require.False(t, config.Insecure)
+}
+
+func TestAnExportedHelmNamespaceNeverPlacesAnObjectOutsideTheNamespaceTheDeclarationNames(t *testing.T) {
+	t.Setenv("HELM_NAMESPACE", "a-namespace-nobody-declared")
+
+	cfg, err := hermetic(t, StorageMemory).storage(theNamespace)
+	require.NoError(t, err)
+
+	client, isKubeClient := cfg.KubeClient.(*kube.Client)
+	require.True(t, isKubeClient)
+	require.Empty(t, client.Namespace)
+
+	placed, _, err := client.Factory.ToRawKubeConfigLoader().Namespace()
+
+	require.NoError(t, err)
+	require.Equal(t, theNamespace, placed)
 }
 
 func liveRelease(chart *chartv2.Chart, status common.Status) *releasev1.Release {

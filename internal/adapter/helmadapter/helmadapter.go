@@ -67,13 +67,11 @@ func New(storage, kubeconfigPath string) (Releases, error) {
 		return Releases{}, fmt.Errorf("building the chart registry client: %w", err)
 	}
 
-	settings := declaredCluster(kubeconfigPath)
-
 	return Releases{
-		settings: settings,
+		settings: declaredCluster(kubeconfigPath),
 		registry: client,
 		open: func(namespace string) (*action.Configuration, error) {
-			return openStorage(settings, client, storage, namespace)
+			return openStorage(kubeconfigPath, client, storage, namespace)
 		},
 	}, nil
 }
@@ -205,8 +203,11 @@ func chartReference(declared citypes.HelmRelease) (reference, repositoryURL stri
 }
 
 func openStorage(
-	settings *cli.EnvSettings, client *registry.Client, storage, namespace string,
+	kubeconfigPath string, client *registry.Client, storage, namespace string,
 ) (*action.Configuration, error) {
+	settings := declaredCluster(kubeconfigPath)
+	settings.SetNamespace(namespace)
+
 	cfg := new(action.Configuration)
 
 	if err := cfg.Init(settings.RESTClientGetter(), namespace, storage); err != nil {

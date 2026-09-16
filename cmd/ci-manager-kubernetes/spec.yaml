@@ -113,9 +113,9 @@ notes: |
 
   ## the cluster
 
-  The credential that reaches the cluster is declared under `spec.kubeconfig`
-  and the manager reads nothing ambient. No environment variable and no file in
-  the operator's home decide which cluster a run converges.
+  The credential that reaches the cluster is declared under `spec.kubeconfig`.
+  No environment variable and no file in the operator's home decide which
+  cluster a run converges or which namespace it places objects in.
 
   `spec.kubeconfig` declares exactly one source of three. `path` names a
   kubeconfig file on disk. `talos` holds `node`, `endpoint` and
