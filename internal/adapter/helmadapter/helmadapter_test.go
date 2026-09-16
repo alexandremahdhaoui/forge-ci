@@ -152,7 +152,7 @@ func TestAnExportedHelmRepositoryConfigNeverDecidesWhichBytesAChartIsMadeOf(t *t
 		chartFetchSettings(t, scratch).RepositoryConfig)
 }
 
-func TestAnExportedHelmRegistryConfigNeverDecidesWhichBytesAChartIsMadeOf(t *testing.T) {
+func TestTheChartFetchSettingsCarryTheScratchRegistryPathRatherThanAnExportedOne(t *testing.T) {
 	planted := filepath.Join(t.TempDir(), "registry.json")
 	t.Setenv("HELM_REGISTRY_CONFIG", planted)
 
@@ -213,6 +213,8 @@ func TestTheScratchDirectoryAChartIsFetchedIntoIsRemovedWhenTheInstallReturns(t 
 		Repository: repository.URL,
 	})
 	require.Error(t, err)
+	require.Contains(t, err.Error(),
+		"locating chart "+theChart+" "+theVersion+" for release "+theNamespace+"/"+theName)
 
 	left, err := os.ReadDir(temporary)
 

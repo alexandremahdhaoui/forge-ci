@@ -34,7 +34,6 @@ const (
 
 	releaseInfoField = "Info"
 
-	scratchPrefix          = "helm-chart-"
 	scratchRepositoryFile  = "repositories.yaml"
 	scratchRepositoryCache = "repository"
 	scratchContentCache    = "content"
@@ -155,7 +154,7 @@ func (r Releases) InstallRelease(ctx context.Context, declared citypes.HelmRelea
 
 	id := declared.Namespace + "/" + declared.Name
 
-	scratch, err := os.MkdirTemp("", scratchPrefix)
+	scratch, err := os.MkdirTemp("", "helm-chart-")
 	if err != nil {
 		return fmt.Errorf("making the scratch directory chart %s is fetched into for release %s: %w",
 			declared.Chart, id, err)
