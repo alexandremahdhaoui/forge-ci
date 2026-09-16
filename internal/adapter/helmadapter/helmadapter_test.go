@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"helm.sh/helm/v4/pkg/action"
 	chartv2 "helm.sh/helm/v4/pkg/chart/v2"
+	"helm.sh/helm/v4/pkg/cli"
 	"helm.sh/helm/v4/pkg/kube"
 	"helm.sh/helm/v4/pkg/release/common"
 	releasev1 "helm.sh/helm/v4/pkg/release/v1"
@@ -52,6 +53,18 @@ current-context: here
 	return releases
 }
 
+func declaredSettings(t *testing.T) *cli.EnvSettings {
+	t.Helper()
+
+	return declaredCluster(hermetic(t, StorageMemory).kubeconfigPath, theNamespace)
+}
+
+func chartFetchSettings(t *testing.T, scratch string) *cli.EnvSettings {
+	t.Helper()
+
+	return chartFetch(hermetic(t, StorageMemory).kubeconfigPath, theNamespace, scratch)
+}
+
 func TestAHelmClientHandedNoKubeconfigFileIsRefusedByNameInsteadOfReadingTheEnvironment(t *testing.T) {
 	for _, path := range []string{"", "   "} {
 		_, err := New(StorageMemory, path)
@@ -67,7 +80,7 @@ func TestAHelmClientHandedNoKubeconfigFileIsRefusedByNameInsteadOfReadingTheEnvi
 func TestAnExportedHelmAPIServerNeverBeatsTheServerTheDeclaredKubeconfigNames(t *testing.T) {
 	t.Setenv("HELM_KUBEAPISERVER", "https://198.51.100.7:6443")
 
-	config, err := hermetic(t, StorageMemory).settings.RESTClientGetter().ToRESTConfig()
+	config, err := declaredSettings(t).RESTClientGetter().ToRESTConfig()
 
 	require.NoError(t, err)
 	require.Equal(t, theDeclaredServer, config.Host)
@@ -76,7 +89,7 @@ func TestAnExportedHelmAPIServerNeverBeatsTheServerTheDeclaredKubeconfigNames(t 
 func TestAnExportedHelmKubeTokenNeverReachesTheClientTheDeclaredKubeconfigBuilds(t *testing.T) {
 	t.Setenv("HELM_KUBETOKEN", "a-token-nobody-declared")
 
-	config, err := hermetic(t, StorageMemory).settings.RESTClientGetter().ToRESTConfig()
+	config, err := declaredSettings(t).RESTClientGetter().ToRESTConfig()
 
 	require.NoError(t, err)
 	require.Empty(t, config.BearerToken)
@@ -90,7 +103,7 @@ func TestEveryAmbientClusterVariableHelmReadsIsClearedSoOnlyTheDeclaredFileIsObe
 	t.Setenv("HELM_KUBETLS_SERVER_NAME", "a-name-nobody-declared")
 	t.Setenv("HELM_KUBEINSECURE_SKIP_TLS_VERIFY", "true")
 
-	config, err := hermetic(t, StorageMemory).settings.RESTClientGetter().ToRESTConfig()
+	config, err := declaredSettings(t).RESTClientGetter().ToRESTConfig()
 
 	require.NoError(t, err)
 	require.Equal(t, theDeclaredServer, config.Host)
@@ -115,6 +128,96 @@ func TestAnExportedHelmNamespaceNeverPlacesAnObjectOutsideTheNamespaceTheDeclara
 
 	require.NoError(t, err)
 	require.Equal(t, theNamespace, placed)
+}
+
+func TestAnExportedHelmRepositoryCacheNeverDecidesWhichBytesAChartIsMadeOf(t *testing.T) {
+	planted := t.TempDir()
+	t.Setenv("HELM_REPOSITORY_CACHE", planted)
+
+	scratch := t.TempDir()
+
+	require.Equal(t,
+		filepath.Join(scratch, scratchRepositoryCache),
+		chartFetchSettings(t, scratch).RepositoryCache)
+}
+
+func TestAnExportedHelmRepositoryConfigNeverDecidesWhichBytesAChartIsMadeOf(t *testing.T) {
+	planted := filepath.Join(t.TempDir(), "repositories.yaml")
+	t.Setenv("HELM_REPOSITORY_CONFIG", planted)
+
+	scratch := t.TempDir()
+
+	require.Equal(t,
+		filepath.Join(scratch, scratchRepositoryFile),
+		chartFetchSettings(t, scratch).RepositoryConfig)
+}
+
+func TestAnExportedHelmRegistryConfigNeverDecidesWhichBytesAChartIsMadeOf(t *testing.T) {
+	planted := filepath.Join(t.TempDir(), "registry.json")
+	t.Setenv("HELM_REGISTRY_CONFIG", planted)
+
+	scratch := t.TempDir()
+
+	require.Equal(t,
+		filepath.Join(scratch, scratchRegistryFile),
+		chartFetchSettings(t, scratch).RegistryConfig)
+}
+
+func TestAnExportedHelmContentCacheNeverDecidesWhichBytesAChartIsMadeOf(t *testing.T) {
+	planted := t.TempDir()
+	t.Setenv("HELM_CONTENT_CACHE", planted)
+
+	scratch := t.TempDir()
+
+	require.Equal(t,
+		filepath.Join(scratch, scratchContentCache),
+		chartFetchSettings(t, scratch).ContentCache)
+}
+
+func TestAnExportedHelmPluginsDirectoryNeverHandsAChartFetchADownloaderNobodyDeclared(t *testing.T) {
+	planted := t.TempDir()
+	t.Setenv("HELM_PLUGINS", planted)
+
+	scratch := t.TempDir()
+	directory := chartFetchSettings(t, scratch).PluginsDirectory
+
+	require.Equal(t, filepath.Join(scratch, scratchPlugins), directory)
+	require.NoDirExists(t, directory)
+}
+
+func TestAnExportedHelmNamespaceNeverTravelsIntoTheEnvironmentAChartFetchBuilds(t *testing.T) {
+	t.Setenv("HELM_NAMESPACE", "a-namespace-nobody-declared")
+
+	settings := chartFetchSettings(t, t.TempDir())
+
+	require.Equal(t, theNamespace, settings.Namespace())
+	require.Equal(t, theNamespace, settings.EnvVars()["HELM_NAMESPACE"])
+}
+
+func TestTheScratchDirectoryAChartIsFetchedIntoIsRemovedWhenTheInstallReturns(t *testing.T) {
+	temporary := t.TempDir()
+	releases := hermetic(t, StorageMemory)
+
+	repository := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "no index here", http.StatusNotFound)
+	}))
+	defer repository.Close()
+
+	t.Setenv("TMPDIR", temporary)
+
+	err := releases.InstallRelease(context.Background(), citypes.HelmRelease{
+		Namespace:  theNamespace,
+		Name:       theName,
+		Chart:      theChart,
+		Version:    theVersion,
+		Repository: repository.URL,
+	})
+	require.Error(t, err)
+
+	left, err := os.ReadDir(temporary)
+
+	require.NoError(t, err)
+	require.Empty(t, left)
 }
 
 func liveRelease(chart *chartv2.Chart, status common.Status) *releasev1.Release {

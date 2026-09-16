@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -31,6 +33,13 @@ const (
 	chartVersionKey = "Version"
 
 	releaseInfoField = "Info"
+
+	scratchPrefix          = "helm-chart-"
+	scratchRepositoryFile  = "repositories.yaml"
+	scratchRepositoryCache = "repository"
+	scratchContentCache    = "content"
+	scratchRegistryFile    = "registry.json"
+	scratchPlugins         = "plugins"
 )
 
 var Storages = []string{StorageSecrets, StorageMemory}
@@ -50,9 +59,9 @@ func Storage(declared string) (string, error) {
 }
 
 type Releases struct {
-	settings *cli.EnvSettings
-	registry *registry.Client
-	open     func(namespace string) (*action.Configuration, error)
+	kubeconfigPath string
+	registry       *registry.Client
+	open           func(namespace string) (*action.Configuration, error)
 }
 
 func New(storage, kubeconfigPath string) (Releases, error) {
@@ -68,17 +77,18 @@ func New(storage, kubeconfigPath string) (Releases, error) {
 	}
 
 	return Releases{
-		settings: declaredCluster(kubeconfigPath),
-		registry: client,
+		kubeconfigPath: kubeconfigPath,
+		registry:       client,
 		open: func(namespace string) (*action.Configuration, error) {
 			return openStorage(kubeconfigPath, client, storage, namespace)
 		},
 	}, nil
 }
 
-func declaredCluster(kubeconfigPath string) *cli.EnvSettings {
+func declaredCluster(kubeconfigPath, namespace string) *cli.EnvSettings {
 	settings := cli.New()
 
+	settings.SetNamespace(namespace)
 	settings.KubeConfig = kubeconfigPath
 	settings.KubeContext = ""
 	settings.KubeToken = ""
@@ -88,6 +98,18 @@ func declaredCluster(kubeconfigPath string) *cli.EnvSettings {
 	settings.KubeCaFile = ""
 	settings.KubeTLSServerName = ""
 	settings.KubeInsecureSkipTLSVerify = false
+
+	return settings
+}
+
+func chartFetch(kubeconfigPath, namespace, scratch string) *cli.EnvSettings {
+	settings := declaredCluster(kubeconfigPath, namespace)
+
+	settings.RepositoryConfig = filepath.Join(scratch, scratchRepositoryFile)
+	settings.RepositoryCache = filepath.Join(scratch, scratchRepositoryCache)
+	settings.ContentCache = filepath.Join(scratch, scratchContentCache)
+	settings.RegistryConfig = filepath.Join(scratch, scratchRegistryFile)
+	settings.PluginsDirectory = filepath.Join(scratch, scratchPlugins)
 
 	return settings
 }
@@ -133,6 +155,14 @@ func (r Releases) InstallRelease(ctx context.Context, declared citypes.HelmRelea
 
 	id := declared.Namespace + "/" + declared.Name
 
+	scratch, err := os.MkdirTemp("", scratchPrefix)
+	if err != nil {
+		return fmt.Errorf("making the scratch directory chart %s is fetched into for release %s: %w",
+			declared.Chart, id, err)
+	}
+
+	defer func() { _ = os.RemoveAll(scratch) }()
+
 	install := action.NewInstall(cfg)
 	install.Namespace = declared.Namespace
 	install.ReleaseName = declared.Name
@@ -145,7 +175,8 @@ func (r Releases) InstallRelease(ctx context.Context, declared citypes.HelmRelea
 	reference, repositoryURL := chartReference(declared)
 	install.RepoURL = repositoryURL
 
-	path, err := install.LocateChart(reference, r.settings)
+	path, err := install.LocateChart(
+		reference, chartFetch(r.kubeconfigPath, declared.Namespace, scratch))
 	if err != nil {
 		return fmt.Errorf("locating chart %s %s for release %s: %w",
 			reference, declared.Version, id, err)
@@ -205,8 +236,7 @@ func chartReference(declared citypes.HelmRelease) (reference, repositoryURL stri
 func openStorage(
 	kubeconfigPath string, client *registry.Client, storage, namespace string,
 ) (*action.Configuration, error) {
-	settings := declaredCluster(kubeconfigPath)
-	settings.SetNamespace(namespace)
+	settings := declaredCluster(kubeconfigPath, namespace)
 
 	cfg := new(action.Configuration)
 
