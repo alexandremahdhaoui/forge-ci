@@ -2,18 +2,27 @@ package talosadapter
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
+	"math/big"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	machineapi "github.com/siderolabs/talos/pkg/machinery/api/machine"
 	configresource "github.com/siderolabs/talos/pkg/machinery/resources/config"
+	"github.com/siderolabs/talos/pkg/machinery/resources/runtime"
 
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 )
@@ -362,6 +371,126 @@ func TestEveryDialRefusesATalosconfigDrivingTwoNodesBeforeReachingAnything(t *te
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "names 2 nodes")
 	assert.NotContains(t, err.Error(), "connection refused")
+}
+
+func aNodeSpeakingWithAnUnknownCertificate(t *testing.T) citypes.Secret {
+	t.Helper()
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
+	}
+
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	require.NoError(t, err)
+
+	listener, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{
+		Certificates: []tls.Certificate{{Certificate: [][]byte{der}, PrivateKey: key}},
+		MinVersion:   tls.VersionTLS12,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = listener.Close() })
+
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+
+			_ = conn.(*tls.Conn).Handshake()
+			_ = conn.Close()
+		}
+	}()
+
+	return writeTalosconfig(t, "context: t0\ncontexts:\n  t0:\n    endpoints:\n      - "+
+		listener.Addr().String()+"\n    nodes:\n      - 127.0.0.1\n")
+}
+
+func stageAnswering(stage runtime.MachineStage) func(context.Context, string) (runtime.MachineStage, error) {
+	return func(context.Context, string) (runtime.MachineStage, error) { return stage, nil }
+}
+
+func TestANodeInMaintenanceHoldsNoClusterSoItsBootstrapStateReadsFalse(t *testing.T) {
+	t.Parallel()
+
+	node, err := New(ApplyModeAuto)
+	require.NoError(t, err)
+
+	node.stage = stageAnswering(runtime.MachineStageMaintenance)
+
+	bootstrapped, err := node.Bootstrapped(t.Context(), aNodeSpeakingWithAnUnknownCertificate(t))
+	require.NoError(t, err)
+	assert.False(t, bootstrapped)
+}
+
+func TestANodeInMaintenanceHoldsNoConfigSoItsMachineConfigReadsEmpty(t *testing.T) {
+	t.Parallel()
+
+	node, err := New(ApplyModeAuto)
+	require.NoError(t, err)
+
+	node.stage = stageAnswering(runtime.MachineStageMaintenance)
+
+	running, err := node.MachineConfig(t.Context(), aNodeSpeakingWithAnUnknownCertificate(t))
+	require.NoError(t, err)
+	assert.Empty(t, running)
+}
+
+func TestACertificateErrorFromANodeInAnyOtherStageIsTheSecureErrorByName(t *testing.T) {
+	t.Parallel()
+
+	for name, stage := range map[string]func(context.Context, string) (runtime.MachineStage, error){
+		"running":   stageAnswering(runtime.MachineStageRunning),
+		"booting":   stageAnswering(runtime.MachineStageBooting),
+		"unknown":   stageAnswering(runtime.MachineStageUnknown),
+		"no answer": func(context.Context, string) (runtime.MachineStage, error) { return 0, errors.New("no probe") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			node, err := New(ApplyModeAuto)
+			require.NoError(t, err)
+
+			node.stage = stage
+			talosconfig := aNodeSpeakingWithAnUnknownCertificate(t)
+
+			bootstrapped, err := node.Bootstrapped(t.Context(), talosconfig)
+			require.Error(t, err)
+			assert.False(t, bootstrapped)
+			assert.Contains(t, err.Error(), "getting the etcd service of node 127.0.0.1")
+			assert.Contains(t, err.Error(), "x509")
+			assert.NotContains(t, err.Error(), "no probe")
+
+			_, err = node.MachineConfig(t.Context(), talosconfig)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "x509")
+			assert.NotContains(t, err.Error(), "no probe")
+
+			err = node.ApplyMachineConfig(t.Context(), talosconfig, "version: v1alpha1\n")
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "applying the machine config to node 127.0.0.1")
+			assert.Contains(t, err.Error(), "x509")
+			assert.NotContains(t, err.Error(), "maintenance")
+			assert.False(t, node.rebooting)
+		})
+	}
+}
+
+func TestANewNodeProbesTheMachineStatusForItsStage(t *testing.T) {
+	t.Parallel()
+
+	node, err := New(ApplyModeAuto)
+	require.NoError(t, err)
+
+	_, err = node.stage(t.Context(), theClosedPort)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "node "+theClosedPort)
 }
 
 func TestTheWaitStopsWhenTheContextEndsAndNamesTheLastCause(t *testing.T) {

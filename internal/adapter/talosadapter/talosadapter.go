@@ -54,6 +54,7 @@ var applyModes = map[string]applyMode{
 type Node struct {
 	mode      applyMode
 	rebooting bool
+	stage     func(ctx context.Context, node string) (runtime.MachineStage, error)
 }
 
 func New(mode string) (*Node, error) {
@@ -67,7 +68,7 @@ func New(mode string) (*Node, error) {
 			"reading the apply mode %q: this adapter knows %s and %s", mode, ApplyModeAuto, ApplyModeStaged)
 	}
 
-	return &Node{mode: chosen}, nil
+	return &Node{mode: chosen, stage: probeStage}, nil
 }
 
 type Credential struct{}
@@ -241,8 +242,15 @@ func (n *Node) Bootstrapped(ctx context.Context, talosconfig citypes.Secret) (bo
 
 			return nil
 		})
+	if err == nil {
+		return running, nil
+	}
 
-	return running, err
+	if !n.inMaintenance(ctx, node, err) {
+		return false, err
+	}
+
+	return false, nil
 }
 
 func (n *Node) WaitNodeRegistered(ctx context.Context, talosconfig citypes.Secret) error {
@@ -325,19 +333,28 @@ func (n *Node) inMaintenance(ctx context.Context, node string, secureErr error) 
 		return false
 	}
 
-	maintenanceClient, err := dialMaintenance(ctx, node)
+	stage, err := n.stage(ctx, node)
 	if err != nil {
 		return false
+	}
+
+	return stage == runtime.MachineStageMaintenance
+}
+
+func probeStage(ctx context.Context, node string) (runtime.MachineStage, error) {
+	maintenanceClient, err := dialMaintenance(ctx, node)
+	if err != nil {
+		return runtime.MachineStageUnknown, fmt.Errorf("dialing node %s in maintenance: %w", node, err)
 	}
 
 	defer func() { _ = maintenanceClient.Close() }()
 
 	status, err := safe.StateGetByID[*runtime.MachineStatus](ctx, maintenanceClient.COSI, runtime.MachineStatusID)
 	if err != nil {
-		return false
+		return runtime.MachineStageUnknown, fmt.Errorf("getting the machine status of node %s: %w", node, err)
 	}
 
-	return status.TypedSpec().Stage == runtime.MachineStageMaintenance
+	return status.TypedSpec().Stage, nil
 }
 
 func isCertificateError(err error) bool {

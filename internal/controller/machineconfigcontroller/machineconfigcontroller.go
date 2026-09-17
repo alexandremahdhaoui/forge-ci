@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"path/filepath"
+	"strings"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/fsadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/talossecretsadapter"
@@ -68,6 +69,12 @@ func (c *Controller) Declare(in citypes.DeclareInput) (citypes.DeclareOutput, er
 	target, err := c.declaredContext(in.Spec, clusterName)
 	if err != nil {
 		return citypes.DeclareOutput{}, err
+	}
+
+	if strings.Contains(target.Endpoints[0], "://") {
+		return citypes.DeclareOutput{}, fmt.Errorf(
+			"reading the client configuration of cluster %s: the first endpoint carries a scheme, "+
+				"and a talosconfig endpoint is a host or a host and port", clusterName)
 	}
 
 	cluster := talossecretsadapter.Cluster{

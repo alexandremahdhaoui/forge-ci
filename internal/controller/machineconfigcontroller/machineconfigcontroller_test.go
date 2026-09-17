@@ -137,6 +137,23 @@ func TestAContextEndpointWithoutAPortStillBecomesTheClusterEndpointOnPort6443(t 
 	require.NoError(t, err)
 }
 
+func TestAContextEndpointCarryingASchemeIsRefusedByNameBeforeAnyFileIsRead(t *testing.T) {
+	exported(t)
+
+	talosconfig := machineconfigcontrollermock.NewMockTalosconfig(t)
+	talosconfig.EXPECT().Context(citypes.Secret(thePath)).
+		Return(citypes.TalosContext{Endpoints: []string{"https://box.lan:50000"}, Node: theNode}, nil)
+
+	_, err := machineconfigcontroller.New(
+		fsadaptermock.NewMockFS(t), machineconfigcontrollermock.NewMockRenderer(t), talosconfig,
+	).Declare(citypes.DeclareInput{Root: "/w", Spec: fullSpec()})
+
+	require.Error(t, err)
+	assert.Equal(t,
+		"reading the client configuration of cluster t0: the first endpoint carries a scheme, "+
+			"and a talosconfig endpoint is a host or a host and port", err.Error())
+}
+
 func TestAVariableHoldingNothingIsRefusedNamingTheClusterAndTheVariableBeforeAnyFileIsRead(t *testing.T) {
 	t.Setenv(theVariable, "")
 
