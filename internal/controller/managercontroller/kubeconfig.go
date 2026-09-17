@@ -20,33 +20,25 @@ const (
 	SourceTalos = "talos"
 	SourceKind  = "kind"
 
-	nodeKey           = "node"
-	endpointKey       = "endpoint"
 	talosconfigEnvKey = "talosconfigEnv"
 	clusterKey        = "cluster"
 
 	kubeconfigPath = "spec." + KubeconfigKey
 )
 
-var (
-	KubeconfigSources = []string{SourcePath, SourceTalos, SourceKind}
-
-	talosKeys = []string{nodeKey, endpointKey, talosconfigEnvKey}
-)
+var KubeconfigSources = []string{SourcePath, SourceTalos, SourceKind}
 
 type KubeconfigSource interface {
 	Kubeconfig(ctx context.Context) ([]byte, error)
 }
 
 type TalosKubeconfig interface {
-	Kubeconfig(ctx context.Context, node, endpoint string, talosconfig citypes.Secret) ([]byte, error)
+	Kubeconfig(ctx context.Context, talosconfig citypes.Secret) ([]byte, error)
 }
 
 type DeclaredKubeconfig struct {
 	Source         string
 	Path           string
-	Node           string
-	Endpoint       string
 	TalosconfigEnv string
 	Cluster        string
 }
@@ -56,7 +48,7 @@ func (d DeclaredKubeconfig) Names() string {
 	case SourcePath:
 		return SourcePath + " " + d.Path
 	case SourceTalos:
-		return SourceTalos + " node " + d.Node + " through endpoint " + d.Endpoint
+		return SourceTalos + " through " + d.TalosconfigEnv
 	case SourceKind:
 		return SourceKind + " cluster " + d.Cluster
 	default:
@@ -171,37 +163,27 @@ func declaredTalos(held map[string]any) (DeclaredKubeconfig, error) {
 		return DeclaredKubeconfig{}, err
 	}
 
-	out := DeclaredKubeconfig{Source: SourceTalos}
-	into := map[string]*string{
-		nodeKey:           &out.Node,
-		endpointKey:       &out.Endpoint,
-		talosconfigEnvKey: &out.TalosconfigEnv,
+	for _, key := range slices.Sorted(maps.Keys(block)) {
+		if key != talosconfigEnvKey {
+			return DeclaredKubeconfig{}, fmt.Errorf(
+				"reading spec.kubeconfig.talos: it declares %q, and a talos source declares %s only, "+
+					"the node and the endpoints come from the talosconfig that variable names",
+				key, talosconfigEnvKey)
+		}
 	}
 
-	missing := make([]string, 0, len(talosKeys))
-
-	for _, key := range talosKeys {
-		value, err := declaredString(block, kubeconfigPath+"."+SourceTalos, key)
-		if err != nil {
-			return DeclaredKubeconfig{}, err
-		}
-
-		if strings.TrimSpace(value) == "" {
-			missing = append(missing, key)
-
-			continue
-		}
-
-		*into[key] = value
+	variable, err := declaredString(block, kubeconfigPath+"."+SourceTalos, talosconfigEnvKey)
+	if err != nil {
+		return DeclaredKubeconfig{}, err
 	}
 
-	if len(missing) > 0 {
+	if strings.TrimSpace(variable) == "" {
 		return DeclaredKubeconfig{}, fmt.Errorf(
 			"reading spec.kubeconfig.talos: it declares no %s, and a talos source declares %s",
-			strings.Join(missing, " and "), strings.Join(talosKeys, ", "))
+			talosconfigEnvKey, talosconfigEnvKey)
 	}
 
-	return out, nil
+	return DeclaredKubeconfig{Source: SourceTalos, TalosconfigEnv: variable}, nil
 }
 
 func declaredKind(held map[string]any) (DeclaredKubeconfig, error) {
@@ -232,12 +214,7 @@ func NewKubeconfigSource(
 	case SourceKind:
 		return kubeconfigadapter.NewKind(runner, declared.Cluster), nil
 	case SourceTalos:
-		return talosKubeconfig{
-			talos:          talos,
-			node:           declared.Node,
-			endpoint:       declared.Endpoint,
-			talosconfigEnv: declared.TalosconfigEnv,
-		}, nil
+		return talosKubeconfig{talos: talos, talosconfigEnv: declared.TalosconfigEnv}, nil
 	default:
 		return nil, fmt.Errorf(
 			"building the cluster credential source: the declaration names source %q, "+
@@ -247,8 +224,6 @@ func NewKubeconfigSource(
 
 type talosKubeconfig struct {
 	talos          TalosKubeconfig
-	node           string
-	endpoint       string
 	talosconfigEnv string
 }
 
@@ -256,14 +231,14 @@ func (s talosKubeconfig) Kubeconfig(ctx context.Context) ([]byte, error) {
 	talosconfig := citypes.SecretFromEnv(s.talosconfigEnv)
 	if talosconfig == "" {
 		return nil, fmt.Errorf(
-			"reading the client configuration of node %s: nothing is set in %s, "+
+			"reading the client configuration: nothing is set in %s, "+
 				"and spec.kubeconfig.talos.talosconfigEnv names it. export it before reconciling",
-			s.node, s.talosconfigEnv)
+			s.talosconfigEnv)
 	}
 
-	raw, err := s.talos.Kubeconfig(ctx, s.node, s.endpoint, talosconfig)
+	raw, err := s.talos.Kubeconfig(ctx, talosconfig)
 	if err != nil {
-		return nil, fmt.Errorf("reading the kubeconfig of node %s: %w", s.node, err)
+		return nil, fmt.Errorf("reading the kubeconfig through %s: %w", s.talosconfigEnv, err)
 	}
 
 	return raw, nil

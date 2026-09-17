@@ -18,8 +18,6 @@ import (
 )
 
 const (
-	theNode          = "10.0.0.1"
-	theEndpoint      = "10.0.0.1"
 	theKindCluster   = "a-cluster"
 	theVariable      = "A_TALOSCONFIG_THIS_TEST_OWNS"
 	theKubeconfigDoc = "apiVersion: v1\nkind: Config\n"
@@ -40,19 +38,33 @@ func TestAPathSourceIsReadBackWithTheFileItNames(t *testing.T) {
 	}, declared)
 }
 
-func TestATalosSourceIsReadBackWithItsNodeItsEndpointAndTheVariableItNames(t *testing.T) {
+func TestATalosSourceIsReadBackWithTheVariableItNamesAndNothingElse(t *testing.T) {
 	t.Parallel()
 
-	declared, err := managercontroller.Kubeconfig(talosSpec(map[string]any{
-		"node": theNode, "endpoint": theEndpoint, "talosconfigEnv": theVariable,
-	}))
+	declared, err := managercontroller.Kubeconfig(talosSpec(map[string]any{"talosconfigEnv": theVariable}))
 	require.NoError(t, err)
 	assert.Equal(t, managercontroller.DeclaredKubeconfig{
 		Source:         managercontroller.SourceTalos,
-		Node:           theNode,
-		Endpoint:       theEndpoint,
 		TalosconfigEnv: theVariable,
 	}, declared)
+}
+
+func TestATalosSourceDeclaringANodeOrAnEndpointIsRefusedNamingTheKeyAndTheOneKeyAllowed(t *testing.T) {
+	t.Parallel()
+
+	for _, key := range []string{"node", "endpoint"} {
+		t.Run(key, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := managercontroller.Kubeconfig(
+				talosSpec(map[string]any{"talosconfigEnv": theVariable, key: "box.lan"}))
+			require.Error(t, err)
+			assert.Equal(t,
+				"reading spec.kubeconfig.talos: it declares "+`"`+key+`"`+", and a talos source declares "+
+					"talosconfigEnv only, the node and the endpoints come from the talosconfig that variable names",
+				err.Error())
+		})
+	}
 }
 
 func TestAKindSourceIsReadBackWithTheClusterItNames(t *testing.T) {
@@ -96,7 +108,7 @@ func TestAManagerDeclaringAllThreeSourcesAtOnceIsRefusedNamingAllThree(t *testin
 
 	_, err := managercontroller.Kubeconfig(map[string]any{"kubeconfig": map[string]any{
 		"path":  "/etc/kubeconfig",
-		"talos": map[string]any{"node": theNode},
+		"talos": map[string]any{"talosconfigEnv": theVariable},
 		"kind":  map[string]any{"cluster": theKindCluster},
 	}})
 	require.Error(t, err)
@@ -138,34 +150,33 @@ func TestAPathSourceNamingNoFileIsRefusedByName(t *testing.T) {
 	}
 }
 
-func TestATalosSourceMissingEveryKeyIsRefusedNamingEveryKeyItLacks(t *testing.T) {
+func TestATalosSourceNamingNoVariableIsRefusedByNameAndNeverFallsBackToADefaultVariable(t *testing.T) {
 	t.Parallel()
 
-	_, err := managercontroller.Kubeconfig(talosSpec(nil))
-	require.Error(t, err)
-	assert.Equal(t,
-		"reading spec.kubeconfig.talos: it declares no node and endpoint and talosconfigEnv, "+
-			"and a talos source declares node, endpoint, talosconfigEnv", err.Error())
-}
+	for name, block := range map[string]map[string]any{
+		"an empty block":     nil,
+		"a blank variable":   {"talosconfigEnv": "  "},
+		"an absent variable": {},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-func TestATalosSourceMissingOnlyTheVariableIsRefusedNamingThatOneKeyAndNeverFallsBackToADefaultVariable(t *testing.T) {
-	t.Parallel()
-
-	_, err := managercontroller.Kubeconfig(
-		talosSpec(map[string]any{"node": theNode, "endpoint": theEndpoint}))
-	require.Error(t, err)
-	assert.Equal(t,
-		"reading spec.kubeconfig.talos: it declares no talosconfigEnv, "+
-			"and a talos source declares node, endpoint, talosconfigEnv", err.Error())
+			_, err := managercontroller.Kubeconfig(talosSpec(block))
+			require.Error(t, err)
+			assert.Equal(t,
+				"reading spec.kubeconfig.talos: it declares no talosconfigEnv, "+
+					"and a talos source declares talosconfigEnv", err.Error())
+		})
+	}
 }
 
 func TestATalosKeyThatIsNotAStringIsRefusedByTheHelperThatReadsTheSpec(t *testing.T) {
 	t.Parallel()
 
-	_, err := managercontroller.Kubeconfig(talosSpec(map[string]any{"node": 7}))
+	_, err := managercontroller.Kubeconfig(talosSpec(map[string]any{"talosconfigEnv": 7}))
 	require.Error(t, err)
 	assert.Equal(t,
-		"reading spec.kubeconfig.talos.node: a string is required, the spec holds a int", err.Error())
+		"reading spec.kubeconfig.talos.talosconfigEnv: a string is required, the spec holds a int", err.Error())
 }
 
 func TestAPathThatIsNotAStringIsRefusedNamingTheKeyTheSchemaDeclares(t *testing.T) {
@@ -227,9 +238,9 @@ func TestEverySourceNamesItselfSoARefusalSaysWhereTheCredentialWasComingFrom(t *
 	assert.Equal(t, "path /etc/kubeconfig", managercontroller.DeclaredKubeconfig{
 		Source: managercontroller.SourcePath, Path: "/etc/kubeconfig",
 	}.Names())
-	assert.Equal(t, "talos node "+theNode+" through endpoint "+theEndpoint,
+	assert.Equal(t, "talos through "+theVariable,
 		managercontroller.DeclaredKubeconfig{
-			Source: managercontroller.SourceTalos, Node: theNode, Endpoint: theEndpoint,
+			Source: managercontroller.SourceTalos, TalosconfigEnv: theVariable,
 		}.Names())
 	assert.Equal(t, "kind cluster "+theKindCluster, managercontroller.DeclaredKubeconfig{
 		Source: managercontroller.SourceKind, Cluster: theKindCluster,
@@ -273,13 +284,12 @@ func TestAKindDeclarationPicksTheAdapterThatAsksTheBinaryForThatCluster(t *testi
 	assert.Equal(t, theKubeconfigDoc, string(raw))
 }
 
-func TestATalosDeclarationPicksTheNodeAndHandsItTheSecretTheDeclaredVariableHolds(t *testing.T) {
+func TestATalosDeclarationHandsTheAdapterTheSecretTheDeclaredVariableHoldsAndNothingElse(t *testing.T) {
 	t.Setenv(theVariable, "/home/a-person/talosconfig")
 
 	talos := managercontrollermock.NewMockTalosKubeconfig(t)
 	talos.EXPECT().
-		Kubeconfig(context.Background(), theNode, theEndpoint,
-			citypes.Secret("/home/a-person/talosconfig")).
+		Kubeconfig(context.Background(), citypes.Secret("/home/a-person/talosconfig")).
 		Return([]byte(theKubeconfigDoc), nil)
 
 	source, err := managercontroller.NewKubeconfigSource(declaredTalosSource(), talos, nil)
@@ -290,7 +300,7 @@ func TestATalosDeclarationPicksTheNodeAndHandsItTheSecretTheDeclaredVariableHold
 	assert.Equal(t, theKubeconfigDoc, string(raw))
 }
 
-func TestATalosDeclarationWhoseVariableHoldsNothingIsRefusedNamingTheNodeAndTheVariable(t *testing.T) {
+func TestATalosDeclarationWhoseVariableHoldsNothingIsRefusedNamingTheVariable(t *testing.T) {
 	t.Setenv(theVariable, "")
 
 	source, err := managercontroller.NewKubeconfigSource(declaredTalosSource(), nil, nil)
@@ -299,18 +309,17 @@ func TestATalosDeclarationWhoseVariableHoldsNothingIsRefusedNamingTheNodeAndTheV
 	_, err = source.Kubeconfig(context.Background())
 	require.Error(t, err)
 	assert.Equal(t,
-		"reading the client configuration of node "+theNode+": nothing is set in "+theVariable+
+		"reading the client configuration: nothing is set in "+theVariable+
 			", and spec.kubeconfig.talos.talosconfigEnv names it. export it before reconciling",
 		err.Error())
 }
 
-func TestANodeThatRefusesToHandBackAKubeconfigIsReportedAsAnErrorNamingTheNode(t *testing.T) {
+func TestANodeThatRefusesToHandBackAKubeconfigIsReportedAsAnErrorNamingTheVariable(t *testing.T) {
 	t.Setenv(theVariable, "/home/a-person/talosconfig")
 
 	talos := managercontrollermock.NewMockTalosKubeconfig(t)
 	talos.EXPECT().
-		Kubeconfig(context.Background(), theNode, theEndpoint,
-			citypes.Secret("/home/a-person/talosconfig")).
+		Kubeconfig(context.Background(), citypes.Secret("/home/a-person/talosconfig")).
 		Return(nil, errors.New("connection refused"))
 
 	source, err := managercontroller.NewKubeconfigSource(declaredTalosSource(), talos, nil)
@@ -319,7 +328,7 @@ func TestANodeThatRefusesToHandBackAKubeconfigIsReportedAsAnErrorNamingTheNode(t
 	_, err = source.Kubeconfig(context.Background())
 	require.Error(t, err)
 	assert.Equal(t,
-		"reading the kubeconfig of node "+theNode+": connection refused", err.Error())
+		"reading the kubeconfig through "+theVariable+": connection refused", err.Error())
 }
 
 func TestADeclarationNamingNoSourceIsRefusedByThePickerRatherThanHandingBackANilSource(t *testing.T) {
@@ -335,8 +344,6 @@ func TestADeclarationNamingNoSourceIsRefusedByThePickerRatherThanHandingBackANil
 func declaredTalosSource() managercontroller.DeclaredKubeconfig {
 	return managercontroller.DeclaredKubeconfig{
 		Source:         managercontroller.SourceTalos,
-		Node:           theNode,
-		Endpoint:       theEndpoint,
 		TalosconfigEnv: theVariable,
 	}
 }

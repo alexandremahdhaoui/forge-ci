@@ -58,6 +58,7 @@ packages:
       pkgname: machineconfigcontrollermock
     interfaces:
       Renderer:
+      Talosconfig:
 
   github.com/alexandremahdhaoui/forge-ci/internal/driver/clidriver:
     config:

@@ -13,7 +13,8 @@ import (
 )
 
 const (
-	KindMachineConfig = "machine-config"
+	KindMachineConfig    = "machine-config"
+	KindClusterBootstrap = "cluster-bootstrap"
 
 	defaultTalosconfigVariable = "TALOSCONFIG"
 )
@@ -21,6 +22,9 @@ const (
 type Talos interface {
 	MachineConfig(ctx context.Context, node string, talosconfig citypes.Secret) (string, error)
 	ApplyMachineConfig(ctx context.Context, node string, talosconfig citypes.Secret, config string) error
+	Bootstrap(ctx context.Context, node string, talosconfig citypes.Secret) error
+	Bootstrapped(ctx context.Context, node string, talosconfig citypes.Secret) (bool, error)
+	WaitNodeRegistered(ctx context.Context, node string, talosconfig citypes.Secret) error
 }
 
 type TalosRealizer struct {
@@ -43,9 +47,12 @@ func (r TalosRealizer) Realize(res citypes.Resource, opts Options) (Action, erro
 	switch res.Kind {
 	case KindMachineConfig:
 		return r.realizeMachineConfig(res, opts)
+	case KindClusterBootstrap:
+		return r.realizeClusterBootstrap(res, opts)
 	default:
 		return Action{}, fmt.Errorf(
-			"the talos manager cannot realize kind %q, it knows %s", res.Kind, KindMachineConfig)
+			"the talos manager cannot realize kind %q, it knows %s and %s",
+			res.Kind, KindMachineConfig, KindClusterBootstrap)
 	}
 }
 
@@ -87,11 +94,11 @@ func (r TalosRealizer) realizeMachineConfig(res citypes.Resource, opts Options) 
 	}
 
 	if same {
-		return Kept("kept machine config on node " + node), nil
+		return Kept("kept machine config " + res.Name), nil
 	}
 
 	if opts.DryRun {
-		return Kept(opts.would("apply machine config to node " + node)), nil
+		return Kept(opts.would("apply machine config " + res.Name)), nil
 	}
 
 	if err := r.talos.ApplyMachineConfig(r.ctx, node, talosconfig, declared); err != nil {
@@ -100,7 +107,58 @@ func (r TalosRealizer) realizeMachineConfig(res citypes.Resource, opts Options) 
 			node, source, err)
 	}
 
-	return Did("applied machine config to node " + node), nil
+	return Did("applied machine config " + res.Name), nil
+}
+
+func (r TalosRealizer) realizeClusterBootstrap(res citypes.Resource, opts Options) (Action, error) {
+	node, err := citypes.SpecString(res.Spec, "node")
+	if err != nil {
+		return Action{}, err
+	}
+
+	if node == "" {
+		return Action{}, errors.New("spec.node is required")
+	}
+
+	talosconfig, source, err := r.talosconfigFor(res.Spec)
+	if err != nil {
+		return Action{}, err
+	}
+
+	if r.talos == nil {
+		return Action{}, fmt.Errorf(
+			"reading the bootstrap state of node %s: this manager carries no node client yet", node)
+	}
+
+	bootstrapped, err := r.talos.Bootstrapped(r.ctx, node, talosconfig)
+	if err != nil {
+		return Action{}, fmt.Errorf(
+			"reading the bootstrap state of node %s using the client configuration from %s: %w",
+			node, source, err)
+	}
+
+	if bootstrapped {
+		if err := r.talos.WaitNodeRegistered(r.ctx, node, talosconfig); err != nil {
+			return Action{}, fmt.Errorf("waiting for node %s to register: %w", node, err)
+		}
+
+		return Kept("kept cluster bootstrap " + res.Name), nil
+	}
+
+	if opts.DryRun {
+		return Kept(opts.would("bootstrap cluster " + res.Name)), nil
+	}
+
+	if err := r.talos.Bootstrap(r.ctx, node, talosconfig); err != nil {
+		return Action{}, fmt.Errorf(
+			"bootstrapping node %s using the client configuration from %s: %w", node, source, err)
+	}
+
+	if err := r.talos.WaitNodeRegistered(r.ctx, node, talosconfig); err != nil {
+		return Action{}, fmt.Errorf("waiting for node %s to register: %w", node, err)
+	}
+
+	return Did("bootstrapped cluster " + res.Name), nil
 }
 
 func (r TalosRealizer) talosconfigFor(spec map[string]any) (citypes.Secret, string, error) {
@@ -142,12 +200,16 @@ func (r TalosRealizer) talosconfigFor(spec map[string]any) (citypes.Secret, stri
 }
 
 func sameMachineConfig(running, declared string) (bool, error) {
-	have, err := loadMachineConfig(running, "the machine config the node holds")
+	want, err := loadMachineConfig(declared, "the declared machine config")
 	if err != nil {
 		return false, err
 	}
 
-	want, err := loadMachineConfig(declared, "the declared machine config")
+	if running == "" {
+		return false, nil
+	}
+
+	have, err := loadMachineConfig(running, "the machine config the node holds")
 	if err != nil {
 		return false, err
 	}

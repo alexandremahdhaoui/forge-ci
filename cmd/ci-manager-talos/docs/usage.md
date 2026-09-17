@@ -2,27 +2,27 @@
 
 # ci-manager-talos
 
-**Converge the machine config of a declared node, and record what it changed.**
+**Converge the machine config of a declared node, bootstrap its cluster, and record what it changed.**
 
 A forge-ci `manager` engine.
 
 ## Why it exists
 
 A cluster host is declared, never clicked. The engine that owns the cluster
-declares one machine config per node and this manager makes the node hold it,
-so a wiped box rebuilds from the same declaration and a second run finds
-nothing left to do.
+declares one machine config and one bootstrap and this manager makes the
+node hold the config and the cluster exist, so a wiped box rebuilds from the
+same declaration and a second run finds nothing left to do.
 
 ## Tools
 
 | Tool | Does |
 |---|---|
-| `reconcile` | Converge every declared node to its machine config and return who owns it. |
+| `reconcile` | Converge every declared node to its machine config, bootstrap every declared cluster, and return who owns it. |
 
 ## By hand
 
 ```sh
-echo '{"manager":"talos","resources":[{"kind":"machine-config","name":"t0-controlplane","spec":{"node":"192.168.1.10","talosconfigEnv":"TALOSCONFIG","config":"version: v1alpha1\n"}}]}' \
+echo '{"manager":"talos","resources":[{"kind":"machine-config","name":"t0","spec":{"node":"box.lan","talosconfigEnv":"TALOSCONFIG","config":"version: v1alpha1\n"}},{"kind":"cluster-bootstrap","name":"t0","spec":{"node":"box.lan","talosconfigEnv":"TALOSCONFIG"}}]}' \
   | ci-manager-talos reconcile
 ```
 
@@ -42,13 +42,30 @@ engines:
 
 ## Worth knowing
 
-It knows one kind, `machine-config`. The resource name is the node's name in
-the declaration and `spec.node` is the address the manager reaches.
+It knows two kinds, `machine-config` and `cluster-bootstrap`. The resource
+name is the cluster's name in the declaration and `spec.node` is the node
+the talosconfig context names. Every dial goes through the endpoints of the
+talosconfig's current context, which must name exactly one node.
 `spec.config` is the machine config document, one document or several
 separated by a document marker. The client configuration comes from
 `spec.talosconfig` as a path, or from the variable `spec.talosconfigEnv`
 names, or from the variable the manager spec names, which defaults to
-TALOSCONFIG.
+TALOSCONFIG. An action names the resource and never the node.
+
+A fresh node boots in maintenance with no PKI and refuses a secure dial. The
+manager dials secure first. When that fails on a certificate error it probes
+the node's machine status over an insecure connection, and only when the
+stage reads maintenance does it treat the node as holding no config and
+apply over that insecure connection. Any other stage and any other failure
+is the secure error, by name. After such an apply the node installs and
+reboots, so every later dial in the same run retries until a ceiling of ten
+minutes and names the last cause when it passes.
+
+`cluster-bootstrap` reads whether etcd runs on the node. When it does, the
+manager waits for a node to register with the Kubernetes API and answers
+Kept. When it does not, the manager bootstraps and waits the same way and
+answers Did. Registered means a node object exists and has posted a status.
+It never waits for Ready, which belongs to the platform layer.
 
 Kept means the node already holds this config. The manager reads the config
 the node is running before it writes anything, loads both configs through the

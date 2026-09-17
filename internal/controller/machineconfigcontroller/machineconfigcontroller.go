@@ -3,6 +3,7 @@ package machineconfigcontroller
 import (
 	"errors"
 	"fmt"
+	"net"
 	"path/filepath"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/fsadapter"
@@ -10,14 +11,15 @@ import (
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 )
 
-const kindMachineConfig = "machine-config"
+const (
+	kindMachineConfig    = "machine-config"
+	kindClusterBootstrap = "cluster-bootstrap"
 
-var (
-	ErrNodes = errors.New(
-		"this engine needs spec.nodes naming at least one node, each with name and address")
-	ErrNeverPublishes = errors.New(
-		"this engine declares machine configs and never publishes: no substage may name it")
+	apiServerPort = "6443"
 )
+
+var ErrNeverPublishes = errors.New(
+	"this engine declares machine configs and never publishes: no substage may name it")
 
 type Renderer interface {
 	Load(bundle citypes.Secret) (citypes.Secret, error)
@@ -26,24 +28,40 @@ type Renderer interface {
 	) (citypes.Secret, error)
 }
 
-type Controller struct {
-	fs       fsadapter.FS
-	renderer Renderer
+type Talosconfig interface {
+	Context(talosconfig citypes.Secret) (citypes.TalosContext, error)
 }
 
-func New(fs fsadapter.FS, renderer Renderer) *Controller {
-	return &Controller{fs: fs, renderer: renderer}
+type Controller struct {
+	fs          fsadapter.FS
+	renderer    Renderer
+	talosconfig Talosconfig
+}
+
+func New(fs fsadapter.FS, renderer Renderer, talosconfig Talosconfig) *Controller {
+	return &Controller{fs: fs, renderer: renderer, talosconfig: talosconfig}
 }
 
 func (c *Controller) Declare(in citypes.DeclareInput) (citypes.DeclareOutput, error) {
-	nodes, err := declaredNodes(in.Spec)
+	clusterName, err := requiredString(in.Spec, "clusterName")
 	if err != nil {
 		return citypes.DeclareOutput{}, err
 	}
 
-	cluster, err := declaredCluster(in.Spec)
+	kubernetesVersion, err := requiredString(in.Spec, "kubernetesVersion")
 	if err != nil {
 		return citypes.DeclareOutput{}, err
+	}
+
+	target, err := c.declaredContext(in.Spec, clusterName)
+	if err != nil {
+		return citypes.DeclareOutput{}, err
+	}
+
+	cluster := talossecretsadapter.Cluster{
+		Name:              clusterName,
+		Endpoint:          "https://" + net.JoinHostPort(hostOf(target.Endpoints[0]), apiServerPort),
+		KubernetesVersion: kubernetesVersion,
 	}
 
 	config, err := c.render(in.Root, in.Spec, cluster)
@@ -51,21 +69,53 @@ func (c *Controller) Declare(in citypes.DeclareInput) (citypes.DeclareOutput, er
 		return citypes.DeclareOutput{}, err
 	}
 
-	resources := make([]citypes.Resource, 0, len(nodes))
-
-	for _, node := range nodes {
-		resources = append(resources, citypes.Resource{
+	return citypes.DeclareOutput{Resources: []citypes.Resource{
+		{
 			Kind: kindMachineConfig,
-			Name: node.Name,
-			Spec: map[string]any{"node": node.Address, "config": string(config)},
-		})
-	}
-
-	return citypes.DeclareOutput{Resources: resources}, nil
+			Name: clusterName,
+			Spec: map[string]any{"node": target.Node, "config": string(config)},
+		},
+		{
+			Kind: kindClusterBootstrap,
+			Name: clusterName,
+			Spec: map[string]any{"node": target.Node},
+		},
+	}}, nil
 }
 
 func (c *Controller) Publish() error {
 	return ErrNeverPublishes
+}
+
+func (c *Controller) declaredContext(spec map[string]any, clusterName string) (citypes.TalosContext, error) {
+	variable, err := requiredString(spec, "talosconfigEnv")
+	if err != nil {
+		return citypes.TalosContext{}, err
+	}
+
+	talosconfig := citypes.SecretFromEnv(variable)
+	if talosconfig == "" {
+		return citypes.TalosContext{}, fmt.Errorf(
+			"reading the client configuration of cluster %s: nothing is set in %s, "+
+				"and spec.talosconfigEnv names it. export it before declaring", clusterName, variable)
+	}
+
+	target, err := c.talosconfig.Context(talosconfig)
+	if err != nil {
+		return citypes.TalosContext{}, fmt.Errorf(
+			"reading the client configuration of cluster %s: %w", clusterName, err)
+	}
+
+	return target, nil
+}
+
+func hostOf(endpoint string) string {
+	host, _, err := net.SplitHostPort(endpoint)
+	if err != nil {
+		return endpoint
+	}
+
+	return host
 }
 
 func (c *Controller) render(
@@ -106,30 +156,6 @@ func (c *Controller) render(
 	return config, nil
 }
 
-type node struct {
-	Name    string
-	Address string
-}
-
-func declaredCluster(spec map[string]any) (talossecretsadapter.Cluster, error) {
-	fields := map[string]string{}
-
-	for _, key := range []string{"clusterName", "endpoint", "kubernetesVersion"} {
-		value, err := requiredString(spec, key)
-		if err != nil {
-			return talossecretsadapter.Cluster{}, err
-		}
-
-		fields[key] = value
-	}
-
-	return talossecretsadapter.Cluster{
-		Name:              fields["clusterName"],
-		Endpoint:          fields["endpoint"],
-		KubernetesVersion: fields["kubernetesVersion"],
-	}, nil
-}
-
 func requiredString(spec map[string]any, key string) (string, error) {
 	value, err := citypes.SpecString(spec, key)
 	if err != nil {
@@ -141,51 +167,4 @@ func requiredString(spec map[string]any, key string) (string, error) {
 	}
 
 	return value, nil
-}
-
-func declaredNodes(spec map[string]any) ([]node, error) {
-	raw, ok := spec["nodes"].([]any)
-	if !ok || len(raw) == 0 {
-		return nil, ErrNodes
-	}
-
-	nodes := make([]node, 0, len(raw))
-
-	for i, entry := range raw {
-		held, ok := entry.(map[string]any)
-		if !ok {
-			return nil, fmt.Errorf("reading spec.nodes[%d]: an object is required, the spec holds a %T", i, entry)
-		}
-
-		read, err := readNode(i, held)
-		if err != nil {
-			return nil, err
-		}
-
-		nodes = append(nodes, read)
-	}
-
-	return nodes, nil
-}
-
-func readNode(index int, held map[string]any) (node, error) {
-	name, err := citypes.SpecString(held, "name")
-	if err != nil {
-		return node{}, fmt.Errorf("reading spec.nodes[%d]: %w", index, err)
-	}
-
-	if name == "" {
-		return node{}, fmt.Errorf("reading spec.nodes[%d]: name is required", index)
-	}
-
-	address, err := citypes.SpecString(held, "address")
-	if err != nil {
-		return node{}, fmt.Errorf("reading node %s: %w", name, err)
-	}
-
-	if address == "" {
-		return node{}, fmt.Errorf("reading node %s: address is required", name)
-	}
-
-	return node{Name: name, Address: address}, nil
 }

@@ -21,24 +21,27 @@ const (
 	loadedBundle   = "bundle: the loaded cluster CA private key\n"
 	patchText      = "machine:\n  install:\n    disk: /dev/sda\n"
 	renderedConfig = "version: v1alpha1\nmachine:\n  ca:\n    key: the rendered private key\n"
+
+	theVariable = "A_TALOSCONFIG_THIS_TEST_OWNS"
+	thePath     = "/home/a-person/talosconfig"
+	theNode     = "box.lan"
 )
 
-func nodeSpec(name, address string) map[string]any {
-	return map[string]any{"name": name, "address": address}
+func theContext() citypes.TalosContext {
+	return citypes.TalosContext{Endpoints: []string{"box.lan:50000", "spare.lan"}, Node: theNode}
 }
 
 func theCluster() talossecretsadapter.Cluster {
 	return talossecretsadapter.Cluster{
-		Name: "t0", Endpoint: "https://10.0.0.1:6443", KubernetesVersion: "1.37.0",
+		Name: "t0", Endpoint: "https://box.lan:6443", KubernetesVersion: "1.37.0",
 	}
 }
 
-func fullSpec(nodes ...any) map[string]any {
+func fullSpec() map[string]any {
 	return map[string]any{
-		"nodes":             nodes,
 		"clusterName":       "t0",
-		"endpoint":          "https://10.0.0.1:6443",
 		"kubernetesVersion": "1.37.0",
+		"talosconfigEnv":    theVariable,
 		"bundleFile":        "secrets/bundle.yaml",
 		"patchFile":         "talos/controlplane.patch.yaml",
 	}
@@ -70,27 +73,44 @@ func aRenderer(t *testing.T) *machineconfigcontrollermock.MockRenderer {
 	return renderer
 }
 
-func TestANodeDeclaresAResourceWhoseConfigIsTheRenderedBytesAndNotTheFileBytes(t *testing.T) {
-	t.Parallel()
+func aTalosconfig(t *testing.T) *machineconfigcontrollermock.MockTalosconfig {
+	t.Helper()
 
-	out, err := machineconfigcontroller.New(filesOnDisk(t), aRenderer(t)).Declare(citypes.DeclareInput{
-		Root: "/w",
-		Spec: fullSpec(nodeSpec("t0-controlplane", "192.168.1.10")),
-	})
+	talosconfig := machineconfigcontrollermock.NewMockTalosconfig(t)
+	talosconfig.EXPECT().Context(citypes.Secret(thePath)).Return(theContext(), nil).Maybe()
+
+	return talosconfig
+}
+
+func exported(t *testing.T) {
+	t.Helper()
+	t.Setenv(theVariable, thePath)
+}
+
+func TestAClusterDeclaresItsMachineConfigThenItsBootstrapBothNamedByTheClusterAndReachingTheContextNode(t *testing.T) {
+	exported(t)
+
+	out, err := machineconfigcontroller.New(filesOnDisk(t), aRenderer(t), aTalosconfig(t)).
+		Declare(citypes.DeclareInput{Root: "/w", Spec: fullSpec()})
 
 	require.NoError(t, err)
-	require.Len(t, out.Resources, 1)
+	require.Len(t, out.Resources, 2)
 	assert.Equal(t, citypes.Resource{
 		Kind: "machine-config",
-		Name: "t0-controlplane",
-		Spec: map[string]any{"node": "192.168.1.10", "config": renderedConfig},
+		Name: "t0",
+		Spec: map[string]any{"node": theNode, "config": renderedConfig},
 	}, out.Resources[0])
+	assert.Equal(t, citypes.Resource{
+		Kind: "cluster-bootstrap",
+		Name: "t0",
+		Spec: map[string]any{"node": theNode},
+	}, out.Resources[1])
 	assert.NotEqual(t, storedBundle, out.Resources[0].Spec["config"])
 	assert.NotEqual(t, patchText, out.Resources[0].Spec["config"])
 }
 
-func TestTheRendererReceivesTheLoadedBundleTheDeclaredClusterAndThePatchFileText(t *testing.T) {
-	t.Parallel()
+func TestTheRendererReceivesTheLoadedBundleTheClusterEndpointBuiltFromTheFirstContextEndpointAndThePatchText(t *testing.T) {
+	exported(t)
 
 	renderer := machineconfigcontrollermock.NewMockRenderer(t)
 	renderer.EXPECT().Load(citypes.Secret(storedBundle)).Return(citypes.Secret(loadedBundle), nil).Once()
@@ -98,41 +118,67 @@ func TestTheRendererReceivesTheLoadedBundleTheDeclaredClusterAndThePatchFileText
 		MachineConfig(citypes.Secret(loadedBundle), theCluster(), patchText).
 		Return(citypes.Secret(renderedConfig), nil).Once()
 
-	_, err := machineconfigcontroller.New(filesOnDisk(t), renderer).Declare(citypes.DeclareInput{
-		Root: "/w",
-		Spec: fullSpec(nodeSpec("t0-controlplane", "192.168.1.10")),
-	})
+	_, err := machineconfigcontroller.New(filesOnDisk(t), renderer, aTalosconfig(t)).
+		Declare(citypes.DeclareInput{Root: "/w", Spec: fullSpec()})
 
 	require.NoError(t, err)
 }
 
-func TestEveryDeclaredNodeCarriesTheSameRenderedConfigInTheOrderDeclared(t *testing.T) {
-	t.Parallel()
+func TestAContextEndpointWithoutAPortStillBecomesTheClusterEndpointOnPort6443(t *testing.T) {
+	exported(t)
 
-	out, err := machineconfigcontroller.New(filesOnDisk(t), aRenderer(t)).Declare(citypes.DeclareInput{
-		Root: "/w",
-		Spec: fullSpec(nodeSpec("one", "10.0.0.1"), nodeSpec("two", "10.0.0.2")),
-	})
+	talosconfig := machineconfigcontrollermock.NewMockTalosconfig(t)
+	talosconfig.EXPECT().Context(citypes.Secret(thePath)).
+		Return(citypes.TalosContext{Endpoints: []string{"box.lan"}, Node: theNode}, nil)
+
+	_, err := machineconfigcontroller.New(filesOnDisk(t), aRenderer(t), talosconfig).
+		Declare(citypes.DeclareInput{Root: "/w", Spec: fullSpec()})
 
 	require.NoError(t, err)
-	require.Len(t, out.Resources, 2)
-	assert.Equal(t, "one", out.Resources[0].Name)
-	assert.Equal(t, renderedConfig, out.Resources[0].Spec["config"])
-	assert.Equal(t, "two", out.Resources[1].Name)
-	assert.Equal(t, "10.0.0.2", out.Resources[1].Spec["node"])
-	assert.Equal(t, renderedConfig, out.Resources[1].Spec["config"])
+}
+
+func TestAVariableHoldingNothingIsRefusedNamingTheClusterAndTheVariableBeforeAnyFileIsRead(t *testing.T) {
+	t.Setenv(theVariable, "")
+
+	_, err := machineconfigcontroller.New(
+		fsadaptermock.NewMockFS(t),
+		machineconfigcontrollermock.NewMockRenderer(t),
+		machineconfigcontrollermock.NewMockTalosconfig(t),
+	).Declare(citypes.DeclareInput{Root: "/w", Spec: fullSpec()})
+
+	require.Error(t, err)
+	assert.Equal(t,
+		"reading the client configuration of cluster t0: nothing is set in "+theVariable+
+			", and spec.talosconfigEnv names it. export it before declaring", err.Error())
+}
+
+func TestATalosconfigTheAdapterRefusesIsAnErrorNamingTheClusterAndNeverThePath(t *testing.T) {
+	exported(t)
+
+	talosconfig := machineconfigcontrollermock.NewMockTalosconfig(t)
+	talosconfig.EXPECT().Context(citypes.Secret(thePath)).
+		Return(citypes.TalosContext{}, errors.New("context \"t0\" names 2 nodes"))
+
+	_, err := machineconfigcontroller.New(
+		fsadaptermock.NewMockFS(t), machineconfigcontrollermock.NewMockRenderer(t), talosconfig,
+	).Declare(citypes.DeclareInput{Root: "/w", Spec: fullSpec()})
+
+	require.Error(t, err)
+	assert.Equal(t,
+		"reading the client configuration of cluster t0: context \"t0\" names 2 nodes", err.Error())
+	assert.NotContains(t, err.Error(), thePath)
 }
 
 func TestAMissingBundleFileIsRefusedNamingTheClusterAndTheFile(t *testing.T) {
-	t.Parallel()
+	exported(t)
 
 	fs := fsadaptermock.NewMockFS(t)
 	fs.EXPECT().
 		ReadFile(filepath.Join("/w", "secrets", "bundle.yaml")).
 		Return(nil, errors.New("no such file"))
 
-	_, err := machineconfigcontroller.New(fs, machineconfigcontrollermock.NewMockRenderer(t)).
-		Declare(citypes.DeclareInput{Root: "/w", Spec: fullSpec(nodeSpec("one", "10.0.0.1"))})
+	_, err := machineconfigcontroller.New(fs, machineconfigcontrollermock.NewMockRenderer(t), aTalosconfig(t)).
+		Declare(citypes.DeclareInput{Root: "/w", Spec: fullSpec()})
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "reading the secret bundle of cluster t0 from secrets/bundle.yaml")
@@ -140,7 +186,7 @@ func TestAMissingBundleFileIsRefusedNamingTheClusterAndTheFile(t *testing.T) {
 }
 
 func TestAMissingPatchFileIsRefusedNamingTheClusterAndTheFile(t *testing.T) {
-	t.Parallel()
+	exported(t)
 
 	fs := fsadaptermock.NewMockFS(t)
 	fs.EXPECT().
@@ -150,8 +196,8 @@ func TestAMissingPatchFileIsRefusedNamingTheClusterAndTheFile(t *testing.T) {
 		ReadFile(filepath.Join("/w", "talos", "controlplane.patch.yaml")).
 		Return(nil, errors.New("no such file"))
 
-	_, err := machineconfigcontroller.New(fs, aRenderer(t)).
-		Declare(citypes.DeclareInput{Root: "/w", Spec: fullSpec(nodeSpec("one", "10.0.0.1"))})
+	_, err := machineconfigcontroller.New(fs, aRenderer(t), aTalosconfig(t)).
+		Declare(citypes.DeclareInput{Root: "/w", Spec: fullSpec()})
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(),
@@ -159,18 +205,18 @@ func TestAMissingPatchFileIsRefusedNamingTheClusterAndTheFile(t *testing.T) {
 	assert.Contains(t, err.Error(), "no such file")
 }
 
-func TestEachAbsentClusterKeyIsRefusedByNameBeforeAnyFileIsRead(t *testing.T) {
-	t.Parallel()
+func TestEachAbsentSpecKeyIsRefusedByNameBeforeAnyFileIsRead(t *testing.T) {
+	exported(t)
 
-	for _, key := range []string{"clusterName", "endpoint", "kubernetesVersion", "bundleFile", "patchFile"} {
+	for _, key := range []string{"clusterName", "kubernetesVersion", "talosconfigEnv", "bundleFile", "patchFile"} {
 		t.Run(key, func(t *testing.T) {
-			t.Parallel()
-
-			spec := fullSpec(nodeSpec("one", "10.0.0.1"))
+			spec := fullSpec()
 			delete(spec, key)
 
 			_, err := machineconfigcontroller.New(
-				fsadaptermock.NewMockFS(t), machineconfigcontrollermock.NewMockRenderer(t),
+				fsadaptermock.NewMockFS(t),
+				machineconfigcontrollermock.NewMockRenderer(t),
+				aTalosconfig(t),
 			).Declare(citypes.DeclareInput{Root: "/w", Spec: spec})
 
 			require.Error(t, err)
@@ -179,36 +225,38 @@ func TestEachAbsentClusterKeyIsRefusedByNameBeforeAnyFileIsRead(t *testing.T) {
 	}
 }
 
-func TestAClusterKeyThatIsNotAStringIsRefusedByName(t *testing.T) {
-	t.Parallel()
+func TestASpecKeyThatIsNotAStringIsRefusedByName(t *testing.T) {
+	exported(t)
 
-	spec := fullSpec(nodeSpec("one", "10.0.0.1"))
-	spec["endpoint"] = 6443
+	spec := fullSpec()
+	spec["kubernetesVersion"] = 1.37
 
 	_, err := machineconfigcontroller.New(
-		fsadaptermock.NewMockFS(t), machineconfigcontrollermock.NewMockRenderer(t),
+		fsadaptermock.NewMockFS(t),
+		machineconfigcontrollermock.NewMockRenderer(t),
+		machineconfigcontrollermock.NewMockTalosconfig(t),
 	).Declare(citypes.DeclareInput{Root: "/w", Spec: spec})
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "spec.endpoint")
+	assert.Contains(t, err.Error(), "spec.kubernetesVersion")
 }
 
 func TestABundleTheRendererRefusesIsAnErrorNamingTheCluster(t *testing.T) {
-	t.Parallel()
+	exported(t)
 
 	renderer := machineconfigcontrollermock.NewMockRenderer(t)
 	renderer.EXPECT().Load(citypes.Secret(storedBundle)).
 		Return("", errors.New("reading the stored talos secret bundle: it is not a secret bundle document"))
 
-	_, err := machineconfigcontroller.New(filesOnDisk(t), renderer).
-		Declare(citypes.DeclareInput{Root: "/w", Spec: fullSpec(nodeSpec("one", "10.0.0.1"))})
+	_, err := machineconfigcontroller.New(filesOnDisk(t), renderer, aTalosconfig(t)).
+		Declare(citypes.DeclareInput{Root: "/w", Spec: fullSpec()})
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "loading the secret bundle of cluster t0")
 }
 
-func TestNoRefusalEverCarriesBundlePatchOrConfigBytes(t *testing.T) {
-	t.Parallel()
+func TestNoRefusalEverCarriesBundlePatchConfigOrTalosconfigBytes(t *testing.T) {
+	exported(t)
 
 	failures := map[string]func(*testing.T) (*fsadaptermock.MockFS, *machineconfigcontrollermock.MockRenderer){
 		"the bundle does not load": func(t *testing.T) (
@@ -234,91 +282,17 @@ func TestNoRefusalEverCarriesBundlePatchOrConfigBytes(t *testing.T) {
 
 	for name, failure := range failures {
 		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
 			fs, renderer := failure(t)
 
-			_, err := machineconfigcontroller.New(fs, renderer).
-				Declare(citypes.DeclareInput{Root: "/w", Spec: fullSpec(nodeSpec("one", "10.0.0.1"))})
+			_, err := machineconfigcontroller.New(fs, renderer, aTalosconfig(t)).
+				Declare(citypes.DeclareInput{Root: "/w", Spec: fullSpec()})
 
 			require.Error(t, err)
 
-			for _, secret := range []string{storedBundle, loadedBundle, patchText, renderedConfig} {
+			for _, secret := range []string{storedBundle, loadedBundle, patchText, renderedConfig, thePath} {
 				assert.False(t, strings.Contains(err.Error(), strings.TrimSpace(secret)),
 					"the refusal carries bytes it must never print")
 			}
-		})
-	}
-}
-
-func TestASpecWithNoNodesIsRefusedByName(t *testing.T) {
-	t.Parallel()
-
-	for name, spec := range map[string]map[string]any{
-		"no nodes key":   {},
-		"an empty list":  {"nodes": []any{}},
-		"not a list":     {"nodes": "controlplane"},
-		"a nil declared": {"nodes": nil},
-	} {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			_, err := machineconfigcontroller.New(
-				fsadaptermock.NewMockFS(t), machineconfigcontrollermock.NewMockRenderer(t),
-			).Declare(citypes.DeclareInput{Spec: spec})
-
-			require.ErrorIs(t, err, machineconfigcontroller.ErrNodes)
-		})
-	}
-}
-
-func TestANodeMissingItsNameOrItsAddressIsRefusedByName(t *testing.T) {
-	t.Parallel()
-
-	for want, entry := range map[string]any{
-		"name is required":    nodeSpec("", "10.0.0.1"),
-		"address is required": nodeSpec("one", ""),
-	} {
-		t.Run(want, func(t *testing.T) {
-			t.Parallel()
-
-			_, err := machineconfigcontroller.New(
-				fsadaptermock.NewMockFS(t), machineconfigcontrollermock.NewMockRenderer(t),
-			).Declare(citypes.DeclareInput{Spec: fullSpec(entry)})
-
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), want)
-		})
-	}
-}
-
-func TestANodeThatIsNotAnObjectIsRefusedByItsPosition(t *testing.T) {
-	t.Parallel()
-
-	_, err := machineconfigcontroller.New(
-		fsadaptermock.NewMockFS(t), machineconfigcontrollermock.NewMockRenderer(t),
-	).Declare(citypes.DeclareInput{Spec: fullSpec("controlplane")})
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "spec.nodes[0]")
-}
-
-func TestANodeFieldThatIsNotAStringIsRefusedByName(t *testing.T) {
-	t.Parallel()
-
-	for field, entry := range map[string]any{
-		"spec.nodes[0]": map[string]any{"name": 1, "address": "10.0.0.1"},
-		"address":       map[string]any{"name": "one", "address": 10},
-	} {
-		t.Run(field, func(t *testing.T) {
-			t.Parallel()
-
-			_, err := machineconfigcontroller.New(
-				fsadaptermock.NewMockFS(t), machineconfigcontrollermock.NewMockRenderer(t),
-			).Declare(citypes.DeclareInput{Spec: fullSpec(entry)})
-
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), field)
 		})
 	}
 }
@@ -327,7 +301,9 @@ func TestPublishRefusesByNameBecauseThisEngineOnlyDeclares(t *testing.T) {
 	t.Parallel()
 
 	err := machineconfigcontroller.New(
-		fsadaptermock.NewMockFS(t), machineconfigcontrollermock.NewMockRenderer(t),
+		fsadaptermock.NewMockFS(t),
+		machineconfigcontrollermock.NewMockRenderer(t),
+		machineconfigcontrollermock.NewMockTalosconfig(t),
 	).Publish()
 
 	require.ErrorIs(t, err, machineconfigcontroller.ErrNeverPublishes)

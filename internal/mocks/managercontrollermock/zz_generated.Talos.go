@@ -107,6 +107,141 @@ func (_c *MockTalos_ApplyMachineConfig_Call) RunAndReturn(run func(ctx context.C
 	return _c
 }
 
+// Bootstrap provides a mock function for the type MockTalos
+func (_mock *MockTalos) Bootstrap(ctx context.Context, node string, talosconfig citypes.Secret) error {
+	ret := _mock.Called(ctx, node, talosconfig)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Bootstrap")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, citypes.Secret) error); ok {
+		r0 = returnFunc(ctx, node, talosconfig)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockTalos_Bootstrap_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Bootstrap'
+type MockTalos_Bootstrap_Call struct {
+	*mock.Call
+}
+
+// Bootstrap is a helper method to define mock.On call
+//   - ctx context.Context
+//   - node string
+//   - talosconfig citypes.Secret
+func (_e *MockTalos_Expecter) Bootstrap(ctx any, node any, talosconfig any) *MockTalos_Bootstrap_Call {
+	return &MockTalos_Bootstrap_Call{Call: _e.mock.On("Bootstrap", ctx, node, talosconfig)}
+}
+
+func (_c *MockTalos_Bootstrap_Call) Run(run func(ctx context.Context, node string, talosconfig citypes.Secret)) *MockTalos_Bootstrap_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 citypes.Secret
+		if args[2] != nil {
+			arg2 = args[2].(citypes.Secret)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *MockTalos_Bootstrap_Call) Return(err error) *MockTalos_Bootstrap_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockTalos_Bootstrap_Call) RunAndReturn(run func(ctx context.Context, node string, talosconfig citypes.Secret) error) *MockTalos_Bootstrap_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// Bootstrapped provides a mock function for the type MockTalos
+func (_mock *MockTalos) Bootstrapped(ctx context.Context, node string, talosconfig citypes.Secret) (bool, error) {
+	ret := _mock.Called(ctx, node, talosconfig)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Bootstrapped")
+	}
+
+	var r0 bool
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, citypes.Secret) (bool, error)); ok {
+		return returnFunc(ctx, node, talosconfig)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, citypes.Secret) bool); ok {
+		r0 = returnFunc(ctx, node, talosconfig)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, citypes.Secret) error); ok {
+		r1 = returnFunc(ctx, node, talosconfig)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockTalos_Bootstrapped_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Bootstrapped'
+type MockTalos_Bootstrapped_Call struct {
+	*mock.Call
+}
+
+// Bootstrapped is a helper method to define mock.On call
+//   - ctx context.Context
+//   - node string
+//   - talosconfig citypes.Secret
+func (_e *MockTalos_Expecter) Bootstrapped(ctx any, node any, talosconfig any) *MockTalos_Bootstrapped_Call {
+	return &MockTalos_Bootstrapped_Call{Call: _e.mock.On("Bootstrapped", ctx, node, talosconfig)}
+}
+
+func (_c *MockTalos_Bootstrapped_Call) Run(run func(ctx context.Context, node string, talosconfig citypes.Secret)) *MockTalos_Bootstrapped_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 citypes.Secret
+		if args[2] != nil {
+			arg2 = args[2].(citypes.Secret)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *MockTalos_Bootstrapped_Call) Return(b bool, err error) *MockTalos_Bootstrapped_Call {
+	_c.Call.Return(b, err)
+	return _c
+}
+
+func (_c *MockTalos_Bootstrapped_Call) RunAndReturn(run func(ctx context.Context, node string, talosconfig citypes.Secret) (bool, error)) *MockTalos_Bootstrapped_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // MachineConfig provides a mock function for the type MockTalos
 func (_mock *MockTalos) MachineConfig(ctx context.Context, node string, talosconfig citypes.Secret) (string, error) {
 	ret := _mock.Called(ctx, node, talosconfig)
@@ -175,6 +310,69 @@ func (_c *MockTalos_MachineConfig_Call) Return(s string, err error) *MockTalos_M
 }
 
 func (_c *MockTalos_MachineConfig_Call) RunAndReturn(run func(ctx context.Context, node string, talosconfig citypes.Secret) (string, error)) *MockTalos_MachineConfig_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// WaitNodeRegistered provides a mock function for the type MockTalos
+func (_mock *MockTalos) WaitNodeRegistered(ctx context.Context, node string, talosconfig citypes.Secret) error {
+	ret := _mock.Called(ctx, node, talosconfig)
+
+	if len(ret) == 0 {
+		panic("no return value specified for WaitNodeRegistered")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, citypes.Secret) error); ok {
+		r0 = returnFunc(ctx, node, talosconfig)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockTalos_WaitNodeRegistered_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'WaitNodeRegistered'
+type MockTalos_WaitNodeRegistered_Call struct {
+	*mock.Call
+}
+
+// WaitNodeRegistered is a helper method to define mock.On call
+//   - ctx context.Context
+//   - node string
+//   - talosconfig citypes.Secret
+func (_e *MockTalos_Expecter) WaitNodeRegistered(ctx any, node any, talosconfig any) *MockTalos_WaitNodeRegistered_Call {
+	return &MockTalos_WaitNodeRegistered_Call{Call: _e.mock.On("WaitNodeRegistered", ctx, node, talosconfig)}
+}
+
+func (_c *MockTalos_WaitNodeRegistered_Call) Run(run func(ctx context.Context, node string, talosconfig citypes.Secret)) *MockTalos_WaitNodeRegistered_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 citypes.Secret
+		if args[2] != nil {
+			arg2 = args[2].(citypes.Secret)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *MockTalos_WaitNodeRegistered_Call) Return(err error) *MockTalos_WaitNodeRegistered_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockTalos_WaitNodeRegistered_Call) RunAndReturn(run func(ctx context.Context, node string, talosconfig citypes.Secret) error) *MockTalos_WaitNodeRegistered_Call {
 	_c.Call.Return(run)
 	return _c
 }

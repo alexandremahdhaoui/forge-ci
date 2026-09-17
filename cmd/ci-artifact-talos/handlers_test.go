@@ -20,10 +20,21 @@ import (
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/machineconfigcontroller"
 )
 
-const patchDocument = `machine:
+const (
+	patchDocument = `machine:
   install:
     disk: /dev/the-disk-the-patch-names
 `
+	talosconfigDocument = `context: t0
+contexts:
+  t0:
+    endpoints:
+      - box.lan
+    nodes:
+      - box.lan
+`
+	theVariable = "A_TALOSCONFIG_THIS_TEST_OWNS"
+)
 
 func writeThrowawayCluster(t *testing.T) (string, []byte) {
 	t.Helper()
@@ -37,38 +48,42 @@ func writeThrowawayCluster(t *testing.T) (string, []byte) {
 	root := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(root, "bundle.yaml"), bundle, 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(root, "patch.yaml"), []byte(patchDocument), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "talosconfig"), []byte(talosconfigDocument), 0o600))
+
+	t.Setenv(theVariable, filepath.Join(root, "talosconfig"))
 
 	return root, bundle
 }
 
 func declaredSpec() Spec {
 	return Spec{
-		"nodes":             []any{map[string]any{"name": "t0-controlplane", "address": "192.168.1.10"}},
 		"clusterName":       "t0",
-		"endpoint":          "https://192.168.1.10:6443",
 		"kubernetesVersion": constants.DefaultKubernetesVersion,
+		"talosconfigEnv":    theVariable,
 		"bundleFile":        "bundle.yaml",
 		"patchFile":         "patch.yaml",
 	}
 }
 
-func TestTheDeclareToolAnswersARenderedControlPlaneConfigCarryingThePatch(t *testing.T) {
-	t.Parallel()
-
+func TestTheDeclareToolAnswersARenderedControlPlaneConfigCarryingThePatchThenTheBootstrap(t *testing.T) {
 	root, _ := writeThrowawayCluster(t)
 
 	out, err := NewHandlers().Declare(context.Background(), DeclareInput{Root: root, Spec: declaredSpec()})
 
 	require.NoError(t, err)
-	require.Len(t, out.Resources, 1)
+	require.Len(t, out.Resources, 2)
 	assert.Equal(t, "machine-config", out.Resources[0].Kind)
-	assert.Equal(t, "t0-controlplane", out.Resources[0].Name)
-	assert.Equal(t, "192.168.1.10", out.Resources[0].Spec["node"])
+	assert.Equal(t, "t0", out.Resources[0].Name)
+	assert.Equal(t, "box.lan", out.Resources[0].Spec["node"])
+	assert.Equal(t, "cluster-bootstrap", out.Resources[1].Kind)
+	assert.Equal(t, "t0", out.Resources[1].Name)
+	assert.Equal(t, "box.lan", out.Resources[1].Spec["node"])
 
 	rendered, ok := out.Resources[0].Spec["config"].(string)
 	require.True(t, ok)
 	assert.NotEqual(t, patchDocument, rendered)
 	assert.Contains(t, rendered, "/dev/the-disk-the-patch-names")
+	assert.Contains(t, rendered, "https://box.lan:6443")
 
 	loaded, err := configloader.NewFromBytes([]byte(rendered))
 	require.NoError(t, err)
@@ -76,8 +91,6 @@ func TestTheDeclareToolAnswersARenderedControlPlaneConfigCarryingThePatch(t *tes
 }
 
 func TestTheDeclareToolRendersTheSameBytesTwiceFromTheSameFiles(t *testing.T) {
-	t.Parallel()
-
 	root, _ := writeThrowawayCluster(t)
 
 	first, err := NewHandlers().Declare(context.Background(), DeclareInput{Root: root, Spec: declaredSpec()})
@@ -94,20 +107,21 @@ func TestTheDeclareToolAnswersTheControllersRefusalAndNoResources(t *testing.T) 
 
 	out, err := NewHandlers().Declare(context.Background(), DeclareInput{Spec: Spec{}})
 
-	require.ErrorIs(t, err, machineconfigcontroller.ErrNodes)
+	require.Error(t, err)
+	assert.Equal(t, "this engine needs spec.clusterName and the spec does not name it", err.Error())
 	assert.Nil(t, out)
 }
 
-func TestARefusalFromARealRenderNeverCarriesTheBundleBytes(t *testing.T) {
-	t.Parallel()
-
+func TestARefusalFromARealTalosconfigNamingTwoNodesNeverCarriesTheBundleBytes(t *testing.T) {
 	root, bundle := writeThrowawayCluster(t)
-	spec := declaredSpec()
-	spec["endpoint"] = "6443"
+	require.NoError(t, os.WriteFile(filepath.Join(root, "talosconfig"),
+		[]byte(talosconfigDocument+"      - spare.lan\n"), 0o600))
 
-	_, err := NewHandlers().Declare(context.Background(), DeclareInput{Root: root, Spec: spec})
+	_, err := NewHandlers().Declare(context.Background(), DeclareInput{Root: root, Spec: declaredSpec()})
 
 	require.Error(t, err)
+	assert.Contains(t, err.Error(), "names 2 nodes")
+	assert.Contains(t, err.Error(), "one node per cluster")
 
 	for _, line := range strings.Split(string(bundle), "\n") {
 		if len(strings.TrimSpace(line)) < 40 {

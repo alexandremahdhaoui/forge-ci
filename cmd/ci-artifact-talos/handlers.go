@@ -4,13 +4,15 @@ import (
 	"context"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/fsadapter"
+	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/talosadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/talossecretsadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/machineconfigcontroller"
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 )
 
 func NewHandlers() Handlers {
-	return newHandlers(machineconfigcontroller.New(fsadapter.New(), talossecretsadapter.New()))
+	return newHandlers(machineconfigcontroller.New(
+		fsadapter.New(), talossecretsadapter.New(), talosadapter.NewTalosconfig()))
 }
 
 func newHandlers(ctrl *machineconfigcontroller.Controller) Handlers {

@@ -39,8 +39,8 @@ func (_m *MockTalosKubeconfig) EXPECT() *MockTalosKubeconfig_Expecter {
 }
 
 // Kubeconfig provides a mock function for the type MockTalosKubeconfig
-func (_mock *MockTalosKubeconfig) Kubeconfig(ctx context.Context, node string, endpoint string, talosconfig citypes.Secret) ([]byte, error) {
-	ret := _mock.Called(ctx, node, endpoint, talosconfig)
+func (_mock *MockTalosKubeconfig) Kubeconfig(ctx context.Context, talosconfig citypes.Secret) ([]byte, error) {
+	ret := _mock.Called(ctx, talosconfig)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Kubeconfig")
@@ -48,18 +48,18 @@ func (_mock *MockTalosKubeconfig) Kubeconfig(ctx context.Context, node string, e
 
 	var r0 []byte
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, citypes.Secret) ([]byte, error)); ok {
-		return returnFunc(ctx, node, endpoint, talosconfig)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, citypes.Secret) ([]byte, error)); ok {
+		return returnFunc(ctx, talosconfig)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, citypes.Secret) []byte); ok {
-		r0 = returnFunc(ctx, node, endpoint, talosconfig)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, citypes.Secret) []byte); ok {
+		r0 = returnFunc(ctx, talosconfig)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]byte)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string, citypes.Secret) error); ok {
-		r1 = returnFunc(ctx, node, endpoint, talosconfig)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, citypes.Secret) error); ok {
+		r1 = returnFunc(ctx, talosconfig)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -73,36 +73,24 @@ type MockTalosKubeconfig_Kubeconfig_Call struct {
 
 // Kubeconfig is a helper method to define mock.On call
 //   - ctx context.Context
-//   - node string
-//   - endpoint string
 //   - talosconfig citypes.Secret
-func (_e *MockTalosKubeconfig_Expecter) Kubeconfig(ctx any, node any, endpoint any, talosconfig any) *MockTalosKubeconfig_Kubeconfig_Call {
-	return &MockTalosKubeconfig_Kubeconfig_Call{Call: _e.mock.On("Kubeconfig", ctx, node, endpoint, talosconfig)}
+func (_e *MockTalosKubeconfig_Expecter) Kubeconfig(ctx any, talosconfig any) *MockTalosKubeconfig_Kubeconfig_Call {
+	return &MockTalosKubeconfig_Kubeconfig_Call{Call: _e.mock.On("Kubeconfig", ctx, talosconfig)}
 }
 
-func (_c *MockTalosKubeconfig_Kubeconfig_Call) Run(run func(ctx context.Context, node string, endpoint string, talosconfig citypes.Secret)) *MockTalosKubeconfig_Kubeconfig_Call {
+func (_c *MockTalosKubeconfig_Kubeconfig_Call) Run(run func(ctx context.Context, talosconfig citypes.Secret)) *MockTalosKubeconfig_Kubeconfig_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
 			arg0 = args[0].(context.Context)
 		}
-		var arg1 string
+		var arg1 citypes.Secret
 		if args[1] != nil {
-			arg1 = args[1].(string)
-		}
-		var arg2 string
-		if args[2] != nil {
-			arg2 = args[2].(string)
-		}
-		var arg3 citypes.Secret
-		if args[3] != nil {
-			arg3 = args[3].(citypes.Secret)
+			arg1 = args[1].(citypes.Secret)
 		}
 		run(
 			arg0,
 			arg1,
-			arg2,
-			arg3,
 		)
 	})
 	return _c
@@ -113,7 +101,7 @@ func (_c *MockTalosKubeconfig_Kubeconfig_Call) Return(bytes []byte, err error) *
 	return _c
 }
 
-func (_c *MockTalosKubeconfig_Kubeconfig_Call) RunAndReturn(run func(ctx context.Context, node string, endpoint string, talosconfig citypes.Secret) ([]byte, error)) *MockTalosKubeconfig_Kubeconfig_Call {
+func (_c *MockTalosKubeconfig_Kubeconfig_Call) RunAndReturn(run func(ctx context.Context, talosconfig citypes.Secret) ([]byte, error)) *MockTalosKubeconfig_Kubeconfig_Call {
 	_c.Call.Return(run)
 	return _c
 }
