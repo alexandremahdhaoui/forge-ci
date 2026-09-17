@@ -73,7 +73,7 @@ func assertNothingEchoesTheSlot(t *testing.T, err error) {
 	t.Helper()
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "dialing node box.lan")
+	assert.Contains(t, err.Error(), "dialing the node the client configuration names")
 	assert.Contains(t, err.Error(), "must name a talosconfig file")
 	assert.NotContains(t, err.Error(), theKeyMarker)
 	assert.NotContains(t, err.Error(), "BEGIN OPENSSH PRIVATE KEY")
@@ -85,7 +85,7 @@ func TestReadingAMachineConfigNamesTheNodeAndNeverEchoesTheClientConfigurationSl
 	node, err := New(ApplyModeAuto)
 	require.NoError(t, err)
 
-	_, err = node.MachineConfig(t.Context(), "box.lan", thePastedClientConfiguration)
+	_, err = node.MachineConfig(t.Context(), thePastedClientConfiguration)
 	assertNothingEchoesTheSlot(t, err)
 }
 
@@ -96,7 +96,7 @@ func TestApplyingAMachineConfigNamesTheNodeAndNeverEchoesTheClientConfigurationS
 	require.NoError(t, err)
 
 	err = node.ApplyMachineConfig(
-		t.Context(), "box.lan", thePastedClientConfiguration, "version: v1alpha1\n")
+		t.Context(), thePastedClientConfiguration, "version: v1alpha1\n")
 	assertNothingEchoesTheSlot(t, err)
 }
 
@@ -107,7 +107,7 @@ func TestAPastedSlotShortEnoughToBeAFilenameIsNeverTurnedIntoAFileOnDisk(t *test
 	node, err := New(ApplyModeAuto)
 	require.NoError(t, err)
 
-	_, err = node.MachineConfig(t.Context(), "box.lan", citypes.Secret("swordfish"))
+	_, err = node.MachineConfig(t.Context(), citypes.Secret("swordfish"))
 	require.Error(t, err)
 
 	left, err := os.ReadDir(dir)
@@ -121,7 +121,7 @@ func TestAMissingClientConfigurationFileNamesTheReasonAndNotThePath(t *testing.T
 	node, err := New(ApplyModeAuto)
 	require.NoError(t, err)
 
-	_, err = node.MachineConfig(t.Context(), "box.lan", "/etc/t0/absent.yaml")
+	_, err = node.MachineConfig(t.Context(), "/etc/t0/absent.yaml")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no such file or directory")
 	assert.NotContains(t, err.Error(), "/etc/t0/absent.yaml")
@@ -135,7 +135,7 @@ func TestAClientConfigurationFileThatIsNotATalosconfigIsRefusedWithoutEchoingIt(
 	node, err := New(ApplyModeAuto)
 	require.NoError(t, err)
 
-	_, err = node.MachineConfig(t.Context(), "box.lan", citypes.Secret(path))
+	_, err = node.MachineConfig(t.Context(), citypes.Secret(path))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not a talosconfig document")
 	assert.NotContains(t, err.Error(), theKeyMarker)
@@ -265,13 +265,13 @@ func TestANodeThatRefusesTheConnectionIsReportedWithTheSecureErrorAndNeverThePro
 	node, err := New(ApplyModeAuto)
 	require.NoError(t, err)
 
-	_, err = node.MachineConfig(t.Context(), "127.0.0.1", talosconfig)
+	_, err = node.MachineConfig(t.Context(), talosconfig)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "getting the "+string(configresource.ActiveID)+" machine config resource of node 127.0.0.1")
 	assert.Contains(t, err.Error(), "connection refused")
 	assert.NotContains(t, err.Error(), "maintenance")
 
-	err = node.ApplyMachineConfig(t.Context(), "127.0.0.1", talosconfig, "version: v1alpha1\n")
+	err = node.ApplyMachineConfig(t.Context(), talosconfig, "version: v1alpha1\n")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "applying the machine config to node 127.0.0.1")
 	assert.Contains(t, err.Error(), "connection refused")
@@ -297,7 +297,7 @@ func TestAnUnreachableNodeIsAnErrorAndNeverReadsAsNotBootstrapped(t *testing.T) 
 	node, err := New(ApplyModeAuto)
 	require.NoError(t, err)
 
-	bootstrapped, err := node.Bootstrapped(t.Context(), "127.0.0.1", talosconfig)
+	bootstrapped, err := node.Bootstrapped(t.Context(), talosconfig)
 	require.Error(t, err)
 	assert.False(t, bootstrapped)
 	assert.Contains(t, err.Error(), "getting the etcd service of node 127.0.0.1")
@@ -312,7 +312,7 @@ func TestABootstrapAgainstAnUnreachableNodeNamesTheNodeAndTheCause(t *testing.T)
 	node, err := New(ApplyModeAuto)
 	require.NoError(t, err)
 
-	err = node.Bootstrap(t.Context(), "127.0.0.1", talosconfig)
+	err = node.Bootstrap(t.Context(), talosconfig)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "bootstrapping node 127.0.0.1")
 	assert.Contains(t, err.Error(), "connection refused")
@@ -326,7 +326,7 @@ func TestWaitingForAnUnreachableNodeFailsOnTheKubeconfigBeforeAnyKubernetesDial(
 	node, err := New(ApplyModeAuto)
 	require.NoError(t, err)
 
-	err = node.WaitNodeRegistered(t.Context(), "127.0.0.1", talosconfig)
+	err = node.WaitNodeRegistered(t.Context(), talosconfig)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "getting the kubeconfig of node 127.0.0.1")
 	assert.Contains(t, err.Error(), "connection refused")
@@ -358,7 +358,7 @@ func TestEveryDialRefusesATalosconfigDrivingTwoNodesBeforeReachingAnything(t *te
 	node, err := New(ApplyModeAuto)
 	require.NoError(t, err)
 
-	_, err = node.MachineConfig(t.Context(), "127.0.0.1", talosconfig)
+	_, err = node.MachineConfig(t.Context(), talosconfig)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "names 2 nodes")
 	assert.NotContains(t, err.Error(), "connection refused")
@@ -401,7 +401,7 @@ func TestARebootingNodeMakesEverySecureDialWaitInsteadOfFailingAtOnce(t *testing
 
 	node.rebooting = true
 
-	_, err = node.MachineConfig(ctx, "127.0.0.1", writeTalosconfig(t, talosconfigReachingNothing))
+	_, err = node.MachineConfig(ctx, writeTalosconfig(t, talosconfigReachingNothing))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "reading the machine config of node 127.0.0.1")
 	assert.Contains(t, err.Error(), "the last cause")

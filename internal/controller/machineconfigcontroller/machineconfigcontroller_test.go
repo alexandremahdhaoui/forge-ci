@@ -87,7 +87,7 @@ func exported(t *testing.T) {
 	t.Setenv(theVariable, thePath)
 }
 
-func TestAClusterDeclaresItsMachineConfigThenItsBootstrapBothNamedByTheClusterAndReachingTheContextNode(t *testing.T) {
+func TestAClusterDeclaresItsMachineConfigThenItsBootstrapBothNamedByTheClusterAndNeitherNamesANode(t *testing.T) {
 	exported(t)
 
 	out, err := machineconfigcontroller.New(filesOnDisk(t), aRenderer(t), aTalosconfig(t)).
@@ -98,12 +98,12 @@ func TestAClusterDeclaresItsMachineConfigThenItsBootstrapBothNamedByTheClusterAn
 	assert.Equal(t, citypes.Resource{
 		Kind: "machine-config",
 		Name: "t0",
-		Spec: map[string]any{"node": theNode, "config": renderedConfig},
+		Spec: map[string]any{"config": renderedConfig},
 	}, out.Resources[0])
 	assert.Equal(t, citypes.Resource{
 		Kind: "cluster-bootstrap",
 		Name: "t0",
-		Spec: map[string]any{"node": theNode},
+		Spec: map[string]any{},
 	}, out.Resources[1])
 	assert.NotEqual(t, storedBundle, out.Resources[0].Spec["config"])
 	assert.NotEqual(t, patchText, out.Resources[0].Spec["config"])
@@ -223,6 +223,42 @@ func TestEachAbsentSpecKeyIsRefusedByNameBeforeAnyFileIsRead(t *testing.T) {
 			assert.Equal(t, "this engine needs spec."+key+" and the spec does not name it", err.Error())
 		})
 	}
+}
+
+func TestTheRetiredEndpointKeyIsRefusedByNameBeforeAnythingIsRead(t *testing.T) {
+	exported(t)
+
+	spec := fullSpec()
+	spec["endpoint"] = "https://box.lan:6443"
+
+	_, err := machineconfigcontroller.New(
+		fsadaptermock.NewMockFS(t),
+		machineconfigcontrollermock.NewMockRenderer(t),
+		machineconfigcontrollermock.NewMockTalosconfig(t),
+	).Declare(citypes.DeclareInput{Root: "/w", Spec: spec})
+
+	require.Error(t, err)
+	assert.Equal(t,
+		"this engine refuses spec.endpoint: the node and the endpoint come from the talosconfig "+
+			"the variable spec.talosconfigEnv names", err.Error())
+}
+
+func TestTheRetiredNodesKeyIsRefusedByNameBeforeAnythingIsRead(t *testing.T) {
+	exported(t)
+
+	spec := fullSpec()
+	spec["nodes"] = []any{map[string]any{"name": "one", "address": "box.lan"}}
+
+	_, err := machineconfigcontroller.New(
+		fsadaptermock.NewMockFS(t),
+		machineconfigcontrollermock.NewMockRenderer(t),
+		machineconfigcontrollermock.NewMockTalosconfig(t),
+	).Declare(citypes.DeclareInput{Root: "/w", Spec: spec})
+
+	require.Error(t, err)
+	assert.Equal(t,
+		"this engine refuses spec.nodes: the node and the endpoint come from the talosconfig "+
+			"the variable spec.talosconfigEnv names", err.Error())
 }
 
 func TestASpecKeyThatIsNotAStringIsRefusedByName(t *testing.T) {

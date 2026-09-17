@@ -109,10 +109,17 @@ func (Talosconfig) Context(talosconfig citypes.Secret) (citypes.TalosContext, er
 	return target, err
 }
 
-func (n *Node) MachineConfig(ctx context.Context, node string, talosconfig citypes.Secret) (string, error) {
+func (n *Node) MachineConfig(ctx context.Context, talosconfig citypes.Secret) (string, error) {
+	held, target, err := clientConfiguration(talosconfig)
+	if err != nil {
+		return "", fmt.Errorf("dialing the node the client configuration names: %w", err)
+	}
+
+	node := target.Node
+
 	var raw string
 
-	err := n.secure(ctx, node, talosconfig, "reading the machine config of node "+node,
+	err = n.secure(ctx, held, target, "reading the machine config of node "+node,
 		func(nodeClient *client.Client) error {
 			held, err := safe.StateGetByID[*configresource.MachineConfig](
 				client.WithNode(ctx, node), nodeClient.COSI, n.mode.read)
@@ -141,16 +148,21 @@ func (n *Node) MachineConfig(ctx context.Context, node string, talosconfig cityp
 	return "", nil
 }
 
-func (n *Node) ApplyMachineConfig(
-	ctx context.Context, node string, talosconfig citypes.Secret, machineConfig string,
-) error {
+func (n *Node) ApplyMachineConfig(ctx context.Context, talosconfig citypes.Secret, machineConfig string) error {
+	held, target, err := clientConfiguration(talosconfig)
+	if err != nil {
+		return fmt.Errorf("dialing the node the client configuration names: %w", err)
+	}
+
+	node := target.Node
+
 	request := &machineapi.ApplyConfigurationRequest{
 		Data:   []byte(machineConfig),
 		Mode:   n.mode.request,
 		DryRun: false,
 	}
 
-	err := n.secure(ctx, node, talosconfig, "applying the machine config to node "+node,
+	err = n.secure(ctx, held, target, "applying the machine config to node "+node,
 		func(nodeClient *client.Client) error {
 			_, err := nodeClient.ApplyConfiguration(client.WithNode(ctx, node), request)
 			if err != nil {
@@ -183,8 +195,15 @@ func (n *Node) ApplyMachineConfig(
 	return nil
 }
 
-func (n *Node) Bootstrap(ctx context.Context, node string, talosconfig citypes.Secret) error {
-	return n.secure(ctx, node, talosconfig, "bootstrapping node "+node,
+func (n *Node) Bootstrap(ctx context.Context, talosconfig citypes.Secret) error {
+	held, target, err := clientConfiguration(talosconfig)
+	if err != nil {
+		return fmt.Errorf("dialing the node the client configuration names: %w", err)
+	}
+
+	node := target.Node
+
+	return n.secure(ctx, held, target, "bootstrapping node "+node,
 		func(nodeClient *client.Client) error {
 			if err := nodeClient.Bootstrap(client.WithNode(ctx, node), &machineapi.BootstrapRequest{}); err != nil {
 				return fmt.Errorf("bootstrapping node %s: %w", node, err)
@@ -194,10 +213,17 @@ func (n *Node) Bootstrap(ctx context.Context, node string, talosconfig citypes.S
 		})
 }
 
-func (n *Node) Bootstrapped(ctx context.Context, node string, talosconfig citypes.Secret) (bool, error) {
+func (n *Node) Bootstrapped(ctx context.Context, talosconfig citypes.Secret) (bool, error) {
+	held, target, err := clientConfiguration(talosconfig)
+	if err != nil {
+		return false, fmt.Errorf("dialing the node the client configuration names: %w", err)
+	}
+
+	node := target.Node
+
 	var running bool
 
-	err := n.secure(ctx, node, talosconfig, "reading the etcd service of node "+node,
+	err = n.secure(ctx, held, target, "reading the etcd service of node "+node,
 		func(nodeClient *client.Client) error {
 			service, err := safe.StateGetByID[*v1alpha1.Service](
 				client.WithNode(ctx, node), nodeClient.COSI, etcdServiceID)
@@ -219,10 +245,17 @@ func (n *Node) Bootstrapped(ctx context.Context, node string, talosconfig citype
 	return running, err
 }
 
-func (n *Node) WaitNodeRegistered(ctx context.Context, node string, talosconfig citypes.Secret) error {
+func (n *Node) WaitNodeRegistered(ctx context.Context, talosconfig citypes.Secret) error {
+	held, target, err := clientConfiguration(talosconfig)
+	if err != nil {
+		return fmt.Errorf("dialing the node the client configuration names: %w", err)
+	}
+
+	node := target.Node
+
 	var raw []byte
 
-	err := n.secure(ctx, node, talosconfig, "getting the kubeconfig of node "+node,
+	err = n.secure(ctx, held, target, "getting the kubeconfig of node "+node,
 		func(nodeClient *client.Client) error {
 			fetched, err := nodeClient.Kubeconfig(client.WithNode(ctx, node))
 			if err != nil {
@@ -266,18 +299,13 @@ func (n *Node) WaitNodeRegistered(ctx context.Context, node string, talosconfig 
 }
 
 func (n *Node) secure(
-	ctx context.Context, node string, talosconfig citypes.Secret, what string,
+	ctx context.Context, held *clientconfig.Config, target citypes.TalosContext, what string,
 	call func(*client.Client) error,
 ) error {
-	held, target, err := clientConfiguration(talosconfig)
-	if err != nil {
-		return fmt.Errorf("dialing node %s: %w", node, err)
-	}
-
 	attempt := func() error {
 		nodeClient, err := dialSecure(ctx, held, target)
 		if err != nil {
-			return fmt.Errorf("dialing node %s: %w", node, err)
+			return fmt.Errorf("dialing node %s: %w", target.Node, err)
 		}
 
 		defer func() { _ = nodeClient.Close() }()

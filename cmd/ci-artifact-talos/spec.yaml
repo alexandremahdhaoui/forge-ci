@@ -23,17 +23,18 @@ example:
   input: '{"root":"/w","spec":{"clusterName":"t0","kubernetesVersion":"1.37.0","talosconfigEnv":"TALOSCONFIG","bundleFile":"secrets/bundle.yaml","patchFile":"talos/controlplane.patch.yaml"}}'
 notes: |
   One cluster declares two resources, in this order. The first is kind
-  `machine-config`, named by the cluster, whose `spec.node` is the node the
-  talosconfig context names and whose `spec.config` is the rendered control
-  plane machine config. The second is kind `cluster-bootstrap`, named by the
-  cluster, carrying the same `spec.node`. A manager realizes resources in the
-  order declared, so the config lands before the bootstrap.
+  `machine-config`, named by the cluster, whose `spec.config` is the rendered
+  control plane machine config. The second is kind `cluster-bootstrap`, named
+  by the cluster, with an empty spec. Neither names a node. A manager realizes
+  resources in the order declared, so the config lands before the bootstrap.
 
   No address is declared. The engine reads the talosconfig file the variable
   `spec.talosconfigEnv` names. The context must name exactly one node, and
   this release drives one node per cluster. The cluster endpoint handed to the
   renderer is `https://` plus the host of the first context endpoint plus
-  `:6443`, such as `https://box.lan:6443`.
+  `:6443`, such as `https://box.lan:6443`. The retired keys `endpoint` and
+  `nodes` are refused by name, because the node and the endpoint come from
+  that talosconfig.
 
   The engine reads the secret bundle and the patch from files relative to the
   pipeline root, which rides the declare call. The same bundle and the same

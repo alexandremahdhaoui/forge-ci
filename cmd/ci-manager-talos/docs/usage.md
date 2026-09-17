@@ -22,7 +22,7 @@ same declaration and a second run finds nothing left to do.
 ## By hand
 
 ```sh
-echo '{"manager":"talos","resources":[{"kind":"machine-config","name":"t0","spec":{"node":"box.lan","talosconfigEnv":"TALOSCONFIG","config":"version: v1alpha1\n"}},{"kind":"cluster-bootstrap","name":"t0","spec":{"node":"box.lan","talosconfigEnv":"TALOSCONFIG"}}]}' \
+echo '{"manager":"talos","resources":[{"kind":"machine-config","name":"t0","spec":{"talosconfigEnv":"TALOSCONFIG","config":"version: v1alpha1\n"}},{"kind":"cluster-bootstrap","name":"t0","spec":{"talosconfigEnv":"TALOSCONFIG"}}]}' \
   | ci-manager-talos reconcile
 ```
 
@@ -43,9 +43,10 @@ engines:
 ## Worth knowing
 
 It knows two kinds, `machine-config` and `cluster-bootstrap`. The resource
-name is the cluster's name in the declaration and `spec.node` is the node
-the talosconfig context names. Every dial goes through the endpoints of the
-talosconfig's current context, which must name exactly one node.
+name is the cluster's name in the declaration. No resource names a node.
+Every dial goes through the endpoints of the talosconfig's current context
+and targets the one node that context names, so a context naming no node or
+more than one is refused by name.
 `spec.config` is the machine config document, one document or several
 separated by a document marker. The client configuration comes from
 `spec.talosconfig` as a path, or from the variable `spec.talosconfigEnv`
@@ -59,7 +60,9 @@ stage reads maintenance does it treat the node as holding no config and
 apply over that insecure connection. Any other stage and any other failure
 is the secure error, by name. After such an apply the node installs and
 reboots, so every later dial in the same run retries until a ceiling of ten
-minutes and names the last cause when it passes.
+minutes and names the last cause when it passes. A run that stops between
+that apply and the bootstrap reruns into the reboot window, fails at once on
+the dial, and must be rerun.
 
 `cluster-bootstrap` reads whether etcd runs on the node. When it does, the
 manager waits for a node to register with the Kubernetes API and answers

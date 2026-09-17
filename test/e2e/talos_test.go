@@ -140,11 +140,13 @@ func TestADeclaredClusterReachesTheTalosManagerAsAMachineConfigThenABootstrapAnd
 	require.NotContains(t, out, "carries no node client yet",
 		"the manager carries a node client, or this case proves nothing")
 	require.Contains(t, out,
-		"realizing machine-config/"+theTalosCluster+": reading the machine config of node "+theTalosNode,
-		"the declaration reached the talos manager as a machine-config it owns, reaching the context node")
+		"realizing machine-config/"+theTalosCluster+": reading the machine config of "+theTalosCluster,
+		"the declaration reached the talos manager as a machine-config it owns")
 	require.Contains(t, out,
-		"realizing cluster-bootstrap/"+theTalosCluster+": reading the bootstrap state of node "+theTalosNode,
+		"realizing cluster-bootstrap/"+theTalosCluster+": reading the bootstrap state of "+theTalosCluster,
 		"the declaration reached the talos manager as a cluster-bootstrap after the machine config")
+	require.Contains(t, out, "machine config resource of node "+theTalosNode,
+		"the manager read the node from the talosconfig context, not from the declaration")
 	require.Contains(t, out, "dial tcp "+theTalosEndpoint,
 		"every dial went through the endpoint the talosconfig context names")
 }

@@ -20,11 +20,11 @@ const (
 )
 
 type Talos interface {
-	MachineConfig(ctx context.Context, node string, talosconfig citypes.Secret) (string, error)
-	ApplyMachineConfig(ctx context.Context, node string, talosconfig citypes.Secret, config string) error
-	Bootstrap(ctx context.Context, node string, talosconfig citypes.Secret) error
-	Bootstrapped(ctx context.Context, node string, talosconfig citypes.Secret) (bool, error)
-	WaitNodeRegistered(ctx context.Context, node string, talosconfig citypes.Secret) error
+	MachineConfig(ctx context.Context, talosconfig citypes.Secret) (string, error)
+	ApplyMachineConfig(ctx context.Context, talosconfig citypes.Secret, config string) error
+	Bootstrap(ctx context.Context, talosconfig citypes.Secret) error
+	Bootstrapped(ctx context.Context, talosconfig citypes.Secret) (bool, error)
+	WaitNodeRegistered(ctx context.Context, talosconfig citypes.Secret) error
 }
 
 type TalosRealizer struct {
@@ -57,18 +57,13 @@ func (r TalosRealizer) Realize(res citypes.Resource, opts Options) (Action, erro
 }
 
 func (r TalosRealizer) realizeMachineConfig(res citypes.Resource, opts Options) (Action, error) {
-	node, err := citypes.SpecString(res.Spec, "node")
-	if err != nil {
-		return Action{}, err
-	}
-
 	declared, err := citypes.SpecString(res.Spec, "config")
 	if err != nil {
 		return Action{}, err
 	}
 
-	if node == "" || declared == "" {
-		return Action{}, errors.New("spec.node and spec.config are required")
+	if declared == "" {
+		return Action{}, errors.New("spec.config is required")
 	}
 
 	talosconfig, source, err := r.talosconfigFor(res.Spec)
@@ -78,19 +73,19 @@ func (r TalosRealizer) realizeMachineConfig(res citypes.Resource, opts Options) 
 
 	if r.talos == nil {
 		return Action{}, fmt.Errorf(
-			"reading the machine config of node %s: this manager carries no node client yet", node)
+			"reading the machine config of %s: this manager carries no node client yet", res.Name)
 	}
 
-	running, err := r.talos.MachineConfig(r.ctx, node, talosconfig)
+	running, err := r.talos.MachineConfig(r.ctx, talosconfig)
 	if err != nil {
 		return Action{}, fmt.Errorf(
-			"reading the machine config of node %s using the client configuration from %s: %w",
-			node, source, err)
+			"reading the machine config of %s using the client configuration from %s: %w",
+			res.Name, source, err)
 	}
 
 	same, err := sameMachineConfig(running, declared)
 	if err != nil {
-		return Action{}, fmt.Errorf("comparing the machine config of node %s: %w", node, err)
+		return Action{}, fmt.Errorf("comparing the machine config of %s: %w", res.Name, err)
 	}
 
 	if same {
@@ -101,25 +96,16 @@ func (r TalosRealizer) realizeMachineConfig(res citypes.Resource, opts Options) 
 		return Kept(opts.would("apply machine config " + res.Name)), nil
 	}
 
-	if err := r.talos.ApplyMachineConfig(r.ctx, node, talosconfig, declared); err != nil {
+	if err := r.talos.ApplyMachineConfig(r.ctx, talosconfig, declared); err != nil {
 		return Action{}, fmt.Errorf(
-			"applying the machine config to node %s using the client configuration from %s: %w",
-			node, source, err)
+			"applying the machine config of %s using the client configuration from %s: %w",
+			res.Name, source, err)
 	}
 
 	return Did("applied machine config " + res.Name), nil
 }
 
 func (r TalosRealizer) realizeClusterBootstrap(res citypes.Resource, opts Options) (Action, error) {
-	node, err := citypes.SpecString(res.Spec, "node")
-	if err != nil {
-		return Action{}, err
-	}
-
-	if node == "" {
-		return Action{}, errors.New("spec.node is required")
-	}
-
 	talosconfig, source, err := r.talosconfigFor(res.Spec)
 	if err != nil {
 		return Action{}, err
@@ -127,19 +113,19 @@ func (r TalosRealizer) realizeClusterBootstrap(res citypes.Resource, opts Option
 
 	if r.talos == nil {
 		return Action{}, fmt.Errorf(
-			"reading the bootstrap state of node %s: this manager carries no node client yet", node)
+			"reading the bootstrap state of %s: this manager carries no node client yet", res.Name)
 	}
 
-	bootstrapped, err := r.talos.Bootstrapped(r.ctx, node, talosconfig)
+	bootstrapped, err := r.talos.Bootstrapped(r.ctx, talosconfig)
 	if err != nil {
 		return Action{}, fmt.Errorf(
-			"reading the bootstrap state of node %s using the client configuration from %s: %w",
-			node, source, err)
+			"reading the bootstrap state of %s using the client configuration from %s: %w",
+			res.Name, source, err)
 	}
 
 	if bootstrapped {
-		if err := r.talos.WaitNodeRegistered(r.ctx, node, talosconfig); err != nil {
-			return Action{}, fmt.Errorf("waiting for node %s to register: %w", node, err)
+		if err := r.talos.WaitNodeRegistered(r.ctx, talosconfig); err != nil {
+			return Action{}, fmt.Errorf("waiting for the node of %s to register: %w", res.Name, err)
 		}
 
 		return Kept("kept cluster bootstrap " + res.Name), nil
@@ -149,13 +135,13 @@ func (r TalosRealizer) realizeClusterBootstrap(res citypes.Resource, opts Option
 		return Kept(opts.would("bootstrap cluster " + res.Name)), nil
 	}
 
-	if err := r.talos.Bootstrap(r.ctx, node, talosconfig); err != nil {
+	if err := r.talos.Bootstrap(r.ctx, talosconfig); err != nil {
 		return Action{}, fmt.Errorf(
-			"bootstrapping node %s using the client configuration from %s: %w", node, source, err)
+			"bootstrapping %s using the client configuration from %s: %w", res.Name, source, err)
 	}
 
-	if err := r.talos.WaitNodeRegistered(r.ctx, node, talosconfig); err != nil {
-		return Action{}, fmt.Errorf("waiting for node %s to register: %w", node, err)
+	if err := r.talos.WaitNodeRegistered(r.ctx, talosconfig); err != nil {
+		return Action{}, fmt.Errorf("waiting for the node of %s to register: %w", res.Name, err)
 	}
 
 	return Did("bootstrapped cluster " + res.Name), nil

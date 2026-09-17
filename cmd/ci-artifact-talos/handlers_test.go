@@ -74,10 +74,10 @@ func TestTheDeclareToolAnswersARenderedControlPlaneConfigCarryingThePatchThenThe
 	require.Len(t, out.Resources, 2)
 	assert.Equal(t, "machine-config", out.Resources[0].Kind)
 	assert.Equal(t, "t0", out.Resources[0].Name)
-	assert.Equal(t, "box.lan", out.Resources[0].Spec["node"])
+	assert.NotContains(t, out.Resources[0].Spec, "node")
 	assert.Equal(t, "cluster-bootstrap", out.Resources[1].Kind)
 	assert.Equal(t, "t0", out.Resources[1].Name)
-	assert.Equal(t, "box.lan", out.Resources[1].Spec["node"])
+	assert.Empty(t, out.Resources[1].Spec)
 
 	rendered, ok := out.Resources[0].Spec["config"].(string)
 	require.True(t, ok)

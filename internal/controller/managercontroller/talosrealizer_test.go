@@ -87,7 +87,7 @@ func machineConfig(document string) citypes.Resource {
 	return citypes.Resource{
 		Kind: managercontroller.KindMachineConfig,
 		Name: "t0-controlplane",
-		Spec: map[string]any{"node": "box.lan", "config": document},
+		Spec: map[string]any{"config": document},
 	}
 }
 
@@ -100,7 +100,7 @@ func TestTheTalosRealizerNamesItselfTalos(t *testing.T) {
 func TestTheTalosRealizerKeepsAMachineConfigTheNodeAlreadyHolds(t *testing.T) {
 	r, talos := talosRealizer(t)
 	talos.EXPECT().
-		MachineConfig(mock.Anything, "box.lan", citypes.Secret("/home/operator/.config/t0.yaml")).
+		MachineConfig(mock.Anything, citypes.Secret("/home/operator/.config/t0.yaml")).
 		Return(controlplane, nil)
 
 	action, err := r.Realize(machineConfig(controlplane), plain)
@@ -111,7 +111,7 @@ func TestTheTalosRealizerKeepsAMachineConfigTheNodeAlreadyHolds(t *testing.T) {
 
 func TestTheTalosRealizerKeepsAMachineConfigThatDiffersOnlyByKeyOrder(t *testing.T) {
 	r, talos := talosRealizer(t)
-	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything, mock.Anything).
+	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything).
 		Return(controlplaneReordered, nil)
 
 	action, err := r.Realize(machineConfig(controlplane), plain)
@@ -122,7 +122,7 @@ func TestTheTalosRealizerKeepsAMachineConfigThatDiffersOnlyByKeyOrder(t *testing
 
 func TestTheTalosRealizerKeepsAMultiDocumentMachineConfigTheNodeAlreadyHolds(t *testing.T) {
 	r, talos := talosRealizer(t)
-	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything, mock.Anything).
+	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything).
 		Return(controlplaneWithAVolume, nil)
 
 	action, err := r.Realize(machineConfig(controlplaneWithAVolume), plain)
@@ -133,7 +133,7 @@ func TestTheTalosRealizerKeepsAMultiDocumentMachineConfigTheNodeAlreadyHolds(t *
 
 func TestTheTalosRealizerKeepsAMachineConfigWhoseDocumentsAreInADifferentOrder(t *testing.T) {
 	r, talos := talosRealizer(t)
-	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything, mock.Anything).
+	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything).
 		Return(controlplaneThenTheIngressRuleThenTheVolume, nil)
 
 	action, err := r.Realize(machineConfig(controlplaneThenTheVolumeThenTheIngressRule), plain)
@@ -144,7 +144,7 @@ func TestTheTalosRealizerKeepsAMachineConfigWhoseDocumentsAreInADifferentOrder(t
 
 func TestTheTalosRealizerKeepsAMachineConfigWhoseVersionDocumentIsWrittenLast(t *testing.T) {
 	r, talos := talosRealizer(t)
-	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything, mock.Anything).
+	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything).
 		Return(theVolumeThenTheControlplane, nil)
 
 	action, err := r.Realize(machineConfig(controlplaneWithAVolume), plain)
@@ -155,7 +155,7 @@ func TestTheTalosRealizerKeepsAMachineConfigWhoseVersionDocumentIsWrittenLast(t 
 
 func TestTheTalosRealizerKeepsAMachineConfigWrappedInEmptyDocuments(t *testing.T) {
 	r, talos := talosRealizer(t)
-	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything, mock.Anything).
+	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything).
 		Return("---\n"+controlplane+"---\n", nil)
 
 	action, err := r.Realize(machineConfig(controlplane), plain)
@@ -166,10 +166,10 @@ func TestTheTalosRealizerKeepsAMachineConfigWrappedInEmptyDocuments(t *testing.T
 
 func TestTheTalosRealizerAppliesWhenADocumentBehindACommentedSeparatorDiffers(t *testing.T) {
 	r, talos := talosRealizer(t)
-	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything, mock.Anything).
+	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything).
 		Return(controlplaneWithAVolume, nil)
 	talos.EXPECT().
-		ApplyMachineConfig(mock.Anything, mock.Anything, mock.Anything,
+		ApplyMachineConfig(mock.Anything, mock.Anything,
 			controlplaneWithACommentedSeparatorAndABiggerVolume).
 		Return(nil)
 
@@ -182,7 +182,7 @@ func TestTheTalosRealizerAppliesWhenADocumentBehindACommentedSeparatorDiffers(t 
 
 func TestTheTalosRealizerKeepsAMachineConfigThatEndsInACommentOnlyDocument(t *testing.T) {
 	r, talos := talosRealizer(t)
-	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything, mock.Anything).
+	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything).
 		Return(controlplaneWithATrailingCommentOnlyDocument, nil)
 
 	action, err := r.Realize(machineConfig(controlplane), plain)
@@ -193,10 +193,10 @@ func TestTheTalosRealizerKeepsAMachineConfigThatEndsInACommentOnlyDocument(t *te
 
 func TestTheTalosRealizerAppliesAMachineConfigThatDiffersFromTheNode(t *testing.T) {
 	r, talos := talosRealizer(t)
-	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything, mock.Anything).
+	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything).
 		Return(controlplane, nil)
 	talos.EXPECT().
-		ApplyMachineConfig(mock.Anything, "box.lan", citypes.Secret("/home/operator/.config/t0.yaml"),
+		ApplyMachineConfig(mock.Anything, citypes.Secret("/home/operator/.config/t0.yaml"),
 			controlplaneWithABiggerDisk).
 		Return(nil)
 
@@ -208,10 +208,10 @@ func TestTheTalosRealizerAppliesAMachineConfigThatDiffersFromTheNode(t *testing.
 
 func TestTheTalosRealizerAppliesAMachineConfigWhenADocumentWasAdded(t *testing.T) {
 	r, talos := talosRealizer(t)
-	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything, mock.Anything).
+	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything).
 		Return(controlplane, nil)
 	talos.EXPECT().
-		ApplyMachineConfig(mock.Anything, mock.Anything, mock.Anything, controlplaneWithAVolume).
+		ApplyMachineConfig(mock.Anything, mock.Anything, controlplaneWithAVolume).
 		Return(nil)
 
 	action, err := r.Realize(machineConfig(controlplaneWithAVolume), plain)
@@ -221,44 +221,43 @@ func TestTheTalosRealizerAppliesAMachineConfigWhenADocumentWasAdded(t *testing.T
 
 func TestTheTalosRealizerReportsTheNodeWhenTheApplyFails(t *testing.T) {
 	r, talos := talosRealizer(t)
-	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything, mock.Anything).
+	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything).
 		Return(controlplane, nil)
-	talos.EXPECT().ApplyMachineConfig(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+	talos.EXPECT().ApplyMachineConfig(mock.Anything, mock.Anything, mock.Anything).
 		Return(errors.New("node rejected the document"))
 
 	_, err := r.Realize(machineConfig(controlplaneWithABiggerDisk), plain)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "applying the machine config to node box.lan")
+	assert.Contains(t, err.Error(), "applying the machine config of t0-controlplane")
 	assert.Contains(t, err.Error(), "node rejected the document")
 }
 
 func TestTheTalosRealizerReportsTheNodeWhenTheReadFails(t *testing.T) {
 	r, talos := talosRealizer(t)
-	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything, mock.Anything).
+	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything).
 		Return("", errors.New("no route to host"))
 
 	_, err := r.Realize(machineConfig(controlplane), plain)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "reading the machine config of node box.lan")
+	assert.Contains(t, err.Error(), "reading the machine config of t0-controlplane")
 	assert.Contains(t, err.Error(), "no route to host")
 }
 
 func TestADryRunKeepsAndWritesNothingWhenTheNodeAlreadyHoldsTheConfig(t *testing.T) {
 	r, talos := talosRealizer(t)
-	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything, mock.Anything).
+	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything).
 		Return(controlplane, nil)
 
 	action, err := r.Realize(machineConfig(controlplane), managercontroller.Options{DryRun: true})
 	require.NoError(t, err)
 	assert.Equal(t, "kept machine config t0-controlplane", action.Text)
 	assert.False(t, action.Changed)
-	talos.AssertNotCalled(t, "ApplyMachineConfig",
-		mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+	talos.AssertNotCalled(t, "ApplyMachineConfig", mock.Anything, mock.Anything, mock.Anything)
 }
 
 func TestADryRunKeepsAndWritesNothingWhenTheConfigDiffers(t *testing.T) {
 	r, talos := talosRealizer(t)
-	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything, mock.Anything).
+	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything).
 		Return(controlplane, nil)
 
 	action, err := r.Realize(
@@ -266,8 +265,7 @@ func TestADryRunKeepsAndWritesNothingWhenTheConfigDiffers(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "would apply machine config t0-controlplane", action.Text)
 	assert.False(t, action.Changed)
-	talos.AssertNotCalled(t, "ApplyMachineConfig",
-		mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+	talos.AssertNotCalled(t, "ApplyMachineConfig", mock.Anything, mock.Anything, mock.Anything)
 }
 
 func TestTheTalosRealizerRefusesAnUnknownKindByName(t *testing.T) {
@@ -282,9 +280,9 @@ func TestTheTalosRealizerRefusesAnUnknownKindByName(t *testing.T) {
 
 func TestTheTalosRealizerAppliesWhenTheNodeHoldsNoConfigBecauseItIsInMaintenance(t *testing.T) {
 	r, talos := talosRealizer(t)
-	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything, mock.Anything).Return("", nil)
+	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything).Return("", nil)
 	talos.EXPECT().
-		ApplyMachineConfig(mock.Anything, "box.lan", mock.Anything, controlplane).
+		ApplyMachineConfig(mock.Anything, mock.Anything, controlplane).
 		Return(nil)
 
 	action, err := r.Realize(machineConfig(controlplane), plain)
@@ -295,46 +293,57 @@ func TestTheTalosRealizerAppliesWhenTheNodeHoldsNoConfigBecauseItIsInMaintenance
 
 func TestTheTalosRealizerStillRefusesADeclaredConfigThatWillNotLoadWhenTheNodeHoldsNoConfig(t *testing.T) {
 	r, talos := talosRealizer(t)
-	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything, mock.Anything).Return("", nil)
+	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything).Return("", nil)
 
 	_, err := r.Realize(machineConfig(controlplaneWithTheVolumeTwice), plain)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "loading the declared machine config")
-	talos.AssertNotCalled(t, "ApplyMachineConfig",
-		mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+	talos.AssertNotCalled(t, "ApplyMachineConfig", mock.Anything, mock.Anything, mock.Anything)
 }
 
 func clusterBootstrap() citypes.Resource {
 	return citypes.Resource{
 		Kind: managercontroller.KindClusterBootstrap,
 		Name: "t0",
-		Spec: map[string]any{"node": "box.lan"},
+		Spec: map[string]any{},
 	}
+}
+
+func TestAClusterBootstrapWithNoSpecReadsTheNodeFromTheTalosconfigAndRefusesNothing(t *testing.T) {
+	r, talos := talosRealizer(t)
+	talos.EXPECT().Bootstrapped(mock.Anything, mock.Anything).Return(true, nil)
+	talos.EXPECT().WaitNodeRegistered(mock.Anything, mock.Anything).Return(nil)
+
+	action, err := r.Realize(citypes.Resource{
+		Kind: managercontroller.KindClusterBootstrap, Name: "t0", Spec: nil,
+	}, plain)
+	require.NoError(t, err)
+	assert.False(t, action.Changed)
 }
 
 func TestTheTalosRealizerKeepsAClusterWhoseEtcdRunsOnceItsNodeRegistered(t *testing.T) {
 	r, talos := talosRealizer(t)
 	talos.EXPECT().
-		Bootstrapped(mock.Anything, "box.lan", citypes.Secret("/home/operator/.config/t0.yaml")).
+		Bootstrapped(mock.Anything, citypes.Secret("/home/operator/.config/t0.yaml")).
 		Return(true, nil)
 	talos.EXPECT().
-		WaitNodeRegistered(mock.Anything, "box.lan", citypes.Secret("/home/operator/.config/t0.yaml")).
+		WaitNodeRegistered(mock.Anything, citypes.Secret("/home/operator/.config/t0.yaml")).
 		Return(nil)
 
 	action, err := r.Realize(clusterBootstrap(), plain)
 	require.NoError(t, err)
 	assert.Equal(t, "kept cluster bootstrap t0", action.Text)
 	assert.False(t, action.Changed)
-	talos.AssertNotCalled(t, "Bootstrap", mock.Anything, mock.Anything, mock.Anything)
+	talos.AssertNotCalled(t, "Bootstrap", mock.Anything, mock.Anything)
 }
 
 func TestTheTalosRealizerBootstrapsAClusterWhoseEtcdDoesNotRunAndWaitsForItsNode(t *testing.T) {
 	r, talos := talosRealizer(t)
-	talos.EXPECT().Bootstrapped(mock.Anything, "box.lan", mock.Anything).Return(false, nil)
+	talos.EXPECT().Bootstrapped(mock.Anything, mock.Anything).Return(false, nil)
 	talos.EXPECT().
-		Bootstrap(mock.Anything, "box.lan", citypes.Secret("/home/operator/.config/t0.yaml")).
+		Bootstrap(mock.Anything, citypes.Secret("/home/operator/.config/t0.yaml")).
 		Return(nil)
-	talos.EXPECT().WaitNodeRegistered(mock.Anything, "box.lan", mock.Anything).Return(nil)
+	talos.EXPECT().WaitNodeRegistered(mock.Anything, mock.Anything).Return(nil)
 
 	action, err := r.Realize(clusterBootstrap(), plain)
 	require.NoError(t, err)
@@ -344,82 +353,57 @@ func TestTheTalosRealizerBootstrapsAClusterWhoseEtcdDoesNotRunAndWaitsForItsNode
 
 func TestADryRunOverAClusterWhoseEtcdDoesNotRunSaysItWouldBootstrapAndTouchesNothing(t *testing.T) {
 	r, talos := talosRealizer(t)
-	talos.EXPECT().Bootstrapped(mock.Anything, "box.lan", mock.Anything).Return(false, nil)
+	talos.EXPECT().Bootstrapped(mock.Anything, mock.Anything).Return(false, nil)
 
 	action, err := r.Realize(clusterBootstrap(), managercontroller.Options{DryRun: true})
 	require.NoError(t, err)
 	assert.Equal(t, "would bootstrap cluster t0", action.Text)
 	assert.False(t, action.Changed)
-	talos.AssertNotCalled(t, "Bootstrap", mock.Anything, mock.Anything, mock.Anything)
-	talos.AssertNotCalled(t, "WaitNodeRegistered", mock.Anything, mock.Anything, mock.Anything)
+	talos.AssertNotCalled(t, "Bootstrap", mock.Anything, mock.Anything)
+	talos.AssertNotCalled(t, "WaitNodeRegistered", mock.Anything, mock.Anything)
 }
 
 func TestTheTalosRealizerReportsTheNodeWhenTheBootstrapStateCannotBeRead(t *testing.T) {
 	r, talos := talosRealizer(t)
-	talos.EXPECT().Bootstrapped(mock.Anything, "box.lan", mock.Anything).
+	talos.EXPECT().Bootstrapped(mock.Anything, mock.Anything).
 		Return(false, errors.New("no route to host"))
 
 	_, err := r.Realize(clusterBootstrap(), plain)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(),
-		"reading the bootstrap state of node box.lan using the client configuration from "+
+		"reading the bootstrap state of t0 using the client configuration from "+
 			"the variable the manager's talosconfigEnv names")
 	assert.Contains(t, err.Error(), "no route to host")
 }
 
 func TestTheTalosRealizerReportsTheNodeWhenTheBootstrapFails(t *testing.T) {
 	r, talos := talosRealizer(t)
-	talos.EXPECT().Bootstrapped(mock.Anything, "box.lan", mock.Anything).Return(false, nil)
-	talos.EXPECT().Bootstrap(mock.Anything, "box.lan", mock.Anything).
+	talos.EXPECT().Bootstrapped(mock.Anything, mock.Anything).Return(false, nil)
+	talos.EXPECT().Bootstrap(mock.Anything, mock.Anything).
 		Return(errors.New("etcd data directory is not empty"))
 
 	_, err := r.Realize(clusterBootstrap(), plain)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "bootstrapping node box.lan")
+	assert.Contains(t, err.Error(), "bootstrapping t0 using the client configuration from")
 	assert.Contains(t, err.Error(), "etcd data directory is not empty")
-	talos.AssertNotCalled(t, "WaitNodeRegistered", mock.Anything, mock.Anything, mock.Anything)
+	talos.AssertNotCalled(t, "WaitNodeRegistered", mock.Anything, mock.Anything)
 }
 
 func TestTheTalosRealizerReportsTheNodeWhenItNeverRegisters(t *testing.T) {
 	for name, bootstrapped := range map[string]bool{"after a bootstrap": false, "on a kept cluster": true} {
 		t.Run(name, func(t *testing.T) {
 			r, talos := talosRealizer(t)
-			talos.EXPECT().Bootstrapped(mock.Anything, "box.lan", mock.Anything).Return(bootstrapped, nil)
-			talos.EXPECT().Bootstrap(mock.Anything, "box.lan", mock.Anything).Return(nil).Maybe()
-			talos.EXPECT().WaitNodeRegistered(mock.Anything, "box.lan", mock.Anything).
+			talos.EXPECT().Bootstrapped(mock.Anything, mock.Anything).Return(bootstrapped, nil)
+			talos.EXPECT().Bootstrap(mock.Anything, mock.Anything).Return(nil).Maybe()
+			talos.EXPECT().WaitNodeRegistered(mock.Anything, mock.Anything).
 				Return(errors.New("the ceiling of 10m0s passed"))
 
 			_, err := r.Realize(clusterBootstrap(), plain)
 			require.Error(t, err)
-			assert.Contains(t, err.Error(), "waiting for node box.lan to register")
+			assert.Contains(t, err.Error(), "waiting for the node of t0 to register")
 			assert.Contains(t, err.Error(), "the ceiling of 10m0s passed")
 		})
 	}
-}
-
-func TestTheTalosRealizerRefusesAClusterBootstrapWithoutANode(t *testing.T) {
-	r, _ := talosRealizer(t)
-
-	for name, spec := range map[string]map[string]any{"no node": {}, "an empty node": {"node": ""}} {
-		t.Run(name, func(t *testing.T) {
-			_, err := r.Realize(citypes.Resource{
-				Kind: managercontroller.KindClusterBootstrap, Name: "t0", Spec: spec,
-			}, plain)
-			require.Error(t, err)
-			assert.Equal(t, "spec.node is required", err.Error())
-		})
-	}
-}
-
-func TestTheTalosRealizerRefusesAClusterBootstrapWhoseNodeIsNotAString(t *testing.T) {
-	r, _ := talosRealizer(t)
-
-	_, err := r.Realize(citypes.Resource{
-		Kind: managercontroller.KindClusterBootstrap, Name: "t0", Spec: map[string]any{"node": 7},
-	}, plain)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "reading spec.node")
-	assert.Contains(t, err.Error(), "a string is required")
 }
 
 func TestTheTalosRealizerRefusesToBootstrapWithNoClientWired(t *testing.T) {
@@ -429,15 +413,15 @@ func TestTheTalosRealizerRefusesToBootstrapWithNoClientWired(t *testing.T) {
 
 	_, err := r.Realize(clusterBootstrap(), plain)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "reading the bootstrap state of node box.lan")
+	assert.Contains(t, err.Error(), "reading the bootstrap state of t0")
 	assert.Contains(t, err.Error(), "carries no node client yet")
 }
 
 func TestAClusterBootstrapReadsTheClientConfigurationPathFromTheResource(t *testing.T) {
 	r, talos := talosRealizer(t)
-	talos.EXPECT().Bootstrapped(mock.Anything, "box.lan", citypes.Secret("/etc/t0/declared.yaml")).
+	talos.EXPECT().Bootstrapped(mock.Anything, citypes.Secret("/etc/t0/declared.yaml")).
 		Return(true, nil)
-	talos.EXPECT().WaitNodeRegistered(mock.Anything, "box.lan", citypes.Secret("/etc/t0/declared.yaml")).
+	talos.EXPECT().WaitNodeRegistered(mock.Anything, citypes.Secret("/etc/t0/declared.yaml")).
 		Return(nil)
 
 	res := clusterBootstrap()
@@ -459,18 +443,15 @@ func TestAClusterBootstrapWithNoClientConfigurationIsRefusedBeforeAnyDial(t *tes
 	assert.Contains(t, err.Error(), "reading the client configuration path: nothing is set")
 }
 
-func TestTheTalosRealizerRefusesAResourceWithoutANodeOrAConfig(t *testing.T) {
+func TestTheTalosRealizerRefusesAMachineConfigResourceWithoutAConfig(t *testing.T) {
 	r, _ := talosRealizer(t)
 
-	for _, spec := range []map[string]any{
-		{"config": controlplane},
-		{"node": "box.lan"},
-	} {
+	for _, spec := range []map[string]any{nil, {}, {"config": ""}} {
 		_, err := r.Realize(citypes.Resource{
 			Kind: managercontroller.KindMachineConfig, Name: "t0-controlplane", Spec: spec,
 		}, plain)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "spec.node and spec.config are required")
+		assert.Equal(t, "spec.config is required", err.Error())
 	}
 }
 
@@ -505,7 +486,7 @@ func TestTheTalosRealizerRefusesAnEmptyClientConfigurationVariable(t *testing.T)
 
 func TestTheTalosRealizerNamesTheSlotThatFedTheClientConfigurationWhenTheNodeCannotBeRead(t *testing.T) {
 	r, talos := talosRealizer(t)
-	talos.EXPECT().MachineConfig(mock.Anything, "box.lan", citypes.Secret("/etc/t0/declared.yaml")).
+	talos.EXPECT().MachineConfig(mock.Anything, citypes.Secret("/etc/t0/declared.yaml")).
 		Return("", errors.New("no route to host"))
 
 	res := machineConfig(controlplane)
@@ -514,17 +495,17 @@ func TestTheTalosRealizerNamesTheSlotThatFedTheClientConfigurationWhenTheNodeCan
 	_, err := r.Realize(res, plain)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(),
-		"reading the machine config of node box.lan using the client configuration from spec.talosconfig")
+		"reading the machine config of t0-controlplane using the client configuration from spec.talosconfig")
 }
 
 func TestTheTalosRealizerNamesTheSlotThatFedTheClientConfigurationWhenTheApplyFails(t *testing.T) {
 	t.Setenv("FORGE_CI_TEST_OTHER_CLIENT_CONFIG", "/etc/t0/other.yaml")
 
 	r, talos := talosRealizer(t)
-	talos.EXPECT().MachineConfig(mock.Anything, "box.lan", citypes.Secret("/etc/t0/other.yaml")).
+	talos.EXPECT().MachineConfig(mock.Anything, citypes.Secret("/etc/t0/other.yaml")).
 		Return(controlplane, nil)
 	talos.EXPECT().
-		ApplyMachineConfig(mock.Anything, "box.lan", citypes.Secret("/etc/t0/other.yaml"), controlplaneWithABiggerDisk).
+		ApplyMachineConfig(mock.Anything, citypes.Secret("/etc/t0/other.yaml"), controlplaneWithABiggerDisk).
 		Return(errors.New("no route to host"))
 
 	res := machineConfig(controlplaneWithABiggerDisk)
@@ -533,7 +514,7 @@ func TestTheTalosRealizerNamesTheSlotThatFedTheClientConfigurationWhenTheApplyFa
 	_, err := r.Realize(res, plain)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(),
-		"applying the machine config to node box.lan using the client configuration from "+
+		"applying the machine config of t0-controlplane using the client configuration from "+
 			"the variable spec.talosconfigEnv names")
 }
 
@@ -552,7 +533,7 @@ func TestTheTalosRealizerNeverEchoesASecretPastedIntoTheClientConfigurationVaria
 
 func TestTheTalosRealizerReadsTheClientConfigurationPathFromTheResource(t *testing.T) {
 	r, talos := talosRealizer(t)
-	talos.EXPECT().MachineConfig(mock.Anything, "box.lan", citypes.Secret("/etc/t0/declared.yaml")).
+	talos.EXPECT().MachineConfig(mock.Anything, citypes.Secret("/etc/t0/declared.yaml")).
 		Return(controlplane, nil)
 
 	res := machineConfig(controlplane)
@@ -567,7 +548,7 @@ func TestTheTalosRealizerReadsTheClientConfigurationPathFromTheVariableTheResour
 	t.Setenv("FORGE_CI_TEST_OTHER_CLIENT_CONFIG", "/etc/t0/other.yaml")
 
 	r, talos := talosRealizer(t)
-	talos.EXPECT().MachineConfig(mock.Anything, "box.lan", citypes.Secret("/etc/t0/other.yaml")).
+	talos.EXPECT().MachineConfig(mock.Anything, citypes.Secret("/etc/t0/other.yaml")).
 		Return(controlplane, nil)
 
 	res := machineConfig(controlplane)
@@ -580,18 +561,18 @@ func TestTheTalosRealizerReadsTheClientConfigurationPathFromTheVariableTheResour
 
 func TestTheTalosRealizerReportsLoadingTheConfigTheNodeHoldsWhenADocumentWillNotDecode(t *testing.T) {
 	r, talos := talosRealizer(t)
-	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything, mock.Anything).
+	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything).
 		Return(controlplane+"---\n\tnot: yaml\n", nil)
 
 	_, err := r.Realize(machineConfig(controlplane), plain)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "comparing the machine config of node box.lan")
+	assert.Contains(t, err.Error(), "comparing the machine config of t0-controlplane")
 	assert.Contains(t, err.Error(), "loading the machine config the node holds")
 }
 
 func TestTheTalosRealizerReportsLoadingTheDeclaredConfigWhenADocumentWillNotDecode(t *testing.T) {
 	r, talos := talosRealizer(t)
-	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything, mock.Anything).
+	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything).
 		Return(controlplane, nil)
 
 	_, err := r.Realize(machineConfig("\tnot: yaml\n"), plain)
@@ -601,7 +582,7 @@ func TestTheTalosRealizerReportsLoadingTheDeclaredConfigWhenADocumentWillNotDeco
 
 func TestTheTalosRealizerRefusesADeclaredConfigThatRepeatsAVolumeDocument(t *testing.T) {
 	r, talos := talosRealizer(t)
-	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything, mock.Anything).
+	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything).
 		Return(controlplane, nil)
 
 	_, err := r.Realize(machineConfig(controlplaneWithTheVolumeTwice), plain)
@@ -613,7 +594,7 @@ func TestTheTalosRealizerRefusesADeclaredConfigThatRepeatsAVolumeDocument(t *tes
 
 func TestTheTalosRealizerRefusesADeclaredConfigThatRepeatsTheVersionDocument(t *testing.T) {
 	r, talos := talosRealizer(t)
-	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything, mock.Anything).
+	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything).
 		Return(controlplane, nil)
 
 	_, err := r.Realize(machineConfig(controlplaneTwice), plain)
@@ -625,17 +606,17 @@ func TestTheTalosRealizerRefusesADeclaredConfigThatRepeatsTheVersionDocument(t *
 
 func TestTheTalosRealizerReportsTheNodeWhenTheDeclaredConfigCarriesNoVersionDocument(t *testing.T) {
 	r, talos := talosRealizer(t)
-	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything, mock.Anything).
+	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything).
 		Return(controlplane, nil)
 
 	_, err := r.Realize(machineConfig(theVolume), plain)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "comparing the machine config of node box.lan")
+	assert.Contains(t, err.Error(), "comparing the machine config of t0-controlplane")
 	assert.Contains(t, err.Error(), "patching the machine config the node holds")
 }
 
 func TestTheTalosRealizerRefusesASpecFieldThatHoldsSomethingOtherThanAString(t *testing.T) {
-	for _, key := range []string{"node", "config", "talosconfig", "talosconfigEnv"} {
+	for _, key := range []string{"config", "talosconfig", "talosconfigEnv"} {
 		t.Run(key, func(t *testing.T) {
 			r, _ := talosRealizer(t)
 
@@ -658,6 +639,6 @@ func TestTheTalosRealizerRefusesToReachANodeWithNoClientWired(t *testing.T) {
 
 	_, err := r.Realize(machineConfig(controlplane), plain)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "reading the machine config of node box.lan")
+	assert.Contains(t, err.Error(), "reading the machine config of t0-controlplane")
 	assert.Contains(t, err.Error(), "carries no node client yet")
 }

@@ -18,8 +18,12 @@ const (
 	apiServerPort = "6443"
 )
 
-var ErrNeverPublishes = errors.New(
-	"this engine declares machine configs and never publishes: no substage may name it")
+var (
+	ErrNeverPublishes = errors.New(
+		"this engine declares machine configs and never publishes: no substage may name it")
+
+	retiredKeys = []string{"endpoint", "nodes"}
+)
 
 type Renderer interface {
 	Load(bundle citypes.Secret) (citypes.Secret, error)
@@ -43,6 +47,14 @@ func New(fs fsadapter.FS, renderer Renderer, talosconfig Talosconfig) *Controlle
 }
 
 func (c *Controller) Declare(in citypes.DeclareInput) (citypes.DeclareOutput, error) {
+	for _, key := range retiredKeys {
+		if _, declared := in.Spec[key]; declared {
+			return citypes.DeclareOutput{}, fmt.Errorf(
+				"this engine refuses spec.%s: the node and the endpoint come from the talosconfig "+
+					"the variable spec.talosconfigEnv names", key)
+		}
+	}
+
 	clusterName, err := requiredString(in.Spec, "clusterName")
 	if err != nil {
 		return citypes.DeclareOutput{}, err
@@ -73,12 +85,12 @@ func (c *Controller) Declare(in citypes.DeclareInput) (citypes.DeclareOutput, er
 		{
 			Kind: kindMachineConfig,
 			Name: clusterName,
-			Spec: map[string]any{"node": target.Node, "config": string(config)},
+			Spec: map[string]any{"config": string(config)},
 		},
 		{
 			Kind: kindClusterBootstrap,
 			Name: clusterName,
-			Spec: map[string]any{"node": target.Node},
+			Spec: map[string]any{},
 		},
 	}}, nil
 }
