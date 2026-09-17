@@ -54,7 +54,6 @@ var applyModes = map[string]applyMode{
 type Node struct {
 	mode      applyMode
 	rebooting bool
-	stage     func(ctx context.Context, node string) (runtime.MachineStage, error)
 }
 
 func New(mode string) (*Node, error) {
@@ -68,7 +67,7 @@ func New(mode string) (*Node, error) {
 			"reading the apply mode %q: this adapter knows %s and %s", mode, ApplyModeAuto, ApplyModeStaged)
 	}
 
-	return &Node{mode: chosen, stage: probeStage}, nil
+	return &Node{mode: chosen}, nil
 }
 
 type Credential struct{}
@@ -333,7 +332,7 @@ func (n *Node) inMaintenance(ctx context.Context, node string, secureErr error) 
 		return false
 	}
 
-	stage, err := n.stage(ctx, node)
+	stage, err := probeStage(ctx, node)
 	if err != nil {
 		return false
 	}
