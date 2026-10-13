@@ -118,10 +118,12 @@ notes: |
   cluster a run converges or which namespace it places objects in.
 
   `spec.kubeconfig` declares exactly one source of three. `path` names a
-  kubeconfig file on disk. `talos` holds `node`, `endpoint` and
-  `talosconfigEnv`, and the manager fetches the kubeconfig through the talos
-  machine api of that node. `kind` holds `cluster`, and the manager asks the
-  kind binary to export the kubeconfig of that cluster.
+  kubeconfig file on disk. `talos` holds `talosconfigEnv` and nothing else.
+  The manager reads the node and the endpoints from the current context of the
+  talosconfig that variable names, and fetches the kubeconfig through the talos
+  machine api of that node. The context must name at least one endpoint and
+  exactly one node. `kind` holds `cluster`, and the manager asks the kind binary
+  to export the kubeconfig of that cluster.
 
   `talosconfigEnv` names the variable holding the path of the talosconfig file.
   It is required. Nothing is read when it is absent and no variable name is
@@ -132,10 +134,12 @@ notes: |
   Every refusal names what it saw. An absent `spec.kubeconfig` is refused
   naming the three sources. Two sources at once are refused naming the ones it
   found. A key that is none of the three is refused naming it and the three it
-  could have been. An empty `path` is refused. A `talos` block is refused
-  naming every one of `node`, `endpoint` and `talosconfigEnv` it lacks. A
-  `kind` block with no `cluster` is refused. A `talosconfigEnv` naming a
-  variable with nothing set in it is refused naming the node and the variable.
+  could have been. An empty `path` is refused. A `talos` block holding any key
+  but `talosconfigEnv` is refused naming that key, `node` and `endpoint`
+  included, because the node and the endpoints come from the talosconfig. A
+  `talos` block with no `talosconfigEnv` is refused naming it. A `kind` block
+  with no `cluster` is refused. A `talosconfigEnv` naming a variable with
+  nothing set in it is refused naming the variable.
 
   The manager writes the credential to one temporary file for the life of one
   reconcile and removes it after. The cluster client and the helm client both
@@ -177,5 +181,5 @@ spec:
     required: true
     means: >-
       Where the cluster credential comes from. Exactly one source: `path`
-      naming a kubeconfig file, `talos` holding `node`, `endpoint` and
-      `talosconfigEnv`, or `kind` holding `cluster`.
+      naming a kubeconfig file, `talos` holding `talosconfigEnv` only, or
+      `kind` holding `cluster`.
