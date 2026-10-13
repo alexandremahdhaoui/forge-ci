@@ -62,12 +62,11 @@ order declared, so the config lands before the bootstrap.
 No address is declared. The engine reads the talosconfig file the variable
 `spec.talosconfigEnv` names. The context must name exactly one node, and
 this release drives one node per cluster. An endpoint carrying a scheme is
-refused by name and position, wherever it sits in the list. The cluster
-endpoint handed to the
-renderer is `https://` plus the host of the first context endpoint plus
-`:6443`, such as `https://box.lan:6443`. The retired keys `endpoint` and
-`nodes` are refused by name, because the node and the endpoint come from
-that talosconfig.
+refused by name and position, wherever it sits in the list. The engine hands
+the renderer a cluster endpoint built from `https://`, the host of the first
+context endpoint and `:6443`, such as `https://node-a.example.invalid:6443`.
+The retired keys `endpoint` and `nodes` are refused by name, because the
+node and the endpoint come from that talosconfig.
 
 The engine reads the secret bundle and the patch from files relative to the
 pipeline root, which rides the declare call. The same bundle and the same

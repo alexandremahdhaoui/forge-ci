@@ -170,13 +170,13 @@ func TestTheContextReaderAnswersEveryEndpointAndTheOneNode(t *testing.T) {
 contexts:
   t0:
     endpoints:
-      - box.lan
-      - spare.lan:50000
+      - node-a.example.invalid
+      - node-b.example.invalid:50000
     nodes:
-      - box.lan
+      - node-a.example.invalid
 `))
 	require.NoError(t, err)
-	assert.Equal(t, citypes.TalosContext{Endpoints: []string{"box.lan", "spare.lan:50000"}, Node: "box.lan"}, target)
+	assert.Equal(t, citypes.TalosContext{Endpoints: []string{"node-a.example.invalid", "node-b.example.invalid:50000"}, Node: "node-a.example.invalid"}, target)
 }
 
 func TestTheContextReaderRefusesAnEndpointCarryingASchemeAtEveryPositionNamingThePosition(t *testing.T) {
@@ -226,7 +226,7 @@ contexts:
 func TestTheContextReaderRefusesAContextNamingNoEndpointByName(t *testing.T) {
 	t.Parallel()
 
-	_, err := NewTalosconfig().Context(writeTalosconfig(t, "context: t0\ncontexts:\n  t0:\n    nodes: [box.lan]\n"))
+	_, err := NewTalosconfig().Context(writeTalosconfig(t, "context: t0\ncontexts:\n  t0:\n    nodes: [node-a.example.invalid]\n"))
 	require.Error(t, err)
 	assert.Equal(t,
 		`reading the client configuration: context "t0" names no endpoint, and every dial goes through its endpoints`,
@@ -236,12 +236,12 @@ func TestTheContextReaderRefusesAContextNamingNoEndpointByName(t *testing.T) {
 func TestTheContextReaderRefusesAContextThatDoesNotDriveExactlyOneNodeNamingTheCount(t *testing.T) {
 	t.Parallel()
 
-	for count, nodes := range map[string]string{"0": "", "2": "\n    nodes: [box.lan, spare.lan]"} {
+	for count, nodes := range map[string]string{"0": "", "2": "\n    nodes: [node-a.example.invalid, node-b.example.invalid]"} {
 		t.Run(count+" nodes", func(t *testing.T) {
 			t.Parallel()
 
 			_, err := NewTalosconfig().Context(writeTalosconfig(t,
-				"context: t0\ncontexts:\n  t0:\n    endpoints: [box.lan]"+nodes+"\n"))
+				"context: t0\ncontexts:\n  t0:\n    endpoints: [node-a.example.invalid]"+nodes+"\n"))
 			require.Error(t, err)
 			assert.Equal(t,
 				`reading the client configuration: context "t0" names `+count+
@@ -254,7 +254,7 @@ func TestTheContextReaderRefusesAContextThatDoesNotDriveExactlyOneNodeNamingTheC
 func TestTheContextReaderRefusesATalosconfigWhoseCurrentContextIsNotDeclared(t *testing.T) {
 	t.Parallel()
 
-	_, err := NewTalosconfig().Context(writeTalosconfig(t, "context: t1\ncontexts:\n  t0:\n    endpoints: [box.lan]\n"))
+	_, err := NewTalosconfig().Context(writeTalosconfig(t, "context: t1\ncontexts:\n  t0:\n    endpoints: [node-a.example.invalid]\n"))
 	require.Error(t, err)
 	assert.Equal(t, `reading the client configuration: it names no context "t1"`, err.Error())
 }
@@ -278,7 +278,7 @@ func TestACertificateErrorIsToldApartFromEveryOtherFailure(t *testing.T) {
 		"a bare tls failure":  errors.New("tls: handshake failure"),
 		"a bare x509 failure": errors.New("x509: certificate has expired or is not yet valid"),
 		"a wrapped x509 failure": fmt.Errorf(
-			"dialing node box.lan: %w", errors.New("x509: certificate signed by unknown authority")),
+			"dialing node node-a.example.invalid: %w", errors.New("x509: certificate signed by unknown authority")),
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -397,7 +397,7 @@ func TestTheCredentialNeverEchoesTheClientConfigurationSlot(t *testing.T) {
 func TestEveryDialRefusesATalosconfigDrivingTwoNodesBeforeReachingAnything(t *testing.T) {
 	t.Parallel()
 
-	talosconfig := writeTalosconfig(t, talosconfigReachingNothing+"      - spare.lan\n")
+	talosconfig := writeTalosconfig(t, talosconfigReachingNothing+"      - node-b.example.invalid\n")
 
 	node, err := New(ApplyModeAuto)
 	require.NoError(t, err)
@@ -416,14 +416,14 @@ func TestTheWaitStopsWhenTheContextEndsAndNamesTheLastCause(t *testing.T) {
 
 	attempts := 0
 
-	err := untilCeiling(ctx, "waiting for node box.lan to register", func() error {
+	err := untilCeiling(ctx, "waiting for node node-a.example.invalid to register", func() error {
 		attempts++
 
 		return errors.New("no node has posted a status yet")
 	})
 	require.Error(t, err)
 	assert.Equal(t, 1, attempts)
-	assert.Contains(t, err.Error(), "waiting for node box.lan to register")
+	assert.Contains(t, err.Error(), "waiting for node node-a.example.invalid to register")
 	assert.Contains(t, err.Error(), "context canceled")
 	assert.Contains(t, err.Error(), "the last cause: no node has posted a status yet")
 }

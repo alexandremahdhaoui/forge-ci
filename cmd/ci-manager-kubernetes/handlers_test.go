@@ -72,6 +72,31 @@ func TestAKubeconfigTheManagerSpecDeclaresReachesTheClusterClientAndItsHostIsThe
 	assert.Equal(t, []string{}, out.Actions)
 }
 
+func TestATalosSourceWhoseTalosconfigEndpointCarriesASchemeIsRefusedByNameBeforeAnyNodeIsDialed(t *testing.T) {
+	talosconfig := filepath.Join(t.TempDir(), "talosconfig")
+	require.NoError(t, os.WriteFile(talosconfig, []byte(`context: t0
+contexts:
+  t0:
+    endpoints:
+      - 127.0.0.1:1
+      - https://127.0.0.1:1
+    nodes:
+      - 127.0.0.1
+`), 0o600))
+	t.Setenv("THE_TALOSCONFIG", talosconfig)
+
+	_, err := NewHandlers().Reconcile(context.Background(), declaring(map[string]any{
+		"kubeconfig": map[string]any{"talos": map[string]any{"talosconfigEnv": "THE_TALOSCONFIG"}},
+	}))
+	require.Error(t, err)
+	assert.Equal(t,
+		"reading the cluster credential of manager kubernetes from talos through THE_TALOSCONFIG: "+
+			"reading the kubeconfig through THE_TALOSCONFIG: "+
+			"dialing the node the client configuration names: "+
+			`reading the client configuration: endpoint 2 of context "t0" carries a scheme, `+
+			"and a talosconfig endpoint is a host or a host and port", err.Error())
+}
+
 func TestOnlyAReconcileThatWillRealizeAReleaseCarriesAHelmClientThatCanReachHelm(t *testing.T) {
 	t.Parallel()
 

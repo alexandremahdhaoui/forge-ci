@@ -57,7 +57,7 @@ func TestATalosSourceDeclaringANodeOrAnEndpointIsRefusedNamingTheKeyAndTheOneKey
 			t.Parallel()
 
 			_, err := managercontroller.Kubeconfig(
-				talosSpec(map[string]any{"talosconfigEnv": theVariable, key: "box.lan"}))
+				talosSpec(map[string]any{"talosconfigEnv": theVariable, key: "node-a.example.invalid"}))
 			require.Error(t, err)
 			assert.Equal(t,
 				"reading spec.kubeconfig.talos: it declares "+`"`+key+`"`+", and a talos source declares "+

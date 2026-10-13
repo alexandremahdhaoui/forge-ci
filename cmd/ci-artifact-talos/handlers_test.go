@@ -29,9 +29,9 @@ const (
 contexts:
   t0:
     endpoints:
-      - box.lan
+      - node-a.example.invalid
     nodes:
-      - box.lan
+      - node-a.example.invalid
 `
 	theVariable = "A_TALOSCONFIG_THIS_TEST_OWNS"
 )
@@ -84,7 +84,7 @@ func TestTheDeclareToolAnswersARenderedControlPlaneConfigCarryingThePatchThenThe
 	require.True(t, ok)
 	assert.NotEqual(t, patchDocument, rendered)
 	assert.Contains(t, rendered, "/dev/the-disk-the-patch-names")
-	assert.Contains(t, rendered, "https://box.lan:6443")
+	assert.Contains(t, rendered, "https://node-a.example.invalid:6443")
 
 	loaded, err := configloader.NewFromBytes([]byte(rendered))
 	require.NoError(t, err)
@@ -138,7 +138,7 @@ contexts:
 func TestARefusalFromARealTalosconfigNamingTwoNodesNeverCarriesTheBundleBytes(t *testing.T) {
 	root, bundle := writeThrowawayCluster(t)
 	require.NoError(t, os.WriteFile(filepath.Join(root, "talosconfig"),
-		[]byte(talosconfigDocument+"      - spare.lan\n"), 0o600))
+		[]byte(talosconfigDocument+"      - node-b.example.invalid\n"), 0o600))
 
 	_, err := NewHandlers().Declare(context.Background(), DeclareInput{Root: root, Spec: declaredSpec()})
 

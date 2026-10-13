@@ -153,7 +153,9 @@ kind binary to export the kubeconfig of that cluster.
 
 `talosconfigEnv` names the variable holding the path of the talosconfig file.
 It is required. Nothing is read when it is absent and no variable name is
-assumed.
+assumed. The talos source refuses an endpoint carrying a scheme by name and
+position, wherever it sits in the talosconfig context, before it dials any
+node.
 
 Every refusal names what it saw. An absent `spec.kubeconfig` is refused
 naming the three sources. Two sources at once are refused naming the ones it

@@ -24,16 +24,16 @@ const (
 
 	theVariable = "A_TALOSCONFIG_THIS_TEST_OWNS"
 	thePath     = "/home/a-person/talosconfig"
-	theNode     = "box.lan"
+	theNode     = "node-a.example.invalid"
 )
 
 func theContext() citypes.TalosContext {
-	return citypes.TalosContext{Endpoints: []string{"box.lan:50000", "spare.lan"}, Node: theNode}
+	return citypes.TalosContext{Endpoints: []string{"node-a.example.invalid:50000", "node-b.example.invalid"}, Node: theNode}
 }
 
 func theCluster() talossecretsadapter.Cluster {
 	return talossecretsadapter.Cluster{
-		Name: "t0", Endpoint: "https://box.lan:6443", KubernetesVersion: "1.37.0",
+		Name: "t0", Endpoint: "https://node-a.example.invalid:6443", KubernetesVersion: "1.37.0",
 	}
 }
 
@@ -129,7 +129,7 @@ func TestAContextEndpointWithoutAPortStillBecomesTheClusterEndpointOnPort6443(t 
 
 	talosconfig := machineconfigcontrollermock.NewMockTalosconfig(t)
 	talosconfig.EXPECT().Context(citypes.Secret(thePath)).
-		Return(citypes.TalosContext{Endpoints: []string{"box.lan"}, Node: theNode}, nil)
+		Return(citypes.TalosContext{Endpoints: []string{"node-a.example.invalid"}, Node: theNode}, nil)
 
 	_, err := machineconfigcontroller.New(filesOnDisk(t), aRenderer(t), talosconfig).
 		Declare(citypes.DeclareInput{Root: "/w", Spec: fullSpec()})
@@ -229,7 +229,7 @@ func TestTheRetiredEndpointKeyIsRefusedByNameBeforeAnythingIsRead(t *testing.T) 
 	exported(t)
 
 	spec := fullSpec()
-	spec["endpoint"] = "https://box.lan:6443"
+	spec["endpoint"] = "https://node-a.example.invalid:6443"
 
 	_, err := machineconfigcontroller.New(
 		fsadaptermock.NewMockFS(t),
@@ -247,7 +247,7 @@ func TestTheRetiredNodesKeyIsRefusedByNameBeforeAnythingIsRead(t *testing.T) {
 	exported(t)
 
 	spec := fullSpec()
-	spec["nodes"] = []any{map[string]any{"name": "one", "address": "box.lan"}}
+	spec["nodes"] = []any{map[string]any{"name": "one", "address": "node-a.example.invalid"}}
 
 	_, err := machineconfigcontroller.New(
 		fsadaptermock.NewMockFS(t),
