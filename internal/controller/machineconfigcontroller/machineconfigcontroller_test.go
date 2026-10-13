@@ -87,7 +87,7 @@ func exported(t *testing.T) {
 	t.Setenv(theVariable, thePath)
 }
 
-func TestAClusterDeclaresItsMachineConfigThenItsBootstrapBothNamedByTheClusterAndNeitherNamesANode(t *testing.T) {
+func TestAClusterDeclaresItsMachineConfigThenItsBootstrapBothNamedByTheClusterBothCarryingTheVariableAndNeitherNamesANode(t *testing.T) {
 	exported(t)
 
 	out, err := machineconfigcontroller.New(filesOnDisk(t), aRenderer(t), aTalosconfig(t)).
@@ -98,12 +98,12 @@ func TestAClusterDeclaresItsMachineConfigThenItsBootstrapBothNamedByTheClusterAn
 	assert.Equal(t, citypes.Resource{
 		Kind: "machine-config",
 		Name: "t0",
-		Spec: map[string]any{"config": renderedConfig},
+		Spec: map[string]any{"config": renderedConfig, "talosconfigEnv": theVariable},
 	}, out.Resources[0])
 	assert.Equal(t, citypes.Resource{
 		Kind: "cluster-bootstrap",
 		Name: "t0",
-		Spec: map[string]any{},
+		Spec: map[string]any{"talosconfigEnv": theVariable},
 	}, out.Resources[1])
 	assert.NotEqual(t, storedBundle, out.Resources[0].Spec["config"])
 	assert.NotEqual(t, patchText, out.Resources[0].Spec["config"])
@@ -135,23 +135,6 @@ func TestAContextEndpointWithoutAPortStillBecomesTheClusterEndpointOnPort6443(t 
 		Declare(citypes.DeclareInput{Root: "/w", Spec: fullSpec()})
 
 	require.NoError(t, err)
-}
-
-func TestAContextEndpointCarryingASchemeIsRefusedByNameBeforeAnyFileIsRead(t *testing.T) {
-	exported(t)
-
-	talosconfig := machineconfigcontrollermock.NewMockTalosconfig(t)
-	talosconfig.EXPECT().Context(citypes.Secret(thePath)).
-		Return(citypes.TalosContext{Endpoints: []string{"https://box.lan:50000"}, Node: theNode}, nil)
-
-	_, err := machineconfigcontroller.New(
-		fsadaptermock.NewMockFS(t), machineconfigcontrollermock.NewMockRenderer(t), talosconfig,
-	).Declare(citypes.DeclareInput{Root: "/w", Spec: fullSpec()})
-
-	require.Error(t, err)
-	assert.Equal(t,
-		"reading the client configuration of cluster t0: the first endpoint carries a scheme, "+
-			"and a talosconfig endpoint is a host or a host and port", err.Error())
 }
 
 func TestAVariableHoldingNothingIsRefusedNamingTheClusterAndTheVariableBeforeAnyFileIsRead(t *testing.T) {

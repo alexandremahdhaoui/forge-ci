@@ -438,7 +438,23 @@ func contextOf(held *clientconfig.Config) (citypes.TalosContext, error) {
 			held.Context, len(current.Nodes))
 	}
 
+	if err := refuseSchemes(held.Context, current.Endpoints); err != nil {
+		return citypes.TalosContext{}, err
+	}
+
 	return citypes.TalosContext{Endpoints: current.Endpoints, Node: current.Nodes[0]}, nil
+}
+
+func refuseSchemes(contextName string, endpoints []string) error {
+	for i, endpoint := range endpoints {
+		if strings.Contains(endpoint, "://") {
+			return fmt.Errorf(
+				"reading the client configuration: endpoint %d of context %q carries a scheme, "+
+					"and a talosconfig endpoint is a host or a host and port", i+1, contextName)
+		}
+	}
+
+	return nil
 }
 
 func causeWithoutThePath(err error) error {

@@ -80,21 +80,21 @@ func talosRealizer(t *testing.T) (managercontroller.TalosRealizer, *managercontr
 
 	talos := managercontrollermock.NewMockTalos(t)
 
-	return managercontroller.NewTalosRealizer(t.Context(), talos, talosconfigVariable), talos
+	return managercontroller.NewTalosRealizer(t.Context(), talos), talos
 }
 
 func machineConfig(document string) citypes.Resource {
 	return citypes.Resource{
 		Kind: managercontroller.KindMachineConfig,
 		Name: "t0-controlplane",
-		Spec: map[string]any{"config": document},
+		Spec: map[string]any{"config": document, "talosconfigEnv": talosconfigVariable},
 	}
 }
 
 func TestTheTalosRealizerNamesItselfTalos(t *testing.T) {
 	t.Parallel()
 
-	assert.Equal(t, "talos", managercontroller.NewTalosRealizer(t.Context(), nil, "").Kind())
+	assert.Equal(t, "talos", managercontroller.NewTalosRealizer(t.Context(), nil).Kind())
 }
 
 func TestTheTalosRealizerKeepsAMachineConfigTheNodeAlreadyHolds(t *testing.T) {
@@ -305,20 +305,56 @@ func clusterBootstrap() citypes.Resource {
 	return citypes.Resource{
 		Kind: managercontroller.KindClusterBootstrap,
 		Name: "t0",
-		Spec: map[string]any{},
+		Spec: map[string]any{"talosconfigEnv": talosconfigVariable},
 	}
 }
 
-func TestAClusterBootstrapWithNoSpecReadsTheNodeFromTheTalosconfigAndRefusesNothing(t *testing.T) {
-	r, talos := talosRealizer(t)
-	talos.EXPECT().Bootstrapped(mock.Anything, mock.Anything).Return(true, nil)
-	talos.EXPECT().WaitNodeRegistered(mock.Anything, mock.Anything).Return(nil)
+func TestAResourceThatNamesNoTalosconfigVariableIsRefusedByNameBeforeAnyDialEvenWhenTALOSCONFIGIsExported(t *testing.T) {
+	t.Setenv("TALOSCONFIG", "/home/operator/.talos/config")
 
-	action, err := r.Realize(citypes.Resource{
-		Kind: managercontroller.KindClusterBootstrap, Name: "t0", Spec: nil,
-	}, plain)
-	require.NoError(t, err)
-	assert.False(t, action.Changed)
+	for name, res := range map[string]citypes.Resource{
+		"a machine config with no key": {
+			Kind: managercontroller.KindMachineConfig, Name: "t0", Spec: map[string]any{"config": controlplane},
+		},
+		"a machine config with an empty variable": {
+			Kind: managercontroller.KindMachineConfig, Name: "t0",
+			Spec: map[string]any{"config": controlplane, "talosconfigEnv": ""},
+		},
+		"a cluster bootstrap with no spec": {Kind: managercontroller.KindClusterBootstrap, Name: "t0"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := managercontroller.NewTalosRealizer(t.Context(), managercontrollermock.NewMockTalos(t))
+
+			_, err := r.Realize(res, plain)
+			require.Error(t, err)
+			assert.Equal(t,
+				"spec.talosconfigEnv is required: the resource names the variable holding the talosconfig path, "+
+					"and the engine that declares the resource writes it",
+				err.Error())
+		})
+	}
+}
+
+func TestEveryKindRefusesTheRetiredNodeAndTalosconfigKeysByNameBeforeAnyDial(t *testing.T) {
+	for _, res := range []citypes.Resource{machineConfig(controlplane), clusterBootstrap()} {
+		for key, because := range map[string]string{
+			"node":        "the node comes from the talosconfig the variable spec.talosconfigEnv names",
+			"talosconfig": "the talosconfig path comes from the variable spec.talosconfigEnv names",
+		} {
+			t.Run(res.Kind+" "+key, func(t *testing.T) {
+				r, _ := talosRealizer(t)
+
+				res.Spec[key] = "a retired value"
+				defer delete(res.Spec, key)
+
+				_, err := r.Realize(res, plain)
+				require.Error(t, err)
+				assert.Equal(t,
+					"the talos manager refuses spec."+key+" on "+res.Kind+" "+res.Name+": "+because,
+					err.Error())
+			})
+		}
+	}
 }
 
 func TestTheTalosRealizerKeepsAClusterWhoseEtcdRunsOnceItsNodeRegistered(t *testing.T) {
@@ -372,7 +408,7 @@ func TestTheTalosRealizerReportsTheNodeWhenTheBootstrapStateCannotBeRead(t *test
 	require.Error(t, err)
 	assert.Contains(t, err.Error(),
 		"reading the bootstrap state of t0 using the client configuration from "+
-			"the variable the manager's talosconfigEnv names")
+			"the variable spec.talosconfigEnv names")
 	assert.Contains(t, err.Error(), "no route to host")
 }
 
@@ -409,7 +445,7 @@ func TestTheTalosRealizerReportsTheNodeWhenItNeverRegisters(t *testing.T) {
 func TestTheTalosRealizerRefusesToBootstrapWithNoClientWired(t *testing.T) {
 	t.Setenv(talosconfigVariable, "/home/operator/.config/t0.yaml")
 
-	r := managercontroller.NewTalosRealizer(t.Context(), nil, talosconfigVariable)
+	r := managercontroller.NewTalosRealizer(t.Context(), nil)
 
 	_, err := r.Realize(clusterBootstrap(), plain)
 	require.Error(t, err)
@@ -417,26 +453,10 @@ func TestTheTalosRealizerRefusesToBootstrapWithNoClientWired(t *testing.T) {
 	assert.Contains(t, err.Error(), "carries no node client yet")
 }
 
-func TestAClusterBootstrapReadsTheClientConfigurationPathFromTheResource(t *testing.T) {
-	r, talos := talosRealizer(t)
-	talos.EXPECT().Bootstrapped(mock.Anything, citypes.Secret("/etc/t0/declared.yaml")).
-		Return(true, nil)
-	talos.EXPECT().WaitNodeRegistered(mock.Anything, citypes.Secret("/etc/t0/declared.yaml")).
-		Return(nil)
-
-	res := clusterBootstrap()
-	res.Spec["talosconfig"] = "/etc/t0/declared.yaml"
-
-	action, err := r.Realize(res, plain)
-	require.NoError(t, err)
-	assert.False(t, action.Changed)
-}
-
 func TestAClusterBootstrapWithNoClientConfigurationIsRefusedBeforeAnyDial(t *testing.T) {
 	t.Setenv(talosconfigVariable, "")
 
-	r := managercontroller.NewTalosRealizer(
-		t.Context(), managercontrollermock.NewMockTalos(t), talosconfigVariable)
+	r := managercontroller.NewTalosRealizer(t.Context(), managercontrollermock.NewMockTalos(t))
 
 	_, err := r.Realize(clusterBootstrap(), plain)
 	require.Error(t, err)
@@ -455,47 +475,18 @@ func TestTheTalosRealizerRefusesAMachineConfigResourceWithoutAConfig(t *testing.
 	}
 }
 
-func TestTheTalosRealizerNamesTheVariableItReadWhenNothingDeclaresOne(t *testing.T) {
-	t.Setenv("TALOSCONFIG", "")
-
-	r := managercontroller.NewTalosRealizer(t.Context(), managercontrollermock.NewMockTalos(t), "")
-
-	_, err := r.Realize(machineConfig(controlplane), plain)
-	require.Error(t, err)
-	assert.Equal(t,
-		"reading the client configuration path: nothing is set in TALOSCONFIG, which is read when "+
-			"neither spec.talosconfigEnv nor the manager's talosconfigEnv is declared. "+
-			"export it before bootstrapping",
-		err.Error())
-}
-
 func TestTheTalosRealizerRefusesAnEmptyClientConfigurationVariable(t *testing.T) {
 	t.Setenv(talosconfigVariable, "")
 
-	r := managercontroller.NewTalosRealizer(
-		t.Context(), managercontrollermock.NewMockTalos(t), talosconfigVariable)
+	r := managercontroller.NewTalosRealizer(t.Context(), managercontrollermock.NewMockTalos(t))
 
 	_, err := r.Realize(machineConfig(controlplane), plain)
 	require.Error(t, err)
 	assert.Equal(t,
-		"reading the client configuration path: nothing is set in the variable the manager's "+
-			"talosconfigEnv names. export it before bootstrapping",
+		"reading the client configuration path: nothing is set in the variable spec.talosconfigEnv names. "+
+			"export it before bootstrapping",
 		err.Error())
 	assert.NotContains(t, err.Error(), talosconfigVariable)
-}
-
-func TestTheTalosRealizerNamesTheSlotThatFedTheClientConfigurationWhenTheNodeCannotBeRead(t *testing.T) {
-	r, talos := talosRealizer(t)
-	talos.EXPECT().MachineConfig(mock.Anything, citypes.Secret("/etc/t0/declared.yaml")).
-		Return("", errors.New("no route to host"))
-
-	res := machineConfig(controlplane)
-	res.Spec["talosconfig"] = "/etc/t0/declared.yaml"
-
-	_, err := r.Realize(res, plain)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(),
-		"reading the machine config of t0-controlplane using the client configuration from spec.talosconfig")
 }
 
 func TestTheTalosRealizerNamesTheSlotThatFedTheClientConfigurationWhenTheApplyFails(t *testing.T) {
@@ -519,7 +510,7 @@ func TestTheTalosRealizerNamesTheSlotThatFedTheClientConfigurationWhenTheApplyFa
 }
 
 func TestTheTalosRealizerNeverEchoesASecretPastedIntoTheClientConfigurationVariableSlot(t *testing.T) {
-	r := managercontroller.NewTalosRealizer(t.Context(), managercontrollermock.NewMockTalos(t), "")
+	r := managercontroller.NewTalosRealizer(t.Context(), managercontrollermock.NewMockTalos(t))
 
 	res := machineConfig(controlplane)
 	res.Spec["talosconfigEnv"] = thePastedPrivateKey
@@ -529,19 +520,6 @@ func TestTheTalosRealizerNeverEchoesASecretPastedIntoTheClientConfigurationVaria
 	assert.NotContains(t, err.Error(), thePastedPrivateKey)
 	assert.NotContains(t, err.Error(), "BEGIN OPENSSH PRIVATE KEY")
 	assert.Contains(t, err.Error(), "spec.talosconfigEnv")
-}
-
-func TestTheTalosRealizerReadsTheClientConfigurationPathFromTheResource(t *testing.T) {
-	r, talos := talosRealizer(t)
-	talos.EXPECT().MachineConfig(mock.Anything, citypes.Secret("/etc/t0/declared.yaml")).
-		Return(controlplane, nil)
-
-	res := machineConfig(controlplane)
-	res.Spec["talosconfig"] = "/etc/t0/declared.yaml"
-
-	action, err := r.Realize(res, plain)
-	require.NoError(t, err)
-	assert.False(t, action.Changed)
 }
 
 func TestTheTalosRealizerReadsTheClientConfigurationPathFromTheVariableTheResourceNames(t *testing.T) {
@@ -616,7 +594,7 @@ func TestTheTalosRealizerReportsTheNodeWhenTheDeclaredConfigCarriesNoVersionDocu
 }
 
 func TestTheTalosRealizerRefusesASpecFieldThatHoldsSomethingOtherThanAString(t *testing.T) {
-	for _, key := range []string{"config", "talosconfig", "talosconfigEnv"} {
+	for _, key := range []string{"config", "talosconfigEnv"} {
 		t.Run(key, func(t *testing.T) {
 			r, _ := talosRealizer(t)
 
@@ -635,7 +613,7 @@ func TestTheTalosRealizerRefusesASpecFieldThatHoldsSomethingOtherThanAString(t *
 func TestTheTalosRealizerRefusesToReachANodeWithNoClientWired(t *testing.T) {
 	t.Setenv(talosconfigVariable, "/home/operator/.config/t0.yaml")
 
-	r := managercontroller.NewTalosRealizer(t.Context(), nil, talosconfigVariable)
+	r := managercontroller.NewTalosRealizer(t.Context(), nil)
 
 	_, err := r.Realize(machineConfig(controlplane), plain)
 	require.Error(t, err)

@@ -7,9 +7,6 @@ openapi:
 generate:
   packageName: main
   docsBaseURL: https://raw.githubusercontent.com/alexandremahdhaoui/forge-ci/refs/heads/main
-runtime:
-  env:
-    - TALOSCONFIG
 layout:
   tools:
     - name: reconcile

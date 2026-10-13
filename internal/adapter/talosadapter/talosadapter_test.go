@@ -179,6 +179,50 @@ contexts:
 	assert.Equal(t, citypes.TalosContext{Endpoints: []string{"box.lan", "spare.lan:50000"}, Node: "box.lan"}, target)
 }
 
+func TestTheContextReaderRefusesAnEndpointCarryingASchemeAtEveryPositionNamingThePosition(t *testing.T) {
+	t.Parallel()
+
+	for position, endpoints := range map[string]string{
+		"1": "[https://talos.example:50000, talos.example]",
+		"2": "[talos.example, https://talos.example:50000]",
+		"3": "[talos.example, talos.example:50000, tcp://talos.example]",
+	} {
+		t.Run("endpoint "+position, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := NewTalosconfig().Context(writeTalosconfig(t,
+				"context: t0\ncontexts:\n  t0:\n    endpoints: "+endpoints+"\n    nodes: [talos.example]\n"))
+			require.Error(t, err)
+			assert.Equal(t,
+				"reading the client configuration: endpoint "+position+` of context "t0" carries a scheme, `+
+					"and a talosconfig endpoint is a host or a host and port",
+				err.Error())
+		})
+	}
+}
+
+func TestEveryManagerDialRefusesAnEndpointCarryingASchemeBeforeReachingAnything(t *testing.T) {
+	t.Parallel()
+
+	talosconfig := writeTalosconfig(t, `context: t0
+contexts:
+  t0:
+    endpoints:
+      - `+theClosedPort+`
+      - https://`+theClosedPort+`
+    nodes:
+      - 127.0.0.1
+`)
+
+	node, err := New(ApplyModeAuto)
+	require.NoError(t, err)
+
+	_, err = node.MachineConfig(t.Context(), talosconfig)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `endpoint 2 of context "t0" carries a scheme`)
+	assert.NotContains(t, err.Error(), "connection refused")
+}
+
 func TestTheContextReaderRefusesAContextNamingNoEndpointByName(t *testing.T) {
 	t.Parallel()
 

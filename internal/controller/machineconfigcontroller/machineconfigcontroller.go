@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net"
 	"path/filepath"
-	"strings"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/fsadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/talossecretsadapter"
@@ -66,15 +65,14 @@ func (c *Controller) Declare(in citypes.DeclareInput) (citypes.DeclareOutput, er
 		return citypes.DeclareOutput{}, err
 	}
 
-	target, err := c.declaredContext(in.Spec, clusterName)
+	variable, err := requiredString(in.Spec, "talosconfigEnv")
 	if err != nil {
 		return citypes.DeclareOutput{}, err
 	}
 
-	if strings.Contains(target.Endpoints[0], "://") {
-		return citypes.DeclareOutput{}, fmt.Errorf(
-			"reading the client configuration of cluster %s: the first endpoint carries a scheme, "+
-				"and a talosconfig endpoint is a host or a host and port", clusterName)
+	target, err := c.declaredContext(variable, clusterName)
+	if err != nil {
+		return citypes.DeclareOutput{}, err
 	}
 
 	cluster := talossecretsadapter.Cluster{
@@ -92,12 +90,12 @@ func (c *Controller) Declare(in citypes.DeclareInput) (citypes.DeclareOutput, er
 		{
 			Kind: kindMachineConfig,
 			Name: clusterName,
-			Spec: map[string]any{"config": string(config)},
+			Spec: map[string]any{"config": string(config), "talosconfigEnv": variable},
 		},
 		{
 			Kind: kindClusterBootstrap,
 			Name: clusterName,
-			Spec: map[string]any{},
+			Spec: map[string]any{"talosconfigEnv": variable},
 		},
 	}}, nil
 }
@@ -106,12 +104,7 @@ func (c *Controller) Publish() error {
 	return ErrNeverPublishes
 }
 
-func (c *Controller) declaredContext(spec map[string]any, clusterName string) (citypes.TalosContext, error) {
-	variable, err := requiredString(spec, "talosconfigEnv")
-	if err != nil {
-		return citypes.TalosContext{}, err
-	}
-
+func (c *Controller) declaredContext(variable, clusterName string) (citypes.TalosContext, error) {
 	talosconfig := citypes.SecretFromEnv(variable)
 	if talosconfig == "" {
 		return citypes.TalosContext{}, fmt.Errorf(

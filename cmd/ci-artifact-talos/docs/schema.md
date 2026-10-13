@@ -8,7 +8,7 @@ The `spec` block on this engine's entry in `forge-ci.yaml`.
 |---|---|---|---|
 | `clusterName` | string | yes | The name of the cluster the machine config belongs to, and the name of both resources. |
 | `kubernetesVersion` | string | yes | The Kubernetes version the machine config installs. |
-| `talosconfigEnv` | string | yes | The environment variable holding the talosconfig path. Its current context names the endpoints and the one node. |
+| `talosconfigEnv` | string | yes | The environment variable holding the talosconfig path. Its current context names the endpoints and the one node. Both declared resources carry it to the manager. |
 | `bundleFile` | string | yes | The path of the cluster's stored secret bundle relative to the pipeline root. |
 | `patchFile` | string | yes | The path of the control plane patch document relative to the pipeline root. |
 

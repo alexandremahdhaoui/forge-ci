@@ -16,8 +16,13 @@ const (
 	KindMachineConfig    = "machine-config"
 	KindClusterBootstrap = "cluster-bootstrap"
 
-	defaultTalosconfigVariable = "TALOSCONFIG"
+	talosconfigSource = "the variable spec.talosconfigEnv names"
 )
+
+var retiredResourceKeys = []struct{ key, because string }{
+	{"node", "the node comes from the talosconfig " + talosconfigSource},
+	{"talosconfig", "the talosconfig path comes from " + talosconfigSource},
+}
 
 type Talos interface {
 	MachineConfig(ctx context.Context, talosconfig citypes.Secret) (string, error)
@@ -28,15 +33,14 @@ type Talos interface {
 }
 
 type TalosRealizer struct {
-	ctx            context.Context
-	talos          Talos
-	talosconfigEnv string
+	ctx   context.Context
+	talos Talos
 }
 
 var _ Realizer = TalosRealizer{}
 
-func NewTalosRealizer(ctx context.Context, talos Talos, talosconfigEnv string) TalosRealizer {
-	return TalosRealizer{ctx: ctx, talos: talos, talosconfigEnv: talosconfigEnv}
+func NewTalosRealizer(ctx context.Context, talos Talos) TalosRealizer {
+	return TalosRealizer{ctx: ctx, talos: talos}
 }
 
 func (TalosRealizer) Kind() string {
@@ -44,6 +48,10 @@ func (TalosRealizer) Kind() string {
 }
 
 func (r TalosRealizer) Realize(res citypes.Resource, opts Options) (Action, error) {
+	if err := refuseRetiredKeys(res); err != nil {
+		return Action{}, err
+	}
+
 	switch res.Kind {
 	case KindMachineConfig:
 		return r.realizeMachineConfig(res, opts)
@@ -66,7 +74,7 @@ func (r TalosRealizer) realizeMachineConfig(res citypes.Resource, opts Options) 
 		return Action{}, errors.New("spec.config is required")
 	}
 
-	talosconfig, source, err := r.talosconfigFor(res.Spec)
+	talosconfig, err := talosconfigFor(res.Spec)
 	if err != nil {
 		return Action{}, err
 	}
@@ -80,7 +88,7 @@ func (r TalosRealizer) realizeMachineConfig(res citypes.Resource, opts Options) 
 	if err != nil {
 		return Action{}, fmt.Errorf(
 			"reading the machine config of %s using the client configuration from %s: %w",
-			res.Name, source, err)
+			res.Name, talosconfigSource, err)
 	}
 
 	same, err := sameMachineConfig(running, declared)
@@ -99,14 +107,14 @@ func (r TalosRealizer) realizeMachineConfig(res citypes.Resource, opts Options) 
 	if err := r.talos.ApplyMachineConfig(r.ctx, talosconfig, declared); err != nil {
 		return Action{}, fmt.Errorf(
 			"applying the machine config of %s using the client configuration from %s: %w",
-			res.Name, source, err)
+			res.Name, talosconfigSource, err)
 	}
 
 	return Did("applied machine config " + res.Name), nil
 }
 
 func (r TalosRealizer) realizeClusterBootstrap(res citypes.Resource, opts Options) (Action, error) {
-	talosconfig, source, err := r.talosconfigFor(res.Spec)
+	talosconfig, err := talosconfigFor(res.Spec)
 	if err != nil {
 		return Action{}, err
 	}
@@ -120,7 +128,7 @@ func (r TalosRealizer) realizeClusterBootstrap(res citypes.Resource, opts Option
 	if err != nil {
 		return Action{}, fmt.Errorf(
 			"reading the bootstrap state of %s using the client configuration from %s: %w",
-			res.Name, source, err)
+			res.Name, talosconfigSource, err)
 	}
 
 	if bootstrapped {
@@ -137,7 +145,7 @@ func (r TalosRealizer) realizeClusterBootstrap(res citypes.Resource, opts Option
 
 	if err := r.talos.Bootstrap(r.ctx, talosconfig); err != nil {
 		return Action{}, fmt.Errorf(
-			"bootstrapping %s using the client configuration from %s: %w", res.Name, source, err)
+			"bootstrapping %s using the client configuration from %s: %w", res.Name, talosconfigSource, err)
 	}
 
 	if err := r.talos.WaitNodeRegistered(r.ctx, talosconfig); err != nil {
@@ -147,42 +155,37 @@ func (r TalosRealizer) realizeClusterBootstrap(res citypes.Resource, opts Option
 	return Did("bootstrapped cluster " + res.Name), nil
 }
 
-func (r TalosRealizer) talosconfigFor(spec map[string]any) (citypes.Secret, string, error) {
-	declared, err := citypes.SpecString(spec, "talosconfig")
-	if err != nil {
-		return "", "", err
+func refuseRetiredKeys(res citypes.Resource) error {
+	for _, retired := range retiredResourceKeys {
+		if _, declared := res.Spec[retired.key]; declared {
+			return fmt.Errorf("the talos manager refuses spec.%s on %s %s: %s",
+				retired.key, res.Kind, res.Name, retired.because)
+		}
 	}
 
-	if declared != "" {
-		return citypes.Secret(declared), "spec.talosconfig", nil
-	}
+	return nil
+}
 
+func talosconfigFor(spec map[string]any) (citypes.Secret, error) {
 	name, err := citypes.SpecString(spec, "talosconfigEnv")
 	if err != nil {
-		return "", "", err
-	}
-
-	source := "the variable spec.talosconfigEnv names"
-
-	if name == "" {
-		name = r.talosconfigEnv
-		source = "the variable the manager's talosconfigEnv names"
+		return "", err
 	}
 
 	if name == "" {
-		name = defaultTalosconfigVariable
-		source = defaultTalosconfigVariable + ", which is read when neither spec.talosconfigEnv " +
-			"nor the manager's talosconfigEnv is declared"
+		return "", errors.New(
+			"spec.talosconfigEnv is required: the resource names the variable holding the talosconfig path, " +
+				"and the engine that declares the resource writes it")
 	}
 
 	fromEnv := citypes.SecretFromEnv(name)
 	if fromEnv == "" {
-		return "", "", fmt.Errorf(
+		return "", fmt.Errorf(
 			"reading the client configuration path: nothing is set in %s. export it before bootstrapping",
-			source)
+			talosconfigSource)
 	}
 
-	return fromEnv, source, nil
+	return fromEnv, nil
 }
 
 func sameMachineConfig(running, declared string) (bool, error) {

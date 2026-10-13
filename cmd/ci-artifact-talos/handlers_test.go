@@ -75,9 +75,10 @@ func TestTheDeclareToolAnswersARenderedControlPlaneConfigCarryingThePatchThenThe
 	assert.Equal(t, "machine-config", out.Resources[0].Kind)
 	assert.Equal(t, "t0", out.Resources[0].Name)
 	assert.NotContains(t, out.Resources[0].Spec, "node")
+	assert.Equal(t, theVariable, out.Resources[0].Spec["talosconfigEnv"])
 	assert.Equal(t, "cluster-bootstrap", out.Resources[1].Kind)
 	assert.Equal(t, "t0", out.Resources[1].Name)
-	assert.Empty(t, out.Resources[1].Spec)
+	assert.Equal(t, Spec{"talosconfigEnv": theVariable}, out.Resources[1].Spec)
 
 	rendered, ok := out.Resources[0].Spec["config"].(string)
 	require.True(t, ok)
@@ -110,6 +111,28 @@ func TestTheDeclareToolAnswersTheControllersRefusalAndNoResources(t *testing.T) 
 	require.Error(t, err)
 	assert.Equal(t, "this engine needs spec.clusterName and the spec does not name it", err.Error())
 	assert.Nil(t, out)
+}
+
+func TestTheDeclareToolRefusesARealTalosconfigWhoseSecondEndpointCarriesASchemeAndDeclaresNothing(t *testing.T) {
+	root, _ := writeThrowawayCluster(t)
+	require.NoError(t, os.WriteFile(filepath.Join(root, "talosconfig"), []byte(`context: t0
+contexts:
+  t0:
+    endpoints:
+      - talos.example
+      - https://talos.example:50000
+    nodes:
+      - talos.example
+`), 0o600))
+
+	out, err := NewHandlers().Declare(context.Background(), DeclareInput{Root: root, Spec: declaredSpec()})
+
+	require.Error(t, err)
+	assert.Nil(t, out)
+	assert.Equal(t,
+		`reading the client configuration of cluster t0: reading the client configuration: endpoint 2 of context "t0" `+
+			"carries a scheme, and a talosconfig endpoint is a host or a host and port",
+		err.Error())
 }
 
 func TestARefusalFromARealTalosconfigNamingTwoNodesNeverCarriesTheBundleBytes(t *testing.T) {

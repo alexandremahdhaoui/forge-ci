@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/fsadapter"
@@ -10,17 +11,20 @@ import (
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 )
 
+var errRetiredTalosconfigEnv = errors.New(
+	"this manager refuses spec.talosconfigEnv: each resource names its own talosconfig variable, " +
+		"written by the engine that declares it")
+
 func NewHandlers() Handlers {
 	fs := fsadapter.New()
 
 	return Handlers{
 		Reconcile: func(ctx context.Context, in ReconcileInput) (*ReconcileOutput, error) {
-			mode, err := applyMode(in.Spec)
-			if err != nil {
-				return nil, fmt.Errorf("reading the spec of manager %s: %w", in.Manager, err)
+			if _, declared := in.Spec["talosconfigEnv"]; declared {
+				return nil, fmt.Errorf("reading the spec of manager %s: %w", in.Manager, errRetiredTalosconfigEnv)
 			}
 
-			variable, err := talosconfigEnv(in.Spec)
+			mode, err := applyMode(in.Spec)
 			if err != nil {
 				return nil, fmt.Errorf("reading the spec of manager %s: %w", in.Manager, err)
 			}
@@ -30,8 +34,7 @@ func NewHandlers() Handlers {
 				return nil, fmt.Errorf("building the node client of manager %s: %w", in.Manager, err)
 			}
 
-			ctrl := managercontroller.New(
-				managercontroller.NewTalosRealizer(ctx, node, variable), fs)
+			ctrl := managercontroller.New(managercontroller.NewTalosRealizer(ctx, node), fs)
 
 			out, err := ctrl.Reconcile(toReconcileInput(in))
 			if err != nil {
@@ -41,10 +44,6 @@ func NewHandlers() Handlers {
 			return fromReconcileOutput(out), nil
 		},
 	}
-}
-
-func talosconfigEnv(spec map[string]interface{}) (string, error) {
-	return citypes.SpecString(spec, "talosconfigEnv")
 }
 
 func applyMode(spec map[string]interface{}) (string, error) {

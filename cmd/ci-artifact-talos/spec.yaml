@@ -25,12 +25,16 @@ notes: |
   One cluster declares two resources, in this order. The first is kind
   `machine-config`, named by the cluster, whose `spec.config` is the rendered
   control plane machine config. The second is kind `cluster-bootstrap`, named
-  by the cluster, with an empty spec. Neither names a node. A manager realizes
-  resources in the order declared, so the config lands before the bootstrap.
+  by the cluster. Both carry `spec.talosconfigEnv` as declared here, so the
+  manager reads the talosconfig from the variable this engine names and never
+  from a default. Neither names a node. A manager realizes resources in the
+  order declared, so the config lands before the bootstrap.
 
   No address is declared. The engine reads the talosconfig file the variable
   `spec.talosconfigEnv` names. The context must name exactly one node, and
-  this release drives one node per cluster. The cluster endpoint handed to the
+  this release drives one node per cluster. An endpoint carrying a scheme is
+  refused by name and position, wherever it sits in the list. The cluster
+  endpoint handed to the
   renderer is `https://` plus the host of the first context endpoint plus
   `:6443`, such as `https://box.lan:6443`. The retired keys `endpoint` and
   `nodes` are refused by name, because the node and the endpoint come from
@@ -64,7 +68,8 @@ spec:
     required: true
     means: >-
       The environment variable holding the talosconfig path. Its current
-      context names the endpoints and the one node.
+      context names the endpoints and the one node. Both declared resources
+      carry it to the manager.
   - key: bundleFile
     type: string
     required: true

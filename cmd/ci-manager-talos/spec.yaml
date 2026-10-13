@@ -18,12 +18,17 @@ notes: |
   name is the cluster's name in the declaration. No resource names a node.
   Every dial goes through the endpoints of the talosconfig's current context
   and targets the one node that context names, so a context naming no node or
-  more than one is refused by name.
+  more than one is refused by name. An endpoint carrying a scheme is refused
+  by name and position, because a talosconfig endpoint is a host or a host and
+  port.
   `spec.config` is the machine config document, one document or several
-  separated by a document marker. The client configuration comes from
-  `spec.talosconfig` as a path, or from the variable `spec.talosconfigEnv`
-  names, or from the variable the manager spec names, which defaults to
-  TALOSCONFIG. An action names the resource and never the node.
+  separated by a document marker. Every resource carries `spec.talosconfigEnv`,
+  the variable holding the talosconfig path, and the engine that declares the
+  resource writes it. A resource that names no variable is refused by name.
+  There is no default variable. The manager spec carries no talosconfigEnv,
+  and a manager spec that still sets it is refused by name. The retired keys
+  `spec.node` and `spec.talosconfig` are refused by name on every resource.
+  An action names the resource and never the node.
 
   A fresh node boots in maintenance with no PKI and refuses a secure dial. The
   manager dials secure first. When that fails on a certificate error it probes
@@ -71,12 +76,6 @@ spec:
     type: string
     required: false
     means: Where to record what was converged. Omit it and nothing is recorded.
-  - key: talosconfigEnv
-    type: string
-    required: false
-    means: >-
-      The environment variable holding the client configuration path a resource
-      falls back to. Defaults to TALOSCONFIG.
   - key: applyMode
     type: string
     required: false

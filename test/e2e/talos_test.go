@@ -21,6 +21,8 @@ const (
 	theTalosNode = "127.0.0.1"
 
 	theTalosCluster = "t0"
+
+	theTalosconfigVariable = "FORGE_CI_E2E_TALOSCONFIG"
 )
 
 const talosconfigDocument = `context: ` + theTalosCluster + `
@@ -57,7 +59,6 @@ managers:
     engine: "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-manager-talos@v0.1.0"
     spec:
       statePath: ` + filepath.Join(root, "manager-talos.json") + `
-      talosconfigEnv: TALOSCONFIG
 engines:
   - alias: here
     type: compute
@@ -80,7 +81,7 @@ engines:
     spec:
       clusterName: ` + theTalosCluster + `
       kubernetesVersion: ` + constants.DefaultKubernetesVersion + `
-      talosconfigEnv: TALOSCONFIG
+      talosconfigEnv: ` + theTalosconfigVariable + `
       patchFile: demo-repo/talos/controlplane.patch.yaml
       bundleFile: demo-repo/talos/secrets.yaml
 state: ci-state
@@ -126,7 +127,8 @@ func talosWorkspace(t *testing.T) (root string) {
 
 	talosconfig := filepath.Join(root, "talosconfig")
 	require.NoError(t, os.WriteFile(talosconfig, []byte(talosconfigDocument), 0o600))
-	t.Setenv("TALOSCONFIG", talosconfig)
+	t.Setenv(theTalosconfigVariable, talosconfig)
+	t.Setenv("TALOSCONFIG", "")
 
 	return root
 }

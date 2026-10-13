@@ -42,37 +42,27 @@ func TestApplyModeRefusesASpecThatHoldsSomethingOtherThanAString(t *testing.T) {
 	assert.Contains(t, err.Error(), "[]string")
 }
 
-func TestTalosconfigEnvIsEmptyWhenTheManagerSpecNamesNoneSoTheRealizerNamesTheVariableItReads(t *testing.T) {
+func TestTheReconcileToolRefusesAManagerSpecThatStillSetsTheRetiredTalosconfigEnvByName(t *testing.T) {
 	t.Parallel()
 
-	for name, spec := range map[string]map[string]interface{}{
-		"the key is absent": {},
-		"the key is nil":    {"talosconfigEnv": nil},
+	for name, value := range map[string]interface{}{
+		"a variable name": "T0_TALOSCONFIG",
+		"an empty value":  "",
+		"a nil value":     nil,
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			variable, err := talosconfigEnv(spec)
-			require.NoError(t, err)
-			assert.Empty(t, variable)
+			out, err := NewHandlers().Reconcile(t.Context(), ReconcileInput{
+				Manager: "talos",
+				Spec:    Spec{"talosconfigEnv": value},
+			})
+			require.Error(t, err)
+			assert.Nil(t, out)
+			assert.Equal(t,
+				"reading the spec of manager talos: this manager refuses spec.talosconfigEnv: "+
+					"each resource names its own talosconfig variable, written by the engine that declares it",
+				err.Error())
 		})
 	}
-}
-
-func TestTalosconfigEnvIsWhatTheManagerSpecNames(t *testing.T) {
-	t.Parallel()
-
-	variable, err := talosconfigEnv(map[string]interface{}{"talosconfigEnv": "T0_TALOSCONFIG"})
-	require.NoError(t, err)
-	assert.Equal(t, "T0_TALOSCONFIG", variable)
-}
-
-func TestTalosconfigEnvRefusesASpecThatHoldsSomethingOtherThanAString(t *testing.T) {
-	t.Parallel()
-
-	_, err := talosconfigEnv(map[string]interface{}{"talosconfigEnv": 7})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "reading spec.talosconfigEnv")
-	assert.Contains(t, err.Error(), "a string is required")
-	assert.Contains(t, err.Error(), "int")
 }
