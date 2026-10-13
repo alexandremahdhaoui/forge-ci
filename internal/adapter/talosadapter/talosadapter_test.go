@@ -2,18 +2,34 @@ package talosadapter
 
 import (
 	"context"
+	stdx509 "crypto/x509"
+	"encoding/base64"
+	"encoding/pem"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	machineapi "github.com/siderolabs/talos/pkg/machinery/api/machine"
+	clientconfig "github.com/siderolabs/talos/pkg/machinery/client/config"
+	"github.com/siderolabs/talos/pkg/machinery/config"
+	"github.com/siderolabs/talos/pkg/machinery/config/generate/secrets"
 	configresource "github.com/siderolabs/talos/pkg/machinery/resources/config"
+	"github.com/siderolabs/talos/pkg/machinery/role"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8sruntime "k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
+	"sigs.k8s.io/yaml"
 
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 )
@@ -449,4 +465,275 @@ func TestARebootingNodeMakesEverySecureDialWaitInsteadOfFailingAtOnce(t *testing
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "reading the machine config of node 127.0.0.1")
 	assert.Contains(t, err.Error(), "the last cause")
+}
+
+const talosconfigWithTwoContexts = `context: t0
+contexts:
+  t0:
+    endpoints:
+      - node-a.example.invalid
+      - node-b.example.invalid:50000
+    nodes:
+      - node-a.example.invalid
+  other:
+    endpoints:
+      - other.example.invalid
+    nodes:
+      - other.example.invalid
+    ca: dGhlIG90aGVyIGF1dGhvcml0eQ==
+`
+
+func throwawayBundle(t *testing.T) (citypes.Secret, *secrets.Bundle) {
+	t.Helper()
+
+	minted, err := secrets.NewBundle(secrets.NewFixedClock(time.Now()), config.TalosVersionCurrent)
+	require.NoError(t, err)
+
+	raw, err := yaml.Marshal(minted)
+	require.NoError(t, err)
+
+	return citypes.Secret(raw), minted
+}
+
+func TestSavingTheAdminCredentialKeepsTheEndpointsTheOneNodeAndEveryOtherContextAndTrustsTheBundleAuthority(t *testing.T) {
+	t.Parallel()
+
+	path := writeTalosconfig(t, talosconfigWithTwoContexts)
+	bundle, minted := throwawayBundle(t)
+
+	saved, err := (&Node{}).SaveTalosconfig(path, bundle)
+	require.NoError(t, err)
+
+	onDisk, err := os.ReadFile(string(path))
+	require.NoError(t, err)
+	assert.Equal(t, string(saved), string(onDisk))
+
+	info, err := os.Stat(string(path))
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+
+	held, err := clientconfig.FromBytes(onDisk)
+	require.NoError(t, err)
+	assert.Equal(t, "t0", held.Context)
+
+	current := held.Contexts["t0"]
+	assert.Equal(t, []string{"node-a.example.invalid", "node-b.example.invalid:50000"}, current.Endpoints)
+	assert.Equal(t, []string{"node-a.example.invalid"}, current.Nodes)
+	assert.Equal(t, base64.StdEncoding.EncodeToString(minted.Certs.OS.Crt), current.CA)
+	assert.Equal(t, "dGhlIG90aGVyIGF1dGhvcml0eQ==", held.Contexts["other"].CA)
+
+	certificate := decodedCertificate(t, current.Crt)
+	authority := decodedCertificate(t, current.CA)
+
+	pool := stdx509.NewCertPool()
+	pool.AddCert(authority)
+
+	_, err = certificate.Verify(stdx509.VerifyOptions{
+		Roots: pool, KeyUsages: []stdx509.ExtKeyUsage{stdx509.ExtKeyUsageClientAuth},
+	})
+	require.NoError(t, err, "the minted credential is signed by the bundle's os authority")
+	assert.Contains(t, certificate.Subject.Organization, string(role.Admin))
+
+	target, err := NewTalosconfig().Context(path)
+	require.NoError(t, err)
+	assert.Equal(t, "node-a.example.invalid", target.Node)
+}
+
+func decodedCertificate(t *testing.T, encoded string) *stdx509.Certificate {
+	t.Helper()
+
+	raw, err := base64.StdEncoding.DecodeString(encoded)
+	require.NoError(t, err)
+
+	block, _ := pem.Decode(raw)
+	require.NotNil(t, block)
+
+	parsed, err := stdx509.ParseCertificate(block.Bytes)
+	require.NoError(t, err)
+
+	return parsed
+}
+
+func TestSavingRefusesSomethingThatIsNotABundleWithoutEchoingItAndLeavesTheTalosconfigAlone(t *testing.T) {
+	t.Parallel()
+
+	for name, bundle := range map[string]citypes.Secret{
+		"not yaml":        citypes.Secret(theKeyMarker + ": ["),
+		"an empty bundle": citypes.Secret("cluster:\n  id: " + theKeyMarker + "\n"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			path := writeTalosconfig(t, talosconfigWithTwoContexts)
+
+			_, err := (&Node{}).SaveTalosconfig(path, bundle)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "minting the admin credential")
+			assert.NotContains(t, err.Error(), theKeyMarker)
+
+			onDisk, err := os.ReadFile(string(path))
+			require.NoError(t, err)
+			assert.Equal(t, talosconfigWithTwoContexts, string(onDisk))
+		})
+	}
+}
+
+func TestSavingIntoAMissingTalosconfigNamesTheReasonAndNotThePath(t *testing.T) {
+	t.Parallel()
+
+	bundle, _ := throwawayBundle(t)
+	path := filepath.Join(t.TempDir(), "absent.yaml")
+
+	_, err := (&Node{}).SaveTalosconfig(citypes.Secret(path), bundle)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "reading the client configuration the admin credential is saved into")
+	assert.Contains(t, err.Error(), "no such file or directory")
+	assert.NotContains(t, err.Error(), path)
+}
+
+func TestSavingIntoATalosconfigThatCannotBeWrittenNamesTheReasonAndNotThePath(t *testing.T) {
+	t.Parallel()
+
+	if os.Geteuid() == 0 {
+		t.Skip("root writes a read only file, so the refusal cannot be provoked")
+	}
+
+	bundle, _ := throwawayBundle(t)
+	path := writeTalosconfig(t, talosconfigWithTwoContexts)
+	require.NoError(t, os.Chmod(string(path), 0o400))
+
+	_, err := (&Node{}).SaveTalosconfig(path, bundle)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "saving the admin credential into the client configuration")
+	assert.Contains(t, err.Error(), "permission denied")
+	assert.NotContains(t, err.Error(), string(path))
+}
+
+func TestTheBundleSecretIsAbsentUntilStoredThenReadsBackTheSameBytes(t *testing.T) {
+	t.Parallel()
+
+	cluster := fake.NewClientset()
+	bundle, _ := throwawayBundle(t)
+
+	_, found, err := storedBundle(t.Context(), cluster)
+	require.NoError(t, err)
+	assert.False(t, found)
+
+	require.NoError(t, storeBundle(t.Context(), cluster, bundle))
+
+	stored, found, err := storedBundle(t.Context(), cluster)
+	require.NoError(t, err)
+	assert.True(t, found)
+	assert.Equal(t, bundle, stored)
+
+	secret, err := cluster.CoreV1().Secrets("kube-system").Get(t.Context(), "talos-secret-bundle", metav1.GetOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, corev1.SecretTypeOpaque, secret.Type)
+	assert.Equal(t, []string{"bundle.yaml"}, slices.Collect(maps.Keys(secret.Data)))
+}
+
+func TestStoringABundleOverOneTheClusterHoldsIsAnErrorNamingTheSecretAndNeverTheBytes(t *testing.T) {
+	t.Parallel()
+
+	cluster := fake.NewClientset()
+	bundle, _ := throwawayBundle(t)
+
+	require.NoError(t, storeBundle(t.Context(), cluster, bundle))
+
+	err := storeBundle(t.Context(), cluster, citypes.Secret(theKeyMarker))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "creating secret kube-system/talos-secret-bundle")
+	assert.NotContains(t, err.Error(), theKeyMarker)
+}
+
+func TestABundleSecretHoldingNothingUnderItsKeyIsRefusedByName(t *testing.T) {
+	t.Parallel()
+
+	cluster := fake.NewClientset(&corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "kube-system", Name: "talos-secret-bundle"},
+		Data:       map[string][]byte{"secrets.yaml": []byte(theKeyMarker)},
+	})
+
+	_, found, err := storedBundle(t.Context(), cluster)
+	require.Error(t, err)
+	assert.False(t, found)
+	assert.Equal(t,
+		"reading secret kube-system/talos-secret-bundle: it holds nothing under bundle.yaml, "+
+			"and the talos secret bundle lives there", err.Error())
+}
+
+func TestReadingTheBundleSecretTheClusterRefusesIsAnErrorNamingTheSecret(t *testing.T) {
+	t.Parallel()
+
+	cluster := fake.NewClientset()
+	cluster.PrependReactor("get", "secrets", func(k8stesting.Action) (bool, k8sruntime.Object, error) {
+		return true, nil, errors.New("forbidden")
+	})
+
+	_, found, err := storedBundle(t.Context(), cluster)
+	require.Error(t, err)
+	assert.False(t, found)
+	assert.Equal(t, "getting secret kube-system/talos-secret-bundle: forbidden", err.Error())
+}
+
+func TestReachingTheBundleOnAnUnreachableNodeFailsOnTheKubeconfigNamingTheNode(t *testing.T) {
+	t.Parallel()
+
+	talosconfig := writeTalosconfig(t, talosconfigReachingNothing)
+	bundle, _ := throwawayBundle(t)
+
+	_, found, err := (&Node{}).StoredBundle(t.Context(), talosconfig)
+	require.Error(t, err)
+	assert.False(t, found)
+	assert.Contains(t, err.Error(), "getting the kubeconfig of node 127.0.0.1")
+	assert.Contains(t, err.Error(), "connection refused")
+
+	_, found, err = NewTalosconfig().StoredBundle(t.Context(), talosconfig)
+	require.Error(t, err)
+	assert.False(t, found)
+	assert.Contains(t, err.Error(), "getting the kubeconfig of node 127.0.0.1")
+
+	err = (&Node{}).StoreBundle(t.Context(), talosconfig, bundle)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "getting the kubeconfig of node 127.0.0.1")
+	assert.Contains(t, err.Error(), "connection refused")
+}
+
+func TestEveryBundleCallRefusesAMissingTalosconfigNamingTheReasonAndNotThePath(t *testing.T) {
+	t.Parallel()
+
+	path := citypes.Secret(filepath.Join(t.TempDir(), "absent.yaml"))
+
+	_, _, err := (&Node{}).StoredBundle(t.Context(), path)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no such file or directory")
+	assert.NotContains(t, err.Error(), string(path))
+
+	err = (&Node{}).StoreBundle(t.Context(), path, "bundle")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no such file or directory")
+	assert.NotContains(t, err.Error(), string(path))
+
+	_, err = NewTalosconfig().InMaintenance(t.Context(), path)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "probing the node the client configuration names")
+	assert.NotContains(t, err.Error(), string(path))
+}
+
+func TestAnUnreachableNodeNeverReadsAsMaintenance(t *testing.T) {
+	t.Parallel()
+
+	maintenance, err := NewTalosconfig().InMaintenance(t.Context(), writeTalosconfig(t, talosconfigReachingNothing))
+	require.NoError(t, err)
+	assert.False(t, maintenance)
+}
+
+func TestTheEngineReadsTheBootstrapStateThroughTheSameSecureDialAsTheManager(t *testing.T) {
+	t.Parallel()
+
+	bootstrapped, err := NewTalosconfig().Bootstrapped(t.Context(), writeTalosconfig(t, talosconfigReachingNothing))
+	require.Error(t, err)
+	assert.False(t, bootstrapped)
+	assert.Contains(t, err.Error(), "getting the etcd service of node 127.0.0.1")
+	assert.Contains(t, err.Error(), "connection refused")
 }

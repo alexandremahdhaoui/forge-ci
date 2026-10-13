@@ -25,6 +25,15 @@ type Secrets struct{}
 
 func New() Secrets { return Secrets{} }
 
+func (Secrets) Mint() (citypes.Secret, error) {
+	minted, err := secrets.NewBundle(secrets.NewClock(), config.TalosVersionCurrent)
+	if err != nil {
+		return "", fmt.Errorf("minting a talos secret bundle: %w", err)
+	}
+
+	return marshalBundle(minted)
+}
+
 func (Secrets) Load(bundle citypes.Secret) (citypes.Secret, error) {
 	held, err := unmarshalBundle(bundle)
 	if err != nil {

@@ -72,6 +72,29 @@ func TestAStoredBundleRoundTripsThroughLoadUnchanged(t *testing.T) {
 	assert.Equal(t, stored, reread)
 }
 
+func TestAMintedBundleIsAValidBundleThatLoadsBackToTheSameBytes(t *testing.T) {
+	t.Parallel()
+
+	minted, err := New().Mint()
+	require.NoError(t, err)
+
+	reread, err := New().Load(minted)
+	require.NoError(t, err)
+	assert.Equal(t, minted, reread)
+}
+
+func TestTwoMintsNeverShareABundle(t *testing.T) {
+	t.Parallel()
+
+	first, err := New().Mint()
+	require.NoError(t, err)
+
+	second, err := New().Mint()
+	require.NoError(t, err)
+
+	assert.NotEqual(t, first, second)
+}
+
 func TestTheSameBundleAndInputsRenderIdenticalMachineConfigBytesTwice(t *testing.T) {
 	t.Parallel()
 

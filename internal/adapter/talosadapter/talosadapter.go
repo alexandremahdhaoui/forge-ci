@@ -2,6 +2,7 @@ package talosadapter
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -15,12 +16,18 @@ import (
 	machineapi "github.com/siderolabs/talos/pkg/machinery/api/machine"
 	"github.com/siderolabs/talos/pkg/machinery/client"
 	clientconfig "github.com/siderolabs/talos/pkg/machinery/client/config"
+	"github.com/siderolabs/talos/pkg/machinery/config"
+	"github.com/siderolabs/talos/pkg/machinery/config/generate/secrets"
 	configresource "github.com/siderolabs/talos/pkg/machinery/resources/config"
 	"github.com/siderolabs/talos/pkg/machinery/resources/runtime"
 	"github.com/siderolabs/talos/pkg/machinery/resources/v1alpha1"
+	"github.com/siderolabs/talos/pkg/machinery/role"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
+	"sigs.k8s.io/yaml"
 
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 )
@@ -107,6 +114,157 @@ func (Talosconfig) Context(talosconfig citypes.Secret) (citypes.TalosContext, er
 	_, target, err := clientConfiguration(talosconfig)
 
 	return target, err
+}
+
+func (Talosconfig) InMaintenance(ctx context.Context, talosconfig citypes.Secret) (bool, error) {
+	_, target, err := clientConfiguration(talosconfig)
+	if err != nil {
+		return false, fmt.Errorf("probing the node the client configuration names: %w", err)
+	}
+
+	stage, err := probeStage(ctx, target.Node)
+	if err != nil {
+		return false, nil
+	}
+
+	return stage == runtime.MachineStageMaintenance, nil
+}
+
+func (Talosconfig) Bootstrapped(ctx context.Context, talosconfig citypes.Secret) (bool, error) {
+	return (&Node{}).Bootstrapped(ctx, talosconfig)
+}
+
+func (Talosconfig) StoredBundle(ctx context.Context, talosconfig citypes.Secret) (citypes.Secret, bool, error) {
+	return (&Node{}).StoredBundle(ctx, talosconfig)
+}
+
+func (*Node) SaveTalosconfig(talosconfig, bundle citypes.Secret) (citypes.Secret, error) {
+	held, _, err := clientConfiguration(talosconfig)
+	if err != nil {
+		return "", fmt.Errorf("reading the client configuration the admin credential is saved into: %w", err)
+	}
+
+	minted, err := adminCredential(bundle)
+	if err != nil {
+		return "", err
+	}
+
+	current := held.Contexts[held.Context]
+	current.CA = base64.StdEncoding.EncodeToString(minted.authority)
+	current.Crt = base64.StdEncoding.EncodeToString(minted.certificate)
+	current.Key = base64.StdEncoding.EncodeToString(minted.key)
+
+	if err := held.Save(string(talosconfig)); err != nil {
+		return "", fmt.Errorf(
+			"saving the admin credential into the client configuration: %w", causeWithoutThePath(err))
+	}
+
+	raw, err := held.Bytes()
+	if err != nil {
+		return "", fmt.Errorf("encoding the client configuration holding the admin credential: %w", err)
+	}
+
+	return citypes.Secret(raw), nil
+}
+
+type credential struct {
+	authority   []byte
+	certificate []byte
+	key         []byte
+}
+
+func adminCredential(bundle citypes.Secret) (credential, error) {
+	held := &secrets.Bundle{Clock: secrets.NewClock()}
+
+	if err := yaml.Unmarshal([]byte(bundle), held); err != nil {
+		return credential{}, errors.New(
+			"minting the admin credential: the talos secret bundle is not a secret bundle document")
+	}
+
+	if err := held.Validate(config.TalosVersionCurrent); err != nil {
+		return credential{}, fmt.Errorf(
+			"minting the admin credential: validating the talos secret bundle: %w", err)
+	}
+
+	minted, err := held.GenerateTalosAPIClientCertificate(role.MakeSet(role.Admin))
+	if err != nil {
+		return credential{}, fmt.Errorf("minting the admin credential from the talos secret bundle: %w", err)
+	}
+
+	return credential{authority: held.Certs.OS.Crt, certificate: minted.Crt, key: minted.Key}, nil
+}
+
+func (n *Node) StoredBundle(ctx context.Context, talosconfig citypes.Secret) (citypes.Secret, bool, error) {
+	held, target, err := clientConfiguration(talosconfig)
+	if err != nil {
+		return "", false, fmt.Errorf("dialing the node the client configuration names: %w", err)
+	}
+
+	cluster, err := n.cluster(ctx, held, target)
+	if err == nil {
+		return storedBundle(ctx, cluster)
+	}
+
+	if !n.inMaintenance(ctx, target.Node, err) {
+		return "", false, err
+	}
+
+	return "", false, nil
+}
+
+func (n *Node) StoreBundle(ctx context.Context, talosconfig, bundle citypes.Secret) error {
+	held, target, err := clientConfiguration(talosconfig)
+	if err != nil {
+		return fmt.Errorf("dialing the node the client configuration names: %w", err)
+	}
+
+	cluster, err := n.cluster(ctx, held, target)
+	if err != nil {
+		return err
+	}
+
+	return storeBundle(ctx, cluster, bundle)
+}
+
+func bundleSecretID() string {
+	return citypes.TalosBundleNamespace + "/" + citypes.TalosBundleSecret
+}
+
+func storedBundle(ctx context.Context, cluster kubernetes.Interface) (citypes.Secret, bool, error) {
+	secret, err := cluster.CoreV1().Secrets(citypes.TalosBundleNamespace).
+		Get(ctx, citypes.TalosBundleSecret, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return "", false, nil
+	}
+
+	if err != nil {
+		return "", false, fmt.Errorf("getting secret %s: %w", bundleSecretID(), err)
+	}
+
+	held := secret.Data[citypes.TalosBundleKey]
+	if len(held) == 0 {
+		return "", false, fmt.Errorf(
+			"reading secret %s: it holds nothing under %s, and the talos secret bundle lives there",
+			bundleSecretID(), citypes.TalosBundleKey)
+	}
+
+	return citypes.Secret(held), true, nil
+}
+
+func storeBundle(ctx context.Context, cluster kubernetes.Interface, bundle citypes.Secret) error {
+	_, err := cluster.CoreV1().Secrets(citypes.TalosBundleNamespace).Create(ctx, &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: citypes.TalosBundleNamespace,
+			Name:      citypes.TalosBundleSecret,
+		},
+		Type: corev1.SecretTypeOpaque,
+		Data: map[string][]byte{citypes.TalosBundleKey: []byte(bundle)},
+	}, metav1.CreateOptions{})
+	if err != nil {
+		return fmt.Errorf("creating secret %s: %w", bundleSecretID(), err)
+	}
+
+	return nil
 }
 
 func (n *Node) MachineConfig(ctx context.Context, talosconfig citypes.Secret) (string, error) {
@@ -258,36 +416,12 @@ func (n *Node) WaitNodeRegistered(ctx context.Context, talosconfig citypes.Secre
 		return fmt.Errorf("dialing the node the client configuration names: %w", err)
 	}
 
-	node := target.Node
-
-	var raw []byte
-
-	err = n.secure(ctx, held, target, "getting the kubeconfig of node "+node,
-		func(nodeClient *client.Client) error {
-			fetched, err := nodeClient.Kubeconfig(client.WithNode(ctx, node))
-			if err != nil {
-				return fmt.Errorf("getting the kubeconfig of node %s: %w", node, err)
-			}
-
-			raw = fetched
-
-			return nil
-		})
+	cluster, err := n.cluster(ctx, held, target)
 	if err != nil {
 		return err
 	}
 
-	restConfig, err := clientcmd.RESTConfigFromKubeConfig(raw)
-	if err != nil {
-		return fmt.Errorf("reading the kubeconfig of node %s: %w", node, err)
-	}
-
-	cluster, err := kubernetes.NewForConfig(restConfig)
-	if err != nil {
-		return fmt.Errorf("building the kubernetes client of node %s: %w", node, err)
-	}
-
-	return untilCeiling(ctx, "waiting for node "+node+" to register with the kubernetes api", func() error {
+	return untilCeiling(ctx, "waiting for node "+target.Node+" to register with the kubernetes api", func() error {
 		nodes, err := cluster.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 		if err != nil {
 			return fmt.Errorf("listing nodes: %w", err)
@@ -303,6 +437,41 @@ func (n *Node) WaitNodeRegistered(ctx context.Context, talosconfig citypes.Secre
 
 		return errors.New("no node has posted a status yet")
 	})
+}
+
+func (n *Node) cluster(
+	ctx context.Context, held *clientconfig.Config, target citypes.TalosContext,
+) (kubernetes.Interface, error) {
+	node := target.Node
+
+	var raw []byte
+
+	err := n.secure(ctx, held, target, "getting the kubeconfig of node "+node,
+		func(nodeClient *client.Client) error {
+			fetched, err := nodeClient.Kubeconfig(client.WithNode(ctx, node))
+			if err != nil {
+				return fmt.Errorf("getting the kubeconfig of node %s: %w", node, err)
+			}
+
+			raw = fetched
+
+			return nil
+		})
+	if err != nil {
+		return nil, err
+	}
+
+	restConfig, err := clientcmd.RESTConfigFromKubeConfig(raw)
+	if err != nil {
+		return nil, fmt.Errorf("reading the kubeconfig of node %s: %w", node, err)
+	}
+
+	cluster, err := kubernetes.NewForConfig(restConfig)
+	if err != nil {
+		return nil, fmt.Errorf("building the kubernetes client of node %s: %w", node, err)
+	}
+
+	return cluster, nil
 }
 
 func (n *Node) secure(
