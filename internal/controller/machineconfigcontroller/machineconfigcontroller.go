@@ -1,6 +1,7 @@
 package machineconfigcontroller
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -14,18 +15,28 @@ import (
 const (
 	kindMachineConfig    = "machine-config"
 	kindClusterBootstrap = "cluster-bootstrap"
+	kindSecretBundle     = "secret-bundle"
 
 	apiServerPort = "6443"
+
+	nodeFromTheTalosconfig = "the node and the endpoint come from the talosconfig " +
+		"the variable spec.talosconfigEnv names"
 )
 
 var (
 	ErrNeverPublishes = errors.New(
 		"this engine declares machine configs and never publishes: no substage may name it")
 
-	retiredKeys = []string{"endpoint", "nodes"}
+	retiredKeys = []struct{ key, because string }{
+		{"endpoint", nodeFromTheTalosconfig},
+		{"nodes", nodeFromTheTalosconfig},
+		{"bundleFile", "the bundle is minted on a node in maintenance and read from the cluster after, " +
+			"and no bundle file is ever read"},
+	}
 )
 
 type Renderer interface {
+	Mint() (citypes.Secret, error)
 	Load(bundle citypes.Secret) (citypes.Secret, error)
 	MachineConfig(
 		bundle citypes.Secret, cluster talossecretsadapter.Cluster, patch string,
@@ -34,6 +45,9 @@ type Renderer interface {
 
 type Talosconfig interface {
 	Context(talosconfig citypes.Secret) (citypes.TalosContext, error)
+	InMaintenance(ctx context.Context, talosconfig citypes.Secret) (bool, error)
+	Bootstrapped(ctx context.Context, talosconfig citypes.Secret) (bool, error)
+	StoredBundle(ctx context.Context, talosconfig citypes.Secret) (citypes.Secret, bool, error)
 }
 
 type Controller struct {
@@ -46,42 +60,43 @@ func New(fs fsadapter.FS, renderer Renderer, talosconfig Talosconfig) *Controlle
 	return &Controller{fs: fs, renderer: renderer, talosconfig: talosconfig}
 }
 
-func (c *Controller) Declare(in citypes.DeclareInput) (citypes.DeclareOutput, error) {
-	for _, key := range retiredKeys {
-		if _, declared := in.Spec[key]; declared {
-			return citypes.DeclareOutput{}, fmt.Errorf(
-				"this engine refuses spec.%s: the node and the endpoint come from the talosconfig "+
-					"the variable spec.talosconfigEnv names", key)
-		}
-	}
+type declaration struct {
+	clusterName       string
+	kubernetesVersion string
+	talosconfigEnv    string
+	recoveryDirEnv    string
+	patchFile         string
+}
 
-	clusterName, err := requiredString(in.Spec, "clusterName")
+func (c *Controller) Declare(ctx context.Context, in citypes.DeclareInput) (citypes.DeclareOutput, error) {
+	declared, err := readDeclaration(in.Spec)
 	if err != nil {
 		return citypes.DeclareOutput{}, err
 	}
 
-	kubernetesVersion, err := requiredString(in.Spec, "kubernetesVersion")
-	if err != nil {
-		return citypes.DeclareOutput{}, err
-	}
-
-	variable, err := requiredString(in.Spec, "talosconfigEnv")
-	if err != nil {
-		return citypes.DeclareOutput{}, err
-	}
-
-	target, err := c.declaredContext(variable, clusterName)
+	talosconfig, target, err := c.declaredContext(declared)
 	if err != nil {
 		return citypes.DeclareOutput{}, err
 	}
 
 	cluster := talossecretsadapter.Cluster{
-		Name:              clusterName,
+		Name:              declared.clusterName,
 		Endpoint:          "https://" + net.JoinHostPort(hostOf(target.Endpoints[0]), apiServerPort),
-		KubernetesVersion: kubernetesVersion,
+		KubernetesVersion: declared.kubernetesVersion,
 	}
 
-	config, err := c.render(in.Root, in.Spec, cluster)
+	patch, err := c.fs.ReadFile(filepath.Join(in.Root, filepath.FromSlash(declared.patchFile)))
+	if err != nil {
+		return citypes.DeclareOutput{}, fmt.Errorf(
+			"reading the patch document of cluster %s from %s: %w", cluster.Name, declared.patchFile, err)
+	}
+
+	bundle, err := c.bundle(ctx, talosconfig, declared)
+	if err != nil {
+		return citypes.DeclareOutput{}, err
+	}
+
+	config, err := c.render(bundle, cluster, string(patch))
 	if err != nil {
 		return citypes.DeclareOutput{}, err
 	}
@@ -89,13 +104,23 @@ func (c *Controller) Declare(in citypes.DeclareInput) (citypes.DeclareOutput, er
 	return citypes.DeclareOutput{Resources: []citypes.Resource{
 		{
 			Kind: kindMachineConfig,
-			Name: clusterName,
-			Spec: map[string]any{"config": string(config), "talosconfigEnv": variable},
+			Name: cluster.Name,
+			Spec: map[string]any{
+				"config":         config,
+				"bundle":         bundle,
+				"talosconfigEnv": declared.talosconfigEnv,
+				"recoveryDirEnv": declared.recoveryDirEnv,
+			},
 		},
 		{
 			Kind: kindClusterBootstrap,
-			Name: clusterName,
-			Spec: map[string]any{"talosconfigEnv": variable},
+			Name: cluster.Name,
+			Spec: map[string]any{"talosconfigEnv": declared.talosconfigEnv},
+		},
+		{
+			Kind: kindSecretBundle,
+			Name: cluster.Name,
+			Spec: map[string]any{"bundle": bundle, "talosconfigEnv": declared.talosconfigEnv},
 		},
 	}}, nil
 }
@@ -104,21 +129,110 @@ func (c *Controller) Publish() error {
 	return ErrNeverPublishes
 }
 
-func (c *Controller) declaredContext(variable, clusterName string) (citypes.TalosContext, error) {
-	talosconfig := citypes.SecretFromEnv(variable)
+func readDeclaration(spec map[string]any) (declaration, error) {
+	for _, retired := range retiredKeys {
+		if _, declared := spec[retired.key]; declared {
+			return declaration{}, fmt.Errorf("this engine refuses spec.%s: %s", retired.key, retired.because)
+		}
+	}
+
+	var (
+		declared declaration
+		err      error
+	)
+
+	for _, field := range []struct {
+		key  string
+		into *string
+	}{
+		{"clusterName", &declared.clusterName},
+		{"kubernetesVersion", &declared.kubernetesVersion},
+		{"talosconfigEnv", &declared.talosconfigEnv},
+		{"recoveryDirEnv", &declared.recoveryDirEnv},
+		{"patchFile", &declared.patchFile},
+	} {
+		if *field.into, err = requiredString(spec, field.key); err != nil {
+			return declaration{}, err
+		}
+	}
+
+	return declared, nil
+}
+
+func (c *Controller) declaredContext(declared declaration) (citypes.Secret, citypes.TalosContext, error) {
+	talosconfig := citypes.SecretFromEnv(declared.talosconfigEnv)
 	if talosconfig == "" {
-		return citypes.TalosContext{}, fmt.Errorf(
+		return "", citypes.TalosContext{}, fmt.Errorf(
 			"reading the client configuration of cluster %s: nothing is set in %s, "+
-				"and spec.talosconfigEnv names it. export it before declaring", clusterName, variable)
+				"and spec.talosconfigEnv names it. export it before declaring",
+			declared.clusterName, declared.talosconfigEnv)
 	}
 
 	target, err := c.talosconfig.Context(talosconfig)
 	if err != nil {
-		return citypes.TalosContext{}, fmt.Errorf(
-			"reading the client configuration of cluster %s: %w", clusterName, err)
+		return "", citypes.TalosContext{}, fmt.Errorf(
+			"reading the client configuration of cluster %s: %w", declared.clusterName, err)
 	}
 
-	return target, nil
+	return talosconfig, target, nil
+}
+
+func (c *Controller) bundle(
+	ctx context.Context, talosconfig citypes.Secret, declared declaration,
+) (citypes.Secret, error) {
+	maintenance, err := c.talosconfig.InMaintenance(ctx, talosconfig)
+	if err != nil {
+		return "", fmt.Errorf("probing the node of cluster %s: %w", declared.clusterName, err)
+	}
+
+	if !maintenance {
+		return c.storedBundle(ctx, talosconfig, declared)
+	}
+
+	minted, err := c.renderer.Mint()
+	if err != nil {
+		return "", fmt.Errorf("minting the secret bundle of cluster %s: %w", declared.clusterName, err)
+	}
+
+	return minted, nil
+}
+
+func (c *Controller) storedBundle(
+	ctx context.Context, talosconfig citypes.Secret, declared declaration,
+) (citypes.Secret, error) {
+	bootstrapped, err := c.talosconfig.Bootstrapped(ctx, talosconfig)
+	if err != nil {
+		return "", fmt.Errorf("reading the bootstrap state of cluster %s: %w", declared.clusterName, err)
+	}
+
+	if !bootstrapped {
+		return "", fmt.Errorf(
+			"reading the secret bundle of cluster %s: its node holds a machine config and runs no cluster yet, "+
+				"so no cluster holds the bundle. a first run stopped between the apply and the bootstrap, "+
+				"and the bundle it minted is %s in the recovery directory the variable %s names",
+			declared.clusterName, citypes.TalosRecoveryBundleFile, declared.recoveryDirEnv)
+	}
+
+	stored, found, err := c.talosconfig.StoredBundle(ctx, talosconfig)
+	if err != nil {
+		return "", fmt.Errorf("reading the secret bundle of cluster %s from the cluster: %w", declared.clusterName, err)
+	}
+
+	if !found {
+		return "", fmt.Errorf(
+			"reading the secret bundle of cluster %s: the cluster holds no secret %s/%s. "+
+				"write it once from the recovery directory: %s",
+			declared.clusterName, citypes.TalosBundleNamespace, citypes.TalosBundleSecret,
+			restoreCommand(declared.recoveryDirEnv))
+	}
+
+	return stored, nil
+}
+
+func restoreCommand(recoveryDirEnv string) string {
+	return "kubectl --namespace " + citypes.TalosBundleNamespace +
+		" create secret generic " + citypes.TalosBundleSecret +
+		" --from-file=" + citypes.TalosBundleKey + "=\"$" + recoveryDirEnv + "/" + citypes.TalosRecoveryBundleFile + "\""
 }
 
 func hostOf(endpoint string) string {
@@ -131,36 +245,14 @@ func hostOf(endpoint string) string {
 }
 
 func (c *Controller) render(
-	root string, spec map[string]any, cluster talossecretsadapter.Cluster,
+	bundle citypes.Secret, cluster talossecretsadapter.Cluster, patch string,
 ) (citypes.Secret, error) {
-	bundleFile, err := requiredString(spec, "bundleFile")
-	if err != nil {
-		return "", err
-	}
-
-	patchFile, err := requiredString(spec, "patchFile")
-	if err != nil {
-		return "", err
-	}
-
-	stored, err := c.fs.ReadFile(filepath.Join(root, filepath.FromSlash(bundleFile)))
-	if err != nil {
-		return "", fmt.Errorf(
-			"reading the secret bundle of cluster %s from %s: %w", cluster.Name, bundleFile, err)
-	}
-
-	bundle, err := c.renderer.Load(citypes.Secret(stored))
+	loaded, err := c.renderer.Load(bundle)
 	if err != nil {
 		return "", fmt.Errorf("loading the secret bundle of cluster %s: %w", cluster.Name, err)
 	}
 
-	patch, err := c.fs.ReadFile(filepath.Join(root, filepath.FromSlash(patchFile)))
-	if err != nil {
-		return "", fmt.Errorf(
-			"reading the patch document of cluster %s from %s: %w", cluster.Name, patchFile, err)
-	}
-
-	config, err := c.renderer.MachineConfig(bundle, cluster, string(patch))
+	config, err := c.renderer.MachineConfig(loaded, cluster, patch)
 	if err != nil {
 		return "", fmt.Errorf("rendering the machine config of cluster %s: %w", cluster.Name, err)
 	}

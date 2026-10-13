@@ -168,3 +168,56 @@ func (_c *MockRenderer_MachineConfig_Call) RunAndReturn(run func(bundle citypes.
 	_c.Call.Return(run)
 	return _c
 }
+
+// Mint provides a mock function for the type MockRenderer
+func (_mock *MockRenderer) Mint() (citypes.Secret, error) {
+	ret := _mock.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Mint")
+	}
+
+	var r0 citypes.Secret
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func() (citypes.Secret, error)); ok {
+		return returnFunc()
+	}
+	if returnFunc, ok := ret.Get(0).(func() citypes.Secret); ok {
+		r0 = returnFunc()
+	} else {
+		r0 = ret.Get(0).(citypes.Secret)
+	}
+	if returnFunc, ok := ret.Get(1).(func() error); ok {
+		r1 = returnFunc()
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockRenderer_Mint_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Mint'
+type MockRenderer_Mint_Call struct {
+	*mock.Call
+}
+
+// Mint is a helper method to define mock.On call
+func (_e *MockRenderer_Expecter) Mint() *MockRenderer_Mint_Call {
+	return &MockRenderer_Mint_Call{Call: _e.mock.On("Mint")}
+}
+
+func (_c *MockRenderer_Mint_Call) Run(run func()) *MockRenderer_Mint_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockRenderer_Mint_Call) Return(secret citypes.Secret, err error) *MockRenderer_Mint_Call {
+	_c.Call.Return(secret, err)
+	return _c
+}
+
+func (_c *MockRenderer_Mint_Call) RunAndReturn(run func() (citypes.Secret, error)) *MockRenderer_Mint_Call {
+	_c.Call.Return(run)
+	return _c
+}

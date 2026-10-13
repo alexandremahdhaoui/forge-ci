@@ -2,6 +2,10 @@ package managercontroller_test
 
 import (
 	"errors"
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -9,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/managercontroller"
+	"github.com/alexandremahdhaoui/forge-ci/internal/mocks/fsadaptermock"
 	"github.com/alexandremahdhaoui/forge-ci/internal/mocks/managercontrollermock"
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 )
@@ -72,29 +77,53 @@ ingress: block
 	controlplaneTwice                           = controlplane + "---\n" + controlplane
 )
 
-const talosconfigVariable = "FORGE_CI_TEST_CLIENT_CONFIG"
+const (
+	talosconfigVariable = "FORGE_CI_TEST_CLIENT_CONFIG"
+	recoveryVariable    = "FORGE_CI_TEST_RECOVERY_DIR"
+
+	theRecoveryDirectory = "/home/operator/recovery"
+	theBundle            = "cluster:\n  secret: the cluster CA private key\n"
+	theSavedTalosconfig  = "context: t0\ncontexts:\n  t0:\n    key: the admin private key\n"
+)
 
 func talosRealizer(t *testing.T) (managercontroller.TalosRealizer, *managercontrollermock.MockTalos) {
 	t.Helper()
+
+	r, talos, _ := talosRealizerWithFiles(t)
+
+	return r, talos
+}
+
+func talosRealizerWithFiles(t *testing.T) (
+	managercontroller.TalosRealizer, *managercontrollermock.MockTalos, *fsadaptermock.MockFS,
+) {
+	t.Helper()
 	t.Setenv(talosconfigVariable, "/home/operator/.config/t0.yaml")
+	t.Setenv(recoveryVariable, theRecoveryDirectory)
 
 	talos := managercontrollermock.NewMockTalos(t)
+	files := fsadaptermock.NewMockFS(t)
 
-	return managercontroller.NewTalosRealizer(t.Context(), talos), talos
+	return managercontroller.NewTalosRealizer(t.Context(), talos, files), talos, files
 }
 
 func machineConfig(document string) citypes.Resource {
 	return citypes.Resource{
 		Kind: managercontroller.KindMachineConfig,
 		Name: "t0-controlplane",
-		Spec: map[string]any{"config": document, "talosconfigEnv": talosconfigVariable},
+		Spec: map[string]any{
+			"config":         document,
+			"bundle":         theBundle,
+			"talosconfigEnv": talosconfigVariable,
+			"recoveryDirEnv": recoveryVariable,
+		},
 	}
 }
 
 func TestTheTalosRealizerNamesItselfTalos(t *testing.T) {
 	t.Parallel()
 
-	assert.Equal(t, "talos", managercontroller.NewTalosRealizer(t.Context(), nil).Kind())
+	assert.Equal(t, "talos", managercontroller.NewTalosRealizer(t.Context(), nil, nil).Kind())
 }
 
 func TestTheTalosRealizerKeepsAMachineConfigTheNodeAlreadyHolds(t *testing.T) {
@@ -276,19 +305,174 @@ func TestTheTalosRealizerRefusesAnUnknownKindByName(t *testing.T) {
 	assert.Contains(t, err.Error(), `cannot realize kind "reboot"`)
 	assert.Contains(t, err.Error(), "machine-config")
 	assert.Contains(t, err.Error(), "cluster-bootstrap")
+	assert.Contains(t, err.Error(), "secret-bundle")
 }
 
-func TestTheTalosRealizerAppliesWhenTheNodeHoldsNoConfigBecauseItIsInMaintenance(t *testing.T) {
-	r, talos := talosRealizer(t)
-	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything).Return("", nil)
-	talos.EXPECT().
-		ApplyMachineConfig(mock.Anything, mock.Anything, controlplane).
-		Return(nil)
+func recoveryPath(file string) string {
+	return filepath.Join(theRecoveryDirectory, file)
+}
+
+func expectTheRecoveryDirectory(files *fsadaptermock.MockFS, file string, content string) []*mock.Call {
+	return []*mock.Call{
+		files.EXPECT().MkdirAll(theRecoveryDirectory).Return(nil).Call,
+		files.EXPECT().Chmod(theRecoveryDirectory, os.FileMode(0o700)).Return(nil).Call,
+		files.EXPECT().WriteFile(recoveryPath(file), []byte(content)).Return(nil).Call,
+		files.EXPECT().Chmod(recoveryPath(file), os.FileMode(0o600)).Return(nil).Call,
+	}
+}
+
+func TestAFirstRunWritesTheBundleTheTalosconfigAndItsRecoveryCopyBeforeTheApplyOnANodeInMaintenance(t *testing.T) {
+	r, talos, files := talosRealizerWithFiles(t)
+
+	read := talos.EXPECT().MachineConfig(mock.Anything, mock.Anything).Return("", nil).Call
+	bundle := expectTheRecoveryDirectory(files, "secrets.yaml", theBundle)
+	save := talos.EXPECT().
+		SaveTalosconfig(citypes.Secret("/home/operator/.config/t0.yaml"), citypes.Secret(theBundle)).
+		Return(citypes.Secret(theSavedTalosconfig), nil).Call
+	copied := expectTheRecoveryDirectory(files, "talosconfig", theSavedTalosconfig)
+	apply := talos.EXPECT().
+		ApplyMachineConfig(mock.Anything, citypes.Secret("/home/operator/.config/t0.yaml"), controlplane).
+		Return(nil).Call
+
+	order := append([]*mock.Call{read}, bundle...)
+	order = append(order, save)
+	order = append(order, copied...)
+	mock.InOrder(append(order, apply)...)
 
 	action, err := r.Realize(machineConfig(controlplane), plain)
 	require.NoError(t, err)
 	assert.Equal(t, "applied machine config t0-controlplane", action.Text)
 	assert.True(t, action.Changed)
+	assert.NotContains(t, action.Text, theRecoveryDirectory)
+}
+
+func TestANodeThatHoldsAConfigNeverTouchesTheRecoveryDirectoryOrTheTalosconfig(t *testing.T) {
+	r, talos := talosRealizer(t)
+	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything).Return(controlplane, nil)
+	talos.EXPECT().ApplyMachineConfig(mock.Anything, mock.Anything, controlplaneWithABiggerDisk).Return(nil)
+
+	_, err := r.Realize(machineConfig(controlplaneWithABiggerDisk), plain)
+	require.NoError(t, err)
+	talos.AssertNotCalled(t, "SaveTalosconfig", mock.Anything, mock.Anything)
+}
+
+func TestADryRunOnANodeInMaintenanceWritesNoRecoveryFileNoTalosconfigAndAppliesNothing(t *testing.T) {
+	r, talos := talosRealizer(t)
+	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything).Return("", nil)
+
+	action, err := r.Realize(machineConfig(controlplane), managercontroller.Options{DryRun: true})
+	require.NoError(t, err)
+	assert.Equal(t, "would apply machine config t0-controlplane", action.Text)
+	assert.False(t, action.Changed)
+	talos.AssertNotCalled(t, "SaveTalosconfig", mock.Anything, mock.Anything)
+	talos.AssertNotCalled(t, "ApplyMachineConfig", mock.Anything, mock.Anything, mock.Anything)
+}
+
+func TestAFirstRunWithAnEmptyRecoveryVariableIsRefusedBeforeAnyWriteAndAnyApply(t *testing.T) {
+	r, talos := talosRealizer(t)
+	t.Setenv(recoveryVariable, "")
+	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything).Return("", nil)
+
+	_, err := r.Realize(machineConfig(controlplane), plain)
+	require.Error(t, err)
+	assert.Equal(t,
+		"writing the recovery directory of t0-controlplane: nothing is set in "+
+			"the variable spec.recoveryDirEnv names. export it before a first run",
+		err.Error())
+	talos.AssertNotCalled(t, "SaveTalosconfig", mock.Anything, mock.Anything)
+	talos.AssertNotCalled(t, "ApplyMachineConfig", mock.Anything, mock.Anything, mock.Anything)
+}
+
+func TestAFirstRunThatCannotSaveTheAdminCredentialAppliesNothing(t *testing.T) {
+	r, talos, files := talosRealizerWithFiles(t)
+	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything).Return("", nil)
+	expectTheRecoveryDirectory(files, "secrets.yaml", theBundle)
+	talos.EXPECT().SaveTalosconfig(mock.Anything, mock.Anything).
+		Return("", errors.New("minting the admin credential: validating the talos secret bundle"))
+
+	_, err := r.Realize(machineConfig(controlplane), plain)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(),
+		"saving the admin credential of t0-controlplane into the client configuration from "+
+			"the variable spec.talosconfigEnv names")
+	talos.AssertNotCalled(t, "ApplyMachineConfig", mock.Anything, mock.Anything, mock.Anything)
+}
+
+func TestARecoveryWriteThatFailsAppliesNothingAndNamesTheFileButNeverTheDirectory(t *testing.T) {
+	for name, fail := range map[string]func(*fsadaptermock.MockFS){
+		"the directory": func(files *fsadaptermock.MockFS) {
+			files.EXPECT().MkdirAll(theRecoveryDirectory).
+				Return(fmt.Errorf("creating %s: %w", theRecoveryDirectory,
+					&fs.PathError{Op: "mkdir", Path: theRecoveryDirectory, Err: fs.ErrPermission}))
+		},
+		"the directory mode": func(files *fsadaptermock.MockFS) {
+			files.EXPECT().MkdirAll(theRecoveryDirectory).Return(nil)
+			files.EXPECT().Chmod(theRecoveryDirectory, os.FileMode(0o700)).
+				Return(&fs.PathError{Op: "chmod", Path: theRecoveryDirectory, Err: fs.ErrPermission})
+		},
+		"the file": func(files *fsadaptermock.MockFS) {
+			files.EXPECT().MkdirAll(theRecoveryDirectory).Return(nil)
+			files.EXPECT().Chmod(theRecoveryDirectory, os.FileMode(0o700)).Return(nil)
+			files.EXPECT().WriteFile(recoveryPath("secrets.yaml"), mock.Anything).
+				Return(&fs.PathError{Op: "open", Path: recoveryPath("secrets.yaml"), Err: fs.ErrPermission})
+		},
+		"the file mode": func(files *fsadaptermock.MockFS) {
+			files.EXPECT().MkdirAll(theRecoveryDirectory).Return(nil)
+			files.EXPECT().Chmod(theRecoveryDirectory, os.FileMode(0o700)).Return(nil)
+			files.EXPECT().WriteFile(recoveryPath("secrets.yaml"), mock.Anything).Return(nil)
+			files.EXPECT().Chmod(recoveryPath("secrets.yaml"), os.FileMode(0o600)).
+				Return(errors.New("the disk is gone"))
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r, talos, files := talosRealizerWithFiles(t)
+			talos.EXPECT().MachineConfig(mock.Anything, mock.Anything).Return("", nil)
+			fail(files)
+
+			_, err := r.Realize(machineConfig(controlplane), plain)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(),
+				"writing the secret bundle of t0-controlplane into the recovery directory")
+			assert.NotContains(t, err.Error(), theRecoveryDirectory)
+			assert.NotContains(t, err.Error(), "the cluster CA private key")
+			talos.AssertNotCalled(t, "SaveTalosconfig", mock.Anything, mock.Anything)
+			talos.AssertNotCalled(t, "ApplyMachineConfig", mock.Anything, mock.Anything, mock.Anything)
+		})
+	}
+}
+
+func TestAFirstRunThatCannotCopyTheTalosconfigIntoTheRecoveryDirectoryAppliesNothing(t *testing.T) {
+	r, talos, files := talosRealizerWithFiles(t)
+	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything).Return("", nil)
+	expectTheRecoveryDirectory(files, "secrets.yaml", theBundle)
+	talos.EXPECT().SaveTalosconfig(mock.Anything, mock.Anything).
+		Return(citypes.Secret(theSavedTalosconfig), nil)
+	files.EXPECT().WriteFile(recoveryPath("talosconfig"), mock.Anything).Return(errors.New("the disk is gone"))
+
+	_, err := r.Realize(machineConfig(controlplane), plain)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "writing the talosconfig of t0-controlplane into the recovery directory")
+	assert.NotContains(t, err.Error(), "the admin private key")
+	talos.AssertNotCalled(t, "ApplyMachineConfig", mock.Anything, mock.Anything, mock.Anything)
+}
+
+func TestAMachineConfigThatNamesNoBundleOrNoRecoveryVariableIsRefusedByNameBeforeAnyDial(t *testing.T) {
+	for key, says := range map[string]string{
+		"bundle": "spec.bundle is required: the engine that declares the resource writes the cluster's secret bundle into it",
+		"recoveryDirEnv": "spec.recoveryDirEnv is required: the resource names the variable holding the recovery directory, " +
+			"and the engine that declares the resource writes it",
+	} {
+		t.Run(key, func(t *testing.T) {
+			r, _ := talosRealizer(t)
+
+			res := machineConfig(controlplane)
+			delete(res.Spec, key)
+
+			_, err := r.Realize(res, plain)
+			require.Error(t, err)
+			assert.Equal(t, says, err.Error())
+		})
+	}
 }
 
 func TestTheTalosRealizerStillRefusesADeclaredConfigThatWillNotLoadWhenTheNodeHoldsNoConfig(t *testing.T) {
@@ -321,9 +505,17 @@ func TestAResourceThatNamesNoTalosconfigVariableIsRefusedByNameBeforeAnyDialEven
 			Spec: map[string]any{"config": controlplane, "talosconfigEnv": ""},
 		},
 		"a cluster bootstrap with no spec": {Kind: managercontroller.KindClusterBootstrap, Name: "t0"},
+		"a secret bundle with no key": {
+			Kind: managercontroller.KindSecretBundle, Name: "t0", Spec: map[string]any{"bundle": theBundle},
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			r := managercontroller.NewTalosRealizer(t.Context(), managercontrollermock.NewMockTalos(t))
+			r := managercontroller.NewTalosRealizer(t.Context(), managercontrollermock.NewMockTalos(t), nil)
+
+			if res.Kind == managercontroller.KindMachineConfig {
+				res.Spec["bundle"] = theBundle
+				res.Spec["recoveryDirEnv"] = recoveryVariable
+			}
 
 			_, err := r.Realize(res, plain)
 			require.Error(t, err)
@@ -336,7 +528,7 @@ func TestAResourceThatNamesNoTalosconfigVariableIsRefusedByNameBeforeAnyDialEven
 }
 
 func TestEveryKindRefusesTheRetiredNodeAndTalosconfigKeysByNameBeforeAnyDial(t *testing.T) {
-	for _, res := range []citypes.Resource{machineConfig(controlplane), clusterBootstrap()} {
+	for _, res := range []citypes.Resource{machineConfig(controlplane), clusterBootstrap(), secretBundle()} {
 		for key, because := range map[string]string{
 			"node":        "the node comes from the talosconfig the variable spec.talosconfigEnv names",
 			"talosconfig": "the talosconfig path comes from the variable spec.talosconfigEnv names",
@@ -445,7 +637,7 @@ func TestTheTalosRealizerReportsTheNodeWhenItNeverRegisters(t *testing.T) {
 func TestTheTalosRealizerRefusesToBootstrapWithNoClientWired(t *testing.T) {
 	t.Setenv(talosconfigVariable, "/home/operator/.config/t0.yaml")
 
-	r := managercontroller.NewTalosRealizer(t.Context(), nil)
+	r := managercontroller.NewTalosRealizer(t.Context(), nil, nil)
 
 	_, err := r.Realize(clusterBootstrap(), plain)
 	require.Error(t, err)
@@ -456,7 +648,7 @@ func TestTheTalosRealizerRefusesToBootstrapWithNoClientWired(t *testing.T) {
 func TestAClusterBootstrapWithNoClientConfigurationIsRefusedBeforeAnyDial(t *testing.T) {
 	t.Setenv(talosconfigVariable, "")
 
-	r := managercontroller.NewTalosRealizer(t.Context(), managercontrollermock.NewMockTalos(t))
+	r := managercontroller.NewTalosRealizer(t.Context(), managercontrollermock.NewMockTalos(t), nil)
 
 	_, err := r.Realize(clusterBootstrap(), plain)
 	require.Error(t, err)
@@ -478,7 +670,7 @@ func TestTheTalosRealizerRefusesAMachineConfigResourceWithoutAConfig(t *testing.
 func TestTheTalosRealizerRefusesAnEmptyClientConfigurationVariable(t *testing.T) {
 	t.Setenv(talosconfigVariable, "")
 
-	r := managercontroller.NewTalosRealizer(t.Context(), managercontrollermock.NewMockTalos(t))
+	r := managercontroller.NewTalosRealizer(t.Context(), managercontrollermock.NewMockTalos(t), nil)
 
 	_, err := r.Realize(machineConfig(controlplane), plain)
 	require.Error(t, err)
@@ -510,7 +702,7 @@ func TestTheTalosRealizerNamesTheSlotThatFedTheClientConfigurationWhenTheApplyFa
 }
 
 func TestTheTalosRealizerNeverEchoesASecretPastedIntoTheClientConfigurationVariableSlot(t *testing.T) {
-	r := managercontroller.NewTalosRealizer(t.Context(), managercontrollermock.NewMockTalos(t))
+	r := managercontroller.NewTalosRealizer(t.Context(), managercontrollermock.NewMockTalos(t), nil)
 
 	res := machineConfig(controlplane)
 	res.Spec["talosconfigEnv"] = thePastedPrivateKey
@@ -594,7 +786,7 @@ func TestTheTalosRealizerReportsTheNodeWhenTheDeclaredConfigCarriesNoVersionDocu
 }
 
 func TestTheTalosRealizerRefusesASpecFieldThatHoldsSomethingOtherThanAString(t *testing.T) {
-	for _, key := range []string{"config", "talosconfigEnv"} {
+	for _, key := range []string{"config", "bundle", "recoveryDirEnv", "talosconfigEnv"} {
 		t.Run(key, func(t *testing.T) {
 			r, _ := talosRealizer(t)
 
@@ -613,10 +805,130 @@ func TestTheTalosRealizerRefusesASpecFieldThatHoldsSomethingOtherThanAString(t *
 func TestTheTalosRealizerRefusesToReachANodeWithNoClientWired(t *testing.T) {
 	t.Setenv(talosconfigVariable, "/home/operator/.config/t0.yaml")
 
-	r := managercontroller.NewTalosRealizer(t.Context(), nil)
+	r := managercontroller.NewTalosRealizer(t.Context(), nil, nil)
 
 	_, err := r.Realize(machineConfig(controlplane), plain)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "reading the machine config of t0-controlplane")
 	assert.Contains(t, err.Error(), "carries no node client yet")
+}
+
+func secretBundle() citypes.Resource {
+	return citypes.Resource{
+		Kind: managercontroller.KindSecretBundle,
+		Name: "t0",
+		Spec: map[string]any{"bundle": theBundle, "talosconfigEnv": talosconfigVariable},
+	}
+}
+
+func TestTheTalosRealizerStoresABundleTheClusterDoesNotHoldYet(t *testing.T) {
+	r, talos := talosRealizer(t)
+	talos.EXPECT().StoredBundle(mock.Anything, citypes.Secret("/home/operator/.config/t0.yaml")).
+		Return("", false, nil)
+	talos.EXPECT().
+		StoreBundle(mock.Anything, citypes.Secret("/home/operator/.config/t0.yaml"), citypes.Secret(theBundle)).
+		Return(nil)
+
+	action, err := r.Realize(secretBundle(), plain)
+	require.NoError(t, err)
+	assert.Equal(t, "stored secret bundle t0", action.Text)
+	assert.True(t, action.Changed)
+}
+
+func TestTheTalosRealizerKeepsABundleTheClusterHoldsByteForByte(t *testing.T) {
+	r, talos := talosRealizer(t)
+	talos.EXPECT().StoredBundle(mock.Anything, mock.Anything).Return(citypes.Secret(theBundle), true, nil)
+
+	action, err := r.Realize(secretBundle(), plain)
+	require.NoError(t, err)
+	assert.Equal(t, "kept secret bundle t0", action.Text)
+	assert.False(t, action.Changed)
+	talos.AssertNotCalled(t, "StoreBundle", mock.Anything, mock.Anything, mock.Anything)
+}
+
+func TestTheTalosRealizerRefusesByNameAClusterHoldingADifferentBundleAndNeverOverwritesIt(t *testing.T) {
+	for name, opts := range map[string]managercontroller.Options{"a real run": plain, "a dry run": {DryRun: true}} {
+		t.Run(name, func(t *testing.T) {
+			r, talos := talosRealizer(t)
+			talos.EXPECT().StoredBundle(mock.Anything, mock.Anything).
+				Return(citypes.Secret("cluster:\n  secret: another cluster's key\n"), true, nil)
+
+			_, err := r.Realize(secretBundle(), opts)
+			require.Error(t, err)
+			assert.Equal(t,
+				"reading the secret bundle of t0: the cluster holds a different bundle in secret "+
+					"kube-system/talos-secret-bundle, and this manager never overwrites one",
+				err.Error())
+			talos.AssertNotCalled(t, "StoreBundle", mock.Anything, mock.Anything, mock.Anything)
+		})
+	}
+}
+
+func TestADryRunOverAnAbsentBundleSaysItWouldStoreAndStoresNothing(t *testing.T) {
+	r, talos := talosRealizer(t)
+	talos.EXPECT().StoredBundle(mock.Anything, mock.Anything).Return("", false, nil)
+
+	action, err := r.Realize(secretBundle(), managercontroller.Options{DryRun: true})
+	require.NoError(t, err)
+	assert.Equal(t, "would store secret bundle t0", action.Text)
+	assert.False(t, action.Changed)
+	talos.AssertNotCalled(t, "StoreBundle", mock.Anything, mock.Anything, mock.Anything)
+}
+
+func TestEveryBundleFailureNamesTheResourceTheSlotAndTheCauseAndNeverTheBundle(t *testing.T) {
+	for name, failure := range map[string]struct {
+		expect func(*managercontrollermock.MockTalos)
+		says   string
+	}{
+		"the read": {
+			expect: func(talos *managercontrollermock.MockTalos) {
+				talos.EXPECT().StoredBundle(mock.Anything, mock.Anything).
+					Return("", false, errors.New("forbidden"))
+			},
+			says: "reading the secret bundle of t0 using the client configuration from " +
+				"the variable spec.talosconfigEnv names: forbidden",
+		},
+		"the store": {
+			expect: func(talos *managercontrollermock.MockTalos) {
+				talos.EXPECT().StoredBundle(mock.Anything, mock.Anything).Return("", false, nil)
+				talos.EXPECT().StoreBundle(mock.Anything, mock.Anything, mock.Anything).
+					Return(errors.New("already exists"))
+			},
+			says: "storing the secret bundle of t0 using the client configuration from " +
+				"the variable spec.talosconfigEnv names: already exists",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r, talos := talosRealizer(t)
+			failure.expect(talos)
+
+			_, err := r.Realize(secretBundle(), plain)
+			require.Error(t, err)
+			assert.Equal(t, failure.says, err.Error())
+			assert.NotContains(t, err.Error(), "the cluster CA private key")
+		})
+	}
+}
+
+func TestASecretBundleThatNamesNoBundleIsRefusedByNameBeforeAnyDial(t *testing.T) {
+	for _, spec := range []map[string]any{
+		{"talosconfigEnv": talosconfigVariable},
+		{"talosconfigEnv": talosconfigVariable, "bundle": ""},
+	} {
+		r, _ := talosRealizer(t)
+
+		_, err := r.Realize(citypes.Resource{Kind: managercontroller.KindSecretBundle, Name: "t0", Spec: spec}, plain)
+		require.Error(t, err)
+		assert.Equal(t,
+			"spec.bundle is required: the engine that declares the resource writes the cluster's secret bundle into it",
+			err.Error())
+	}
+}
+
+func TestTheTalosRealizerRefusesToReadABundleWithNoClientWired(t *testing.T) {
+	t.Setenv(talosconfigVariable, "/home/operator/.config/t0.yaml")
+
+	_, err := managercontroller.NewTalosRealizer(t.Context(), nil, nil).Realize(secretBundle(), plain)
+	require.Error(t, err)
+	assert.Equal(t, "reading the secret bundle of t0: this manager carries no node client yet", err.Error())
 }

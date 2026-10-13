@@ -290,6 +290,207 @@ func (_c *MockTalos_MachineConfig_Call) RunAndReturn(run func(ctx context.Contex
 	return _c
 }
 
+// SaveTalosconfig provides a mock function for the type MockTalos
+func (_mock *MockTalos) SaveTalosconfig(talosconfig citypes.Secret, bundle citypes.Secret) (citypes.Secret, error) {
+	ret := _mock.Called(talosconfig, bundle)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SaveTalosconfig")
+	}
+
+	var r0 citypes.Secret
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(citypes.Secret, citypes.Secret) (citypes.Secret, error)); ok {
+		return returnFunc(talosconfig, bundle)
+	}
+	if returnFunc, ok := ret.Get(0).(func(citypes.Secret, citypes.Secret) citypes.Secret); ok {
+		r0 = returnFunc(talosconfig, bundle)
+	} else {
+		r0 = ret.Get(0).(citypes.Secret)
+	}
+	if returnFunc, ok := ret.Get(1).(func(citypes.Secret, citypes.Secret) error); ok {
+		r1 = returnFunc(talosconfig, bundle)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockTalos_SaveTalosconfig_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveTalosconfig'
+type MockTalos_SaveTalosconfig_Call struct {
+	*mock.Call
+}
+
+// SaveTalosconfig is a helper method to define mock.On call
+//   - talosconfig citypes.Secret
+//   - bundle citypes.Secret
+func (_e *MockTalos_Expecter) SaveTalosconfig(talosconfig any, bundle any) *MockTalos_SaveTalosconfig_Call {
+	return &MockTalos_SaveTalosconfig_Call{Call: _e.mock.On("SaveTalosconfig", talosconfig, bundle)}
+}
+
+func (_c *MockTalos_SaveTalosconfig_Call) Run(run func(talosconfig citypes.Secret, bundle citypes.Secret)) *MockTalos_SaveTalosconfig_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 citypes.Secret
+		if args[0] != nil {
+			arg0 = args[0].(citypes.Secret)
+		}
+		var arg1 citypes.Secret
+		if args[1] != nil {
+			arg1 = args[1].(citypes.Secret)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockTalos_SaveTalosconfig_Call) Return(secret citypes.Secret, err error) *MockTalos_SaveTalosconfig_Call {
+	_c.Call.Return(secret, err)
+	return _c
+}
+
+func (_c *MockTalos_SaveTalosconfig_Call) RunAndReturn(run func(talosconfig citypes.Secret, bundle citypes.Secret) (citypes.Secret, error)) *MockTalos_SaveTalosconfig_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// StoreBundle provides a mock function for the type MockTalos
+func (_mock *MockTalos) StoreBundle(ctx context.Context, talosconfig citypes.Secret, bundle citypes.Secret) error {
+	ret := _mock.Called(ctx, talosconfig, bundle)
+
+	if len(ret) == 0 {
+		panic("no return value specified for StoreBundle")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, citypes.Secret, citypes.Secret) error); ok {
+		r0 = returnFunc(ctx, talosconfig, bundle)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockTalos_StoreBundle_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'StoreBundle'
+type MockTalos_StoreBundle_Call struct {
+	*mock.Call
+}
+
+// StoreBundle is a helper method to define mock.On call
+//   - ctx context.Context
+//   - talosconfig citypes.Secret
+//   - bundle citypes.Secret
+func (_e *MockTalos_Expecter) StoreBundle(ctx any, talosconfig any, bundle any) *MockTalos_StoreBundle_Call {
+	return &MockTalos_StoreBundle_Call{Call: _e.mock.On("StoreBundle", ctx, talosconfig, bundle)}
+}
+
+func (_c *MockTalos_StoreBundle_Call) Run(run func(ctx context.Context, talosconfig citypes.Secret, bundle citypes.Secret)) *MockTalos_StoreBundle_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 citypes.Secret
+		if args[1] != nil {
+			arg1 = args[1].(citypes.Secret)
+		}
+		var arg2 citypes.Secret
+		if args[2] != nil {
+			arg2 = args[2].(citypes.Secret)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *MockTalos_StoreBundle_Call) Return(err error) *MockTalos_StoreBundle_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockTalos_StoreBundle_Call) RunAndReturn(run func(ctx context.Context, talosconfig citypes.Secret, bundle citypes.Secret) error) *MockTalos_StoreBundle_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// StoredBundle provides a mock function for the type MockTalos
+func (_mock *MockTalos) StoredBundle(ctx context.Context, talosconfig citypes.Secret) (citypes.Secret, bool, error) {
+	ret := _mock.Called(ctx, talosconfig)
+
+	if len(ret) == 0 {
+		panic("no return value specified for StoredBundle")
+	}
+
+	var r0 citypes.Secret
+	var r1 bool
+	var r2 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, citypes.Secret) (citypes.Secret, bool, error)); ok {
+		return returnFunc(ctx, talosconfig)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, citypes.Secret) citypes.Secret); ok {
+		r0 = returnFunc(ctx, talosconfig)
+	} else {
+		r0 = ret.Get(0).(citypes.Secret)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, citypes.Secret) bool); ok {
+		r1 = returnFunc(ctx, talosconfig)
+	} else {
+		r1 = ret.Get(1).(bool)
+	}
+	if returnFunc, ok := ret.Get(2).(func(context.Context, citypes.Secret) error); ok {
+		r2 = returnFunc(ctx, talosconfig)
+	} else {
+		r2 = ret.Error(2)
+	}
+	return r0, r1, r2
+}
+
+// MockTalos_StoredBundle_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'StoredBundle'
+type MockTalos_StoredBundle_Call struct {
+	*mock.Call
+}
+
+// StoredBundle is a helper method to define mock.On call
+//   - ctx context.Context
+//   - talosconfig citypes.Secret
+func (_e *MockTalos_Expecter) StoredBundle(ctx any, talosconfig any) *MockTalos_StoredBundle_Call {
+	return &MockTalos_StoredBundle_Call{Call: _e.mock.On("StoredBundle", ctx, talosconfig)}
+}
+
+func (_c *MockTalos_StoredBundle_Call) Run(run func(ctx context.Context, talosconfig citypes.Secret)) *MockTalos_StoredBundle_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 citypes.Secret
+		if args[1] != nil {
+			arg1 = args[1].(citypes.Secret)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockTalos_StoredBundle_Call) Return(secret citypes.Secret, b bool, err error) *MockTalos_StoredBundle_Call {
+	_c.Call.Return(secret, b, err)
+	return _c
+}
+
+func (_c *MockTalos_StoredBundle_Call) RunAndReturn(run func(ctx context.Context, talosconfig citypes.Secret) (citypes.Secret, bool, error)) *MockTalos_StoredBundle_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // WaitNodeRegistered provides a mock function for the type MockTalos
 func (_mock *MockTalos) WaitNodeRegistered(ctx context.Context, talosconfig citypes.Secret) error {
 	ret := _mock.Called(ctx, talosconfig)

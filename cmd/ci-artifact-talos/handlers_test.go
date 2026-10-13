@@ -4,20 +4,23 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
-	"time"
 
 	"github.com/siderolabs/talos/pkg/machinery/config"
+	"github.com/siderolabs/talos/pkg/machinery/config/configdiff"
 	"github.com/siderolabs/talos/pkg/machinery/config/configloader"
-	"github.com/siderolabs/talos/pkg/machinery/config/generate/secrets"
 	"github.com/siderolabs/talos/pkg/machinery/config/machine"
 	"github.com/siderolabs/talos/pkg/machinery/constants"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"sigs.k8s.io/yaml"
 
+	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/fsadapter"
+	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/talosadapter"
+	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/talossecretsadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/machineconfigcontroller"
+	"github.com/alexandremahdhaoui/forge-ci/internal/mocks/machineconfigcontrollermock"
+	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 )
 
 const (
@@ -33,26 +36,20 @@ contexts:
     nodes:
       - node-a.example.invalid
 `
-	theVariable = "A_TALOSCONFIG_THIS_TEST_OWNS"
+	theVariable         = "A_TALOSCONFIG_THIS_TEST_OWNS"
+	theRecoveryVariable = "A_RECOVERY_DIRECTORY_THIS_TEST_OWNS"
 )
 
-func writeThrowawayCluster(t *testing.T) (string, []byte) {
+func writeThrowawayCluster(t *testing.T) string {
 	t.Helper()
 
-	minted, err := secrets.NewBundle(secrets.NewFixedClock(time.Now()), config.TalosVersionCurrent)
-	require.NoError(t, err)
-
-	bundle, err := yaml.Marshal(minted)
-	require.NoError(t, err)
-
 	root := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(root, "bundle.yaml"), bundle, 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(root, "patch.yaml"), []byte(patchDocument), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(root, "talosconfig"), []byte(talosconfigDocument), 0o600))
 
 	t.Setenv(theVariable, filepath.Join(root, "talosconfig"))
 
-	return root, bundle
+	return root
 }
 
 func declaredSpec() Spec {
@@ -60,47 +57,111 @@ func declaredSpec() Spec {
 		"clusterName":       "t0",
 		"kubernetesVersion": constants.DefaultKubernetesVersion,
 		"talosconfigEnv":    theVariable,
-		"bundleFile":        "bundle.yaml",
+		"recoveryDirEnv":    theRecoveryVariable,
 		"patchFile":         "patch.yaml",
 	}
 }
 
-func TestTheDeclareToolAnswersARenderedControlPlaneConfigCarryingThePatchThenTheBootstrap(t *testing.T) {
-	root, _ := writeThrowawayCluster(t)
+type theNode struct {
+	*machineconfigcontrollermock.MockTalosconfig
+}
 
-	out, err := NewHandlers().Declare(context.Background(), DeclareInput{Root: root, Spec: declaredSpec()})
+func aNode(t *testing.T) theNode {
+	t.Helper()
+
+	node := theNode{machineconfigcontrollermock.NewMockTalosconfig(t)}
+	node.EXPECT().Context(mock.Anything).RunAndReturn(talosadapter.NewTalosconfig().Context).Maybe()
+
+	return node
+}
+
+func (n theNode) inMaintenance() theNode {
+	n.EXPECT().InMaintenance(mock.Anything, mock.Anything).Return(true, nil)
+
+	return n
+}
+
+func (n theNode) holding(bundle citypes.Secret) theNode {
+	n.EXPECT().InMaintenance(mock.Anything, mock.Anything).Return(false, nil)
+	n.EXPECT().Bootstrapped(mock.Anything, mock.Anything).Return(true, nil)
+	n.EXPECT().StoredBundle(mock.Anything, mock.Anything).Return(bundle, true, nil)
+
+	return n
+}
+
+func handlersReaching(node theNode) Handlers {
+	return newHandlers(machineconfigcontroller.New(fsadapter.New(), talossecretsadapter.New(), node))
+}
+
+func TestTheDeclareToolOnANodeInMaintenanceAnswersARenderedControlPlaneConfigThenTheBootstrapThenTheBundle(t *testing.T) {
+	root := writeThrowawayCluster(t)
+
+	out, err := handlersReaching(aNode(t).inMaintenance()).
+		Declare(context.Background(), DeclareInput{Root: root, Spec: declaredSpec()})
 
 	require.NoError(t, err)
-	require.Len(t, out.Resources, 2)
+	require.Len(t, out.Resources, 3)
 	assert.Equal(t, "machine-config", out.Resources[0].Kind)
 	assert.Equal(t, "t0", out.Resources[0].Name)
 	assert.NotContains(t, out.Resources[0].Spec, "node")
 	assert.Equal(t, theVariable, out.Resources[0].Spec["talosconfigEnv"])
+	assert.Equal(t, theRecoveryVariable, out.Resources[0].Spec["recoveryDirEnv"])
 	assert.Equal(t, "cluster-bootstrap", out.Resources[1].Kind)
 	assert.Equal(t, "t0", out.Resources[1].Name)
 	assert.Equal(t, Spec{"talosconfigEnv": theVariable}, out.Resources[1].Spec)
+	assert.Equal(t, "secret-bundle", out.Resources[2].Kind)
+	assert.Equal(t, "t0", out.Resources[2].Name)
+	assert.Equal(t, out.Resources[0].Spec["bundle"], out.Resources[2].Spec["bundle"])
 
-	rendered, ok := out.Resources[0].Spec["config"].(string)
+	rendered, ok := out.Resources[0].Spec["config"].(citypes.Secret)
 	require.True(t, ok)
-	assert.NotEqual(t, patchDocument, rendered)
-	assert.Contains(t, rendered, "/dev/the-disk-the-patch-names")
-	assert.Contains(t, rendered, "https://node-a.example.invalid:6443")
+	assert.NotEqual(t, patchDocument, string(rendered))
+	assert.Contains(t, string(rendered), "/dev/the-disk-the-patch-names")
+	assert.Contains(t, string(rendered), "https://node-a.example.invalid:6443")
 
 	loaded, err := configloader.NewFromBytes([]byte(rendered))
 	require.NoError(t, err)
 	assert.Equal(t, machine.TypeControlPlane, loaded.Machine().Type())
 }
 
-func TestTheDeclareToolRendersTheSameBytesTwiceFromTheSameFiles(t *testing.T) {
-	root, _ := writeThrowawayCluster(t)
+func TestALaterRunRendersFromTheBundleTheFirstRunStoredAConfigTheVendorFindsNoPatchAgainst(t *testing.T) {
+	root := writeThrowawayCluster(t)
 
-	first, err := NewHandlers().Declare(context.Background(), DeclareInput{Root: root, Spec: declaredSpec()})
+	first, err := handlersReaching(aNode(t).inMaintenance()).
+		Declare(context.Background(), DeclareInput{Root: root, Spec: declaredSpec()})
 	require.NoError(t, err)
 
-	second, err := NewHandlers().Declare(context.Background(), DeclareInput{Root: root, Spec: declaredSpec()})
+	stored, ok := first.Resources[2].Spec["bundle"].(citypes.Secret)
+	require.True(t, ok)
+
+	later, err := handlersReaching(aNode(t).holding(stored)).
+		Declare(context.Background(), DeclareInput{Root: root, Spec: declaredSpec()})
 	require.NoError(t, err)
 
-	assert.Equal(t, first.Resources[0].Spec["config"], second.Resources[0].Spec["config"])
+	again, err := handlersReaching(aNode(t).holding(stored)).
+		Declare(context.Background(), DeclareInput{Root: root, Spec: declaredSpec()})
+	require.NoError(t, err)
+
+	applied := loadedConfig(t, first.Resources[0].Spec["config"])
+	rendered := loadedConfig(t, later.Resources[0].Spec["config"])
+
+	patches, err := configdiff.Patch(applied, rendered)
+	require.NoError(t, err)
+	assert.Empty(t, patches, "a later run renders the config the first run applied")
+	assert.Equal(t, later.Resources[0].Spec["config"], again.Resources[0].Spec["config"])
+	assert.Equal(t, stored, later.Resources[2].Spec["bundle"])
+}
+
+func loadedConfig(t *testing.T, held any) config.Provider {
+	t.Helper()
+
+	text, ok := held.(citypes.Secret)
+	require.True(t, ok)
+
+	loaded, err := configloader.NewFromBytes([]byte(text))
+	require.NoError(t, err)
+
+	return loaded
 }
 
 func TestTheDeclareToolAnswersTheControllersRefusalAndNoResources(t *testing.T) {
@@ -113,8 +174,21 @@ func TestTheDeclareToolAnswersTheControllersRefusalAndNoResources(t *testing.T) 
 	assert.Nil(t, out)
 }
 
-func TestTheDeclareToolRefusesARealTalosconfigWhoseSecondEndpointCarriesASchemeAndDeclaresNothing(t *testing.T) {
-	root, _ := writeThrowawayCluster(t)
+func TestTheDeclareToolRefusesTheRetiredBundleFileByNameAndDeclaresNothing(t *testing.T) {
+	t.Parallel()
+
+	spec := declaredSpec()
+	spec["bundleFile"] = "talos/secrets.yaml"
+
+	out, err := NewHandlers().Declare(context.Background(), DeclareInput{Spec: spec})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "this engine refuses spec.bundleFile")
+	assert.Nil(t, out)
+}
+
+func TestTheDeclareToolRefusesARealTalosconfigWhoseSecondEndpointCarriesASchemeBeforeReachingTheNode(t *testing.T) {
+	root := writeThrowawayCluster(t)
 	require.NoError(t, os.WriteFile(filepath.Join(root, "talosconfig"), []byte(`context: t0
 contexts:
   t0:
@@ -135,8 +209,8 @@ contexts:
 		err.Error())
 }
 
-func TestARefusalFromARealTalosconfigNamingTwoNodesNeverCarriesTheBundleBytes(t *testing.T) {
-	root, bundle := writeThrowawayCluster(t)
+func TestTheDeclareToolRefusesARealTalosconfigNamingTwoNodesBeforeReachingEither(t *testing.T) {
+	root := writeThrowawayCluster(t)
 	require.NoError(t, os.WriteFile(filepath.Join(root, "talosconfig"),
 		[]byte(talosconfigDocument+"      - node-b.example.invalid\n"), 0o600))
 
@@ -145,15 +219,6 @@ func TestARefusalFromARealTalosconfigNamingTwoNodesNeverCarriesTheBundleBytes(t 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "names 2 nodes")
 	assert.Contains(t, err.Error(), "one node per cluster")
-
-	for _, line := range strings.Split(string(bundle), "\n") {
-		if len(strings.TrimSpace(line)) < 40 {
-			continue
-		}
-
-		assert.False(t, strings.Contains(err.Error(), strings.TrimSpace(line)),
-			"the refusal carries a line of the bundle")
-	}
 }
 
 func TestThePublishToolRefusesByNameAndPublishesNothing(t *testing.T) {

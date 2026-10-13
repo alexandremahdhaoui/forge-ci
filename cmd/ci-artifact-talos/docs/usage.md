@@ -2,7 +2,7 @@
 
 # ci-artifact-talos
 
-**Declare the machine config and the bootstrap of one cluster, rendered from a secret bundle and a patch under the pipeline root, reaching the node the talosconfig names.**
+**Declare the machine config, the bootstrap and the secret bundle of one cluster, minting the bundle on a node in maintenance and reading it from the cluster after.**
 
 A forge-ci `artifact` engine.
 
@@ -10,9 +10,10 @@ A forge-ci `artifact` engine.
 
 A manager converges what something declares, and nothing declared a machine
 config, so the node manager was unreachable. This engine is the declaration.
-It renders the control plane machine config from the cluster's stored
-secret bundle and a patch document, hands it over as a resource the manager
-owns, and declares the cluster bootstrap after it.
+It renders the control plane machine config from the cluster's secret
+bundle and a patch document, hands it over as a resource the manager owns,
+declares the cluster bootstrap after it, and declares the bundle the cluster
+must hold.
 
 It wears the artifact port because that is the port a declaring engine can
 wear today. It publishes nothing. The publish tool refuses by name, so a
@@ -23,13 +24,13 @@ engine the release reads its behaviour from.
 
 | Tool | Does |
 |---|---|
-| `declare` | Report one machine-config resource and one cluster-bootstrap resource, both named by the cluster. |
+| `declare` | Report one machine-config, one cluster-bootstrap and one secret-bundle resource, each named by the cluster. |
 | `publish` | Refuse. This engine declares machine configs and never publishes. |
 
 ## By hand
 
 ```sh
-echo '{"root":"/w","spec":{"clusterName":"t0","kubernetesVersion":"1.37.0","talosconfigEnv":"TALOSCONFIG","bundleFile":"secrets/bundle.yaml","patchFile":"talos/controlplane.patch.yaml"}}' \
+echo '{"root":"/w","spec":{"clusterName":"t0","kubernetesVersion":"1.37.0","talosconfigEnv":"TALOSCONFIG","recoveryDirEnv":"TALOS_RECOVERY_DIR","patchFile":"talos/controlplane.patch.yaml"}}' \
   | ci-artifact-talos declare
 ```
 
@@ -45,19 +46,38 @@ engines:
       clusterName: <string>
       kubernetesVersion: <string>
       talosconfigEnv: <string>
-      bundleFile: <string>
+      recoveryDirEnv: <string>
       patchFile: <string>
 ```
 
 ## Worth knowing
 
-One cluster declares two resources, in this order. The first is kind
-`machine-config`, named by the cluster, whose `spec.config` is the rendered
-control plane machine config. The second is kind `cluster-bootstrap`, named
-by the cluster. Both carry `spec.talosconfigEnv` as declared here, so the
-manager reads the talosconfig from the variable this engine names and never
-from a default. Neither names a node. A manager realizes resources in the
-order declared, so the config lands before the bootstrap.
+One cluster declares three resources, in this order, each named by the
+cluster. The first is kind `machine-config`. Its `spec.config` is the
+rendered control plane machine config, its `spec.bundle` is the secret
+bundle and its `spec.recoveryDirEnv` names the variable holding the
+recovery directory. The second is kind `cluster-bootstrap`. The third is
+kind `secret-bundle`, whose `spec.bundle` holds the same bytes as the
+first. Each carries `spec.talosconfigEnv` as declared here, so the manager
+reads the talosconfig from the variable this engine names and never from a
+default. None names a node. A manager realizes resources in the order
+declared, so the config lands before the bootstrap and the bundle is stored
+once the cluster runs.
+
+The engine reaches the node. It probes the node's machine status over an
+insecure connection. A node that reads maintenance has no cluster yet, so
+the engine mints a fresh secret bundle. Any other answer means the cluster
+exists, and the engine reads the bundle from secret
+`kube-system/talos-secret-bundle`, key `bundle.yaml`, through a kubeconfig
+fetched from the node with the talosconfig's credential. Both runs render
+from the marshaled bundle bytes through the same load, so a later run
+renders the config the first run applied.
+
+A node that holds a config and runs no cluster is refused by name, naming
+the recovery directory, because a first run stopped between the apply and
+the bootstrap and no cluster holds the bundle. A cluster that holds no
+bundle secret is refused by name, printing the one kubectl command that
+writes it from `secrets.yaml` in the recovery directory.
 
 No address is declared. The engine reads the talosconfig file the variable
 `spec.talosconfigEnv` names. The context must name exactly one node, and
@@ -66,19 +86,21 @@ refused by name and position, wherever it sits in the list. The engine hands
 the renderer a cluster endpoint built from `https://`, the host of the first
 context endpoint and `:6443`, such as `https://node-a.example.invalid:6443`.
 The retired keys `endpoint` and `nodes` are refused by name, because the
-node and the endpoint come from that talosconfig.
+node and the endpoint come from that talosconfig. The retired key
+`bundleFile` is refused by name, because no bundle file is ever read.
 
-The engine reads the secret bundle and the patch from files relative to the
-pipeline root, which rides the declare call. The same bundle and the same
-patch render the same bytes every time. It never mints a bundle, never
-reaches a node and never hashes the text. The manager already compares by
-loading both configs and asking the vendor for the patches between them, so
-a second comparison here would be a second authority over the same question.
+The engine reads the patch from a file relative to the pipeline root, which
+rides the declare call. It never hashes the text. The manager already
+compares by loading both configs and asking the vendor for the patches
+between them, so a second comparison here would be a second authority over
+the same question.
 
-Every spec key is required and an absent one is refused by name. A variable
-holding nothing is refused naming the variable. A file that cannot be read
-is an error naming the cluster and the file.
+Every spec key is required and an absent one is refused by name before
+anything is read. A variable holding nothing is refused naming the
+variable. A file that cannot be read is an error naming the cluster and the
+file.
 
-The rendered config carries the cluster's private keys. No refusal and no
-resource description ever prints the bundle, the patch, the config or the
+The bundle and the rendered config carry the cluster's private keys. Both
+ride their resources as secret values. No refusal and no resource
+description ever prints the bundle, the patch, the config or the
 talosconfig.

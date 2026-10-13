@@ -34,7 +34,7 @@ func NewHandlers() Handlers {
 				return nil, fmt.Errorf("building the node client of manager %s: %w", in.Manager, err)
 			}
 
-			ctrl := managercontroller.New(managercontroller.NewTalosRealizer(ctx, node), fs)
+			ctrl := managercontroller.New(managercontroller.NewTalosRealizer(ctx, node, fs), fs)
 
 			out, err := ctrl.Reconcile(toReconcileInput(in))
 			if err != nil {

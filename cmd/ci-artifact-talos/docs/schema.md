@@ -6,10 +6,10 @@ The `spec` block on this engine's entry in `forge-ci.yaml`.
 
 | Key | Type | Required | Means |
 |---|---|---|---|
-| `clusterName` | string | yes | The name of the cluster the machine config belongs to, and the name of both resources. |
+| `clusterName` | string | yes | The name of the cluster the machine config belongs to, and the name of every resource. |
 | `kubernetesVersion` | string | yes | The Kubernetes version the machine config installs. |
-| `talosconfigEnv` | string | yes | The environment variable holding the talosconfig path. Its current context names the endpoints and the one node. Both declared resources carry it to the manager. |
-| `bundleFile` | string | yes | The path of the cluster's stored secret bundle relative to the pipeline root. |
+| `talosconfigEnv` | string | yes | The environment variable holding the talosconfig path. Its current context names the endpoints and the one node. Every declared resource carries it to the manager. |
+| `recoveryDirEnv` | string | yes | The environment variable holding the recovery directory. A first run writes the secret bundle and the admin talosconfig there. The machine-config resource carries it to the manager. |
 | `patchFile` | string | yes | The path of the control plane patch document relative to the pipeline root. |
 
 forge-ci never validates a spec. This engine does, because only it knows what the keys mean.

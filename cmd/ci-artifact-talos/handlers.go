@@ -17,8 +17,8 @@ func NewHandlers() Handlers {
 
 func newHandlers(ctrl *machineconfigcontroller.Controller) Handlers {
 	return Handlers{
-		Declare: func(_ context.Context, in DeclareInput) (*DeclareOutput, error) {
-			out, err := ctrl.Declare(citypes.DeclareInput{Spec: in.Spec, Root: in.Root})
+		Declare: func(ctx context.Context, in DeclareInput) (*DeclareOutput, error) {
+			out, err := ctrl.Declare(ctx, citypes.DeclareInput{Spec: in.Spec, Root: in.Root})
 			if err != nil {
 				return nil, err
 			}

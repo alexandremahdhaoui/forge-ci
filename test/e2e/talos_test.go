@@ -6,13 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
-	"github.com/siderolabs/talos/pkg/machinery/config"
-	"github.com/siderolabs/talos/pkg/machinery/config/generate/secrets"
 	"github.com/siderolabs/talos/pkg/machinery/constants"
 	"github.com/stretchr/testify/require"
-	"sigs.k8s.io/yaml"
 )
 
 const (
@@ -23,6 +19,8 @@ const (
 	theTalosCluster = "t0"
 
 	theTalosconfigVariable = "FORGE_CI_E2E_TALOSCONFIG"
+
+	theRecoveryVariable = "FORGE_CI_E2E_TALOS_RECOVERY_DIR"
 )
 
 const talosconfigDocument = `context: ` + theTalosCluster + `
@@ -82,8 +80,8 @@ engines:
       clusterName: ` + theTalosCluster + `
       kubernetesVersion: ` + constants.DefaultKubernetesVersion + `
       talosconfigEnv: ` + theTalosconfigVariable + `
+      recoveryDirEnv: ` + theRecoveryVariable + `
       patchFile: demo-repo/talos/controlplane.patch.yaml
-      bundleFile: demo-repo/talos/secrets.yaml
 state: ci-state
 targets:
   - alias: build-all
@@ -100,24 +98,15 @@ stages:
 `
 }
 
-func talosWorkspace(t *testing.T) (root string) {
+func talosWorkspace(t *testing.T) (root, recovery string) {
 	t.Helper()
 
 	root, statePath := bareWorkspace(t, "true")
-
-	minted, err := secrets.NewBundle(secrets.NewFixedClock(time.Now()), config.TalosVersionCurrent)
-	require.NoError(t, err)
-
-	bundle, err := yaml.Marshal(minted)
-	require.NoError(t, err)
 
 	talos := filepath.Join(root, "demo-repo", "talos")
 	require.NoError(t, os.MkdirAll(talos, 0o750))
 	require.NoError(t, os.WriteFile(filepath.Join(talos, "controlplane.patch.yaml"),
 		[]byte(controlplanePatchDocument), 0o600))
-	require.NoError(t, os.WriteFile(filepath.Join(talos, "secrets.yaml"), bundle, 0o600))
-	require.NoError(t, os.WriteFile(filepath.Join(root, "demo-repo", ".gitignore"),
-		[]byte("/.forge/\n.envrc\n/tmp/\n/talos/secrets.yaml\n"), 0o600))
 
 	mustRun(t, filepath.Join(root, "demo-repo"), "git", "add", ".")
 	mustRun(t, filepath.Join(root, "demo-repo"), "git", "commit", "-m", "declare a machine config")
@@ -130,25 +119,25 @@ func talosWorkspace(t *testing.T) (root string) {
 	t.Setenv(theTalosconfigVariable, talosconfig)
 	t.Setenv("TALOSCONFIG", "")
 
-	return root
+	recovery = filepath.Join(t.TempDir(), "recovery")
+	t.Setenv(theRecoveryVariable, recovery)
+
+	return root, recovery
 }
 
-func TestADeclaredClusterReachesTheTalosManagerAsAMachineConfigThenABootstrapAndBothDialTheNodeTheTalosconfigNames(t *testing.T) {
-	root := talosWorkspace(t)
+func TestADeclaredClusterWhoseNodeIsNotInMaintenanceReadsItsBundleThroughTheNodeTheTalosconfigNamesBeforeAnyManagerRuns(t *testing.T) {
+	root, recovery := talosWorkspace(t)
 
 	out, err := run(t, root, "forge-ci", "bootstrap", "--config", "forge-ci.yaml", "--root", root)
 
 	require.Error(t, err, out)
-	require.NotContains(t, out, "carries no node client yet",
-		"the manager carries a node client, or this case proves nothing")
-	require.Contains(t, out,
-		"realizing machine-config/"+theTalosCluster+": reading the machine config of "+theTalosCluster,
-		"the declaration reached the talos manager as a machine-config it owns")
-	require.Contains(t, out,
-		"realizing cluster-bootstrap/"+theTalosCluster+": reading the bootstrap state of "+theTalosCluster,
-		"the declaration reached the talos manager as a cluster-bootstrap after the machine config")
-	require.Contains(t, out, "machine config resource of node "+theTalosNode,
-		"the manager read the node from the talosconfig context, not from the declaration")
+	require.Contains(t, out, "reading the bootstrap state of cluster "+theTalosCluster,
+		"a node that does not read maintenance sends the engine to the cluster for its bundle")
+	require.Contains(t, out, "etcd service of node "+theTalosNode,
+		"the engine read the node from the talosconfig context, not from the declaration")
 	require.Contains(t, out, "dial tcp "+theTalosEndpoint,
 		"every dial went through the endpoint the talosconfig context names")
+	require.NotContains(t, out, "realizing machine-config/"+theTalosCluster,
+		"no manager runs on a declaration the engine could not finish")
+	require.NoDirExists(t, recovery, "nothing but a first run on a node in maintenance writes the recovery directory")
 }

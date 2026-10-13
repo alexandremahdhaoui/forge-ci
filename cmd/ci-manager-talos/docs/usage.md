@@ -2,27 +2,28 @@
 
 # ci-manager-talos
 
-**Converge the machine config of a declared node, bootstrap its cluster, and record what it changed.**
+**Converge the machine config of a declared node, bootstrap its cluster, store its secret bundle in it, and record what it changed.**
 
 A forge-ci `manager` engine.
 
 ## Why it exists
 
 A cluster host is declared, never clicked. The engine that owns the cluster
-declares one machine config and one bootstrap and this manager makes the
-node hold the config and the cluster exist, so a wiped box rebuilds from the
-same declaration and a second run finds nothing left to do.
+declares one machine config, one bootstrap and one secret bundle, and this
+manager makes the node hold the config, the cluster exist and the cluster
+hold its own bundle, so a wiped box rebuilds from the same declaration and
+a second run finds nothing left to do.
 
 ## Tools
 
 | Tool | Does |
 |---|---|
-| `reconcile` | Converge every declared node to its machine config, bootstrap every declared cluster, and return who owns it. |
+| `reconcile` | Converge every declared node to its machine config, bootstrap every declared cluster, store every declared bundle, and return who owns it. |
 
 ## By hand
 
 ```sh
-echo '{"manager":"talos","resources":[{"kind":"machine-config","name":"t0","spec":{"talosconfigEnv":"TALOSCONFIG","config":"version: v1alpha1\n"}},{"kind":"cluster-bootstrap","name":"t0","spec":{"talosconfigEnv":"TALOSCONFIG"}}]}' \
+echo '{"manager":"talos","resources":[{"kind":"machine-config","name":"t0","spec":{"talosconfigEnv":"TALOSCONFIG","recoveryDirEnv":"TALOS_RECOVERY_DIR","bundle":"cluster: {}\n","config":"version: v1alpha1\n"}},{"kind":"cluster-bootstrap","name":"t0","spec":{"talosconfigEnv":"TALOSCONFIG"}},{"kind":"secret-bundle","name":"t0","spec":{"talosconfigEnv":"TALOSCONFIG","bundle":"cluster: {}\n"}}]}' \
   | ci-manager-talos reconcile
 ```
 
@@ -41,8 +42,9 @@ engines:
 
 ## Worth knowing
 
-It knows two kinds, `machine-config` and `cluster-bootstrap`. The resource
-name is the cluster's name in the declaration. No resource names a node.
+It knows three kinds, `machine-config`, `cluster-bootstrap` and
+`secret-bundle`. The resource name is the cluster's name in the
+declaration. No resource names a node.
 Every dial goes through the endpoints of the talosconfig's current context
 and targets the one node that context names, so a context naming no node or
 more than one is refused by name. An endpoint carrying a scheme is refused
@@ -62,7 +64,20 @@ manager dials secure first. When that fails on a certificate error it probes
 the node's machine status over an insecure connection, and only when the
 stage reads maintenance does it treat the node as holding no config and
 apply over that insecure connection. Any other stage and any other failure
-is the secure error, by name. After such an apply the node installs and
+is the secure error, by name.
+
+Before that first apply the manager writes the recovery directory the
+variable `spec.recoveryDirEnv` names. It writes `secrets.yaml`, the bundle
+`spec.bundle` holds. It mints an admin credential from that bundle and
+saves it into the talosconfig file, keeping its endpoints and its one
+node, so every later dial in the run and every later run uses it. It
+writes a copy of that talosconfig as `talosconfig` beside the bundle. The
+directory is 0700 and each file 0600, and stock talosctl loads both. A
+machine-config resource that names no bundle or no recovery variable is
+refused by name, and an empty recovery variable is refused on a first run.
+A refusal names the variable slot and never the directory.
+
+After such an apply the node installs and
 reboots, so every later dial in the same run retries until a ceiling of ten
 minutes and names the last cause when it passes. A run that stops between
 that apply and the bootstrap reruns into the reboot window, fails at once on
@@ -73,6 +88,14 @@ manager waits for a node to register with the Kubernetes API and answers
 Kept. When it does not, the manager bootstraps and waits the same way and
 answers Did. Registered means a node object exists and has posted a status.
 It never waits for Ready, which belongs to the platform layer.
+
+`secret-bundle` reads secret `kube-system/talos-secret-bundle`, key
+`bundle.yaml`, through a kubeconfig fetched from the node with the
+talosconfig's credential. Absent means the manager creates it and answers
+Did. The same bytes as `spec.bundle` mean Kept. Different bytes are refused
+by name and never overwritten, because a cluster holds one bundle for its
+whole life. A dry run over an absent secret says it would store and writes
+nothing.
 
 Kept means the node already holds this config. The manager reads the config
 the node is running before it writes anything, loads both configs through the
@@ -91,10 +114,12 @@ load failure naming the document and the line it sits on. A node refuses a
 repeated document on apply, so the manager refuses it before it travels.
 
 A dry run reads the node exactly as a real run does and answers Kept either
-way, with the text saying what it would apply. It writes nothing.
+way, with the text saying what it would apply. It writes nothing, neither
+the recovery directory nor the talosconfig.
 
 There is no delete path. A node dropped from a declaration stays as it is.
 It refuses a resource recorded as owned by a different manager.
 
-The client configuration path is read from the environment at realize time
-and never written to state, actions or logs.
+The client configuration path and the recovery directory are read from the
+environment at realize time and never written to state, actions or logs.
+No action and no refusal ever carries the bundle or the credential.

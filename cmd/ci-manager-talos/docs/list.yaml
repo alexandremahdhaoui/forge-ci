@@ -7,7 +7,7 @@ baseURL: "https://raw.githubusercontent.com/alexandremahdhaoui/forge-ci/refs/hea
 docs:
   - name: "usage"
     title: "ci-manager-talos usage"
-    description: "Converge the machine config of a declared node, bootstrap its cluster, and record what it changed."
+    description: "Converge the machine config of a declared node, bootstrap its cluster, store its secret bundle in it, and record what it changed."
     url: "cmd/ci-manager-talos/docs/usage.md"
     tags: ["usage", "manager"]
     required: true

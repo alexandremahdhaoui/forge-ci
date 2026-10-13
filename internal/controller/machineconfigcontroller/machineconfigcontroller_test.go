@@ -2,11 +2,13 @@ package machineconfigcontroller_test
 
 import (
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/talossecretsadapter"
@@ -17,14 +19,16 @@ import (
 )
 
 const (
+	mintedBundle   = "bundle: the minted cluster CA private key\n"
 	storedBundle   = "bundle: the stored cluster CA private key\n"
 	loadedBundle   = "bundle: the loaded cluster CA private key\n"
 	patchText      = "machine:\n  install:\n    disk: /dev/sda\n"
 	renderedConfig = "version: v1alpha1\nmachine:\n  ca:\n    key: the rendered private key\n"
 
-	theVariable = "A_TALOSCONFIG_THIS_TEST_OWNS"
-	thePath     = "/home/a-person/talosconfig"
-	theNode     = "node-a.example.invalid"
+	theVariable         = "A_TALOSCONFIG_THIS_TEST_OWNS"
+	theRecoveryVariable = "A_RECOVERY_DIRECTORY_THIS_TEST_OWNS"
+	thePath             = "/home/a-person/talosconfig"
+	theNode             = "node-a.example.invalid"
 )
 
 func theContext() citypes.TalosContext {
@@ -42,9 +46,19 @@ func fullSpec() map[string]any {
 		"clusterName":       "t0",
 		"kubernetesVersion": "1.37.0",
 		"talosconfigEnv":    theVariable,
-		"bundleFile":        "secrets/bundle.yaml",
+		"recoveryDirEnv":    theRecoveryVariable,
 		"patchFile":         "talos/controlplane.patch.yaml",
 	}
+}
+
+func declare(
+	t *testing.T, fs *fsadaptermock.MockFS, renderer *machineconfigcontrollermock.MockRenderer,
+	talosconfig *machineconfigcontrollermock.MockTalosconfig, spec map[string]any,
+) (citypes.DeclareOutput, error) {
+	t.Helper()
+
+	return machineconfigcontroller.New(fs, renderer, talosconfig).
+		Declare(t.Context(), citypes.DeclareInput{Root: "/w", Spec: spec})
 }
 
 func filesOnDisk(t *testing.T) *fsadaptermock.MockFS {
@@ -52,23 +66,35 @@ func filesOnDisk(t *testing.T) *fsadaptermock.MockFS {
 
 	fs := fsadaptermock.NewMockFS(t)
 	fs.EXPECT().
-		ReadFile(filepath.Join("/w", "secrets", "bundle.yaml")).
-		Return([]byte(storedBundle), nil).Maybe()
-	fs.EXPECT().
 		ReadFile(filepath.Join("/w", "talos", "controlplane.patch.yaml")).
 		Return([]byte(patchText), nil).Maybe()
 
 	return fs
 }
 
-func aRenderer(t *testing.T) *machineconfigcontrollermock.MockRenderer {
+func aRendererFor(t *testing.T, bundle string) *machineconfigcontrollermock.MockRenderer {
 	t.Helper()
 
 	renderer := machineconfigcontrollermock.NewMockRenderer(t)
-	renderer.EXPECT().Load(citypes.Secret(storedBundle)).Return(citypes.Secret(loadedBundle), nil).Maybe()
+	renderer.EXPECT().Load(citypes.Secret(bundle)).Return(citypes.Secret(loadedBundle), nil).Maybe()
 	renderer.EXPECT().
 		MachineConfig(citypes.Secret(loadedBundle), theCluster(), patchText).
 		Return(citypes.Secret(renderedConfig), nil).Maybe()
+
+	return renderer
+}
+
+func aRendererNeverCalled(t *testing.T) *machineconfigcontrollermock.MockRenderer {
+	t.Helper()
+
+	return machineconfigcontrollermock.NewMockRenderer(t)
+}
+
+func aMintingRenderer(t *testing.T) *machineconfigcontrollermock.MockRenderer {
+	t.Helper()
+
+	renderer := aRendererFor(t, mintedBundle)
+	renderer.EXPECT().Mint().Return(citypes.Secret(mintedBundle), nil).Maybe()
 
 	return renderer
 }
@@ -82,44 +108,128 @@ func aTalosconfig(t *testing.T) *machineconfigcontrollermock.MockTalosconfig {
 	return talosconfig
 }
 
+func aNodeInMaintenance(t *testing.T) *machineconfigcontrollermock.MockTalosconfig {
+	t.Helper()
+
+	talosconfig := aTalosconfig(t)
+	talosconfig.EXPECT().InMaintenance(mock.Anything, citypes.Secret(thePath)).Return(true, nil).Maybe()
+
+	return talosconfig
+}
+
+func aRunningCluster(t *testing.T) *machineconfigcontrollermock.MockTalosconfig {
+	t.Helper()
+
+	talosconfig := aTalosconfig(t)
+	talosconfig.EXPECT().InMaintenance(mock.Anything, citypes.Secret(thePath)).Return(false, nil).Maybe()
+	talosconfig.EXPECT().Bootstrapped(mock.Anything, citypes.Secret(thePath)).Return(true, nil).Maybe()
+	talosconfig.EXPECT().StoredBundle(mock.Anything, citypes.Secret(thePath)).
+		Return(citypes.Secret(storedBundle), true, nil).Maybe()
+
+	return talosconfig
+}
+
 func exported(t *testing.T) {
 	t.Helper()
 	t.Setenv(theVariable, thePath)
 }
 
-func TestAClusterDeclaresItsMachineConfigThenItsBootstrapBothNamedByTheClusterBothCarryingTheVariableAndNeitherNamesANode(t *testing.T) {
+func TestAFirstRunOnANodeInMaintenanceDeclaresTheConfigTheBootstrapAndTheMintedBundleEachNamedByTheCluster(t *testing.T) {
 	exported(t)
 
-	out, err := machineconfigcontroller.New(filesOnDisk(t), aRenderer(t), aTalosconfig(t)).
-		Declare(citypes.DeclareInput{Root: "/w", Spec: fullSpec()})
+	out, err := declare(t, filesOnDisk(t), aMintingRenderer(t), aNodeInMaintenance(t), fullSpec())
 
 	require.NoError(t, err)
-	require.Len(t, out.Resources, 2)
+	require.Len(t, out.Resources, 3)
 	assert.Equal(t, citypes.Resource{
 		Kind: "machine-config",
 		Name: "t0",
-		Spec: map[string]any{"config": renderedConfig, "talosconfigEnv": theVariable},
+		Spec: map[string]any{
+			"config":         citypes.Secret(renderedConfig),
+			"bundle":         citypes.Secret(mintedBundle),
+			"talosconfigEnv": theVariable,
+			"recoveryDirEnv": theRecoveryVariable,
+		},
 	}, out.Resources[0])
 	assert.Equal(t, citypes.Resource{
 		Kind: "cluster-bootstrap",
 		Name: "t0",
 		Spec: map[string]any{"talosconfigEnv": theVariable},
 	}, out.Resources[1])
-	assert.NotEqual(t, storedBundle, out.Resources[0].Spec["config"])
-	assert.NotEqual(t, patchText, out.Resources[0].Spec["config"])
+	assert.Equal(t, citypes.Resource{
+		Kind: "secret-bundle",
+		Name: "t0",
+		Spec: map[string]any{"bundle": citypes.Secret(mintedBundle), "talosconfigEnv": theVariable},
+	}, out.Resources[2])
+}
+
+func TestTheMachineConfigAndTheSecretBundleCarryIdenticalBundleBytesAsSecretsThatNeverPrint(t *testing.T) {
+	exported(t)
+
+	for name, talosconfig := range map[string]func(*testing.T) *machineconfigcontrollermock.MockTalosconfig{
+		"a first run": aNodeInMaintenance,
+		"a later run": aRunningCluster,
+	} {
+		t.Run(name, func(t *testing.T) {
+			renderer := aMintingRenderer(t)
+			renderer.EXPECT().Load(citypes.Secret(storedBundle)).Return(citypes.Secret(loadedBundle), nil).Maybe()
+
+			out, err := declare(t, filesOnDisk(t), renderer, talosconfig(t), fullSpec())
+			require.NoError(t, err)
+
+			onTheConfig, isSecret := out.Resources[0].Spec["bundle"].(citypes.Secret)
+			require.True(t, isSecret, "the machine config carries the bundle as a secret")
+
+			onTheBundle, isSecret := out.Resources[2].Spec["bundle"].(citypes.Secret)
+			require.True(t, isSecret, "the secret bundle carries the bundle as a secret")
+
+			assert.Equal(t, onTheConfig, onTheBundle)
+
+			printed := fmt.Sprintf("%v %+v", out, out.Resources)
+			for _, secret := range []string{mintedBundle, storedBundle, renderedConfig} {
+				assert.NotContains(t, printed, strings.TrimSpace(secret))
+			}
+		})
+	}
+}
+
+func TestAFirstRunNeverReadsTheCluster(t *testing.T) {
+	exported(t)
+
+	talosconfig := aNodeInMaintenance(t)
+
+	_, err := declare(t, filesOnDisk(t), aMintingRenderer(t), talosconfig, fullSpec())
+
+	require.NoError(t, err)
+	talosconfig.AssertNotCalled(t, "Bootstrapped", mock.Anything, mock.Anything)
+	talosconfig.AssertNotCalled(t, "StoredBundle", mock.Anything, mock.Anything)
+}
+
+func TestALaterRunRendersFromTheBundleTheClusterHoldsAndNeverMints(t *testing.T) {
+	exported(t)
+
+	renderer := aRendererFor(t, storedBundle)
+
+	out, err := declare(t, filesOnDisk(t), renderer, aRunningCluster(t), fullSpec())
+
+	require.NoError(t, err)
+	assert.Equal(t, citypes.Secret(storedBundle), out.Resources[0].Spec["bundle"])
+	assert.Equal(t, citypes.Secret(storedBundle), out.Resources[2].Spec["bundle"])
+	assert.Equal(t, citypes.Secret(renderedConfig), out.Resources[0].Spec["config"])
+	renderer.AssertNotCalled(t, "Mint")
 }
 
 func TestTheRendererReceivesTheLoadedBundleTheClusterEndpointBuiltFromTheFirstContextEndpointAndThePatchText(t *testing.T) {
 	exported(t)
 
 	renderer := machineconfigcontrollermock.NewMockRenderer(t)
-	renderer.EXPECT().Load(citypes.Secret(storedBundle)).Return(citypes.Secret(loadedBundle), nil).Once()
+	renderer.EXPECT().Mint().Return(citypes.Secret(mintedBundle), nil).Once()
+	renderer.EXPECT().Load(citypes.Secret(mintedBundle)).Return(citypes.Secret(loadedBundle), nil).Once()
 	renderer.EXPECT().
 		MachineConfig(citypes.Secret(loadedBundle), theCluster(), patchText).
 		Return(citypes.Secret(renderedConfig), nil).Once()
 
-	_, err := machineconfigcontroller.New(filesOnDisk(t), renderer, aTalosconfig(t)).
-		Declare(citypes.DeclareInput{Root: "/w", Spec: fullSpec()})
+	_, err := declare(t, filesOnDisk(t), renderer, aNodeInMaintenance(t), fullSpec())
 
 	require.NoError(t, err)
 }
@@ -130,21 +240,128 @@ func TestAContextEndpointWithoutAPortStillBecomesTheClusterEndpointOnPort6443(t 
 	talosconfig := machineconfigcontrollermock.NewMockTalosconfig(t)
 	talosconfig.EXPECT().Context(citypes.Secret(thePath)).
 		Return(citypes.TalosContext{Endpoints: []string{"node-a.example.invalid"}, Node: theNode}, nil)
+	talosconfig.EXPECT().InMaintenance(mock.Anything, mock.Anything).Return(true, nil)
 
-	_, err := machineconfigcontroller.New(filesOnDisk(t), aRenderer(t), talosconfig).
-		Declare(citypes.DeclareInput{Root: "/w", Spec: fullSpec()})
+	_, err := declare(t, filesOnDisk(t), aMintingRenderer(t), talosconfig, fullSpec())
 
 	require.NoError(t, err)
+}
+
+func TestANodeThatHoldsAConfigAndRunsNoClusterIsRefusedNamingThatStateAndTheRecoveryDirectory(t *testing.T) {
+	exported(t)
+
+	talosconfig := aTalosconfig(t)
+	talosconfig.EXPECT().InMaintenance(mock.Anything, mock.Anything).Return(false, nil)
+	talosconfig.EXPECT().Bootstrapped(mock.Anything, citypes.Secret(thePath)).Return(false, nil)
+
+	renderer := machineconfigcontrollermock.NewMockRenderer(t)
+
+	_, err := declare(t, filesOnDisk(t), renderer, talosconfig, fullSpec())
+
+	require.Error(t, err)
+	assert.Equal(t,
+		"reading the secret bundle of cluster t0: its node holds a machine config and runs no cluster yet, "+
+			"so no cluster holds the bundle. a first run stopped between the apply and the bootstrap, "+
+			"and the bundle it minted is secrets.yaml in the recovery directory the variable "+
+			theRecoveryVariable+" names",
+		err.Error())
+	talosconfig.AssertNotCalled(t, "StoredBundle", mock.Anything, mock.Anything)
+	renderer.AssertNotCalled(t, "Mint")
+}
+
+func TestAClusterHoldingNoBundleSecretIsRefusedPrintingTheOneCommandThatWritesItFromTheRecoveryDirectory(t *testing.T) {
+	exported(t)
+
+	talosconfig := aTalosconfig(t)
+	talosconfig.EXPECT().InMaintenance(mock.Anything, mock.Anything).Return(false, nil)
+	talosconfig.EXPECT().Bootstrapped(mock.Anything, mock.Anything).Return(true, nil)
+	talosconfig.EXPECT().StoredBundle(mock.Anything, citypes.Secret(thePath)).Return("", false, nil)
+
+	renderer := machineconfigcontrollermock.NewMockRenderer(t)
+
+	_, err := declare(t, filesOnDisk(t), renderer, talosconfig, fullSpec())
+
+	require.Error(t, err)
+	assert.Equal(t,
+		"reading the secret bundle of cluster t0: the cluster holds no secret kube-system/talos-secret-bundle. "+
+			"write it once from the recovery directory: kubectl --namespace kube-system create secret generic "+
+			"talos-secret-bundle --from-file=bundle.yaml=\"$"+theRecoveryVariable+"/secrets.yaml\"",
+		err.Error())
+	renderer.AssertNotCalled(t, "Mint")
+}
+
+func TestEveryFailureOnTheWayToTheBundleIsAnErrorNamingTheClusterAndTheStep(t *testing.T) {
+	exported(t)
+
+	for name, failure := range map[string]struct {
+		talosconfig func(*testing.T) *machineconfigcontrollermock.MockTalosconfig
+		renderer    func(*testing.T) *machineconfigcontrollermock.MockRenderer
+		says        string
+	}{
+		"the probe": {
+			talosconfig: func(t *testing.T) *machineconfigcontrollermock.MockTalosconfig {
+				talosconfig := aTalosconfig(t)
+				talosconfig.EXPECT().InMaintenance(mock.Anything, mock.Anything).
+					Return(false, errors.New("not a talosconfig document"))
+
+				return talosconfig
+			},
+			renderer: aRendererNeverCalled,
+			says:     "probing the node of cluster t0: not a talosconfig document",
+		},
+		"the mint": {
+			talosconfig: aNodeInMaintenance,
+			renderer: func(t *testing.T) *machineconfigcontrollermock.MockRenderer {
+				renderer := machineconfigcontrollermock.NewMockRenderer(t)
+				renderer.EXPECT().Mint().Return("", errors.New("no entropy"))
+
+				return renderer
+			},
+			says: "minting the secret bundle of cluster t0: no entropy",
+		},
+		"the bootstrap state": {
+			talosconfig: func(t *testing.T) *machineconfigcontrollermock.MockTalosconfig {
+				talosconfig := aTalosconfig(t)
+				talosconfig.EXPECT().InMaintenance(mock.Anything, mock.Anything).Return(false, nil)
+				talosconfig.EXPECT().Bootstrapped(mock.Anything, mock.Anything).
+					Return(false, errors.New("connection refused"))
+
+				return talosconfig
+			},
+			renderer: aRendererNeverCalled,
+			says:     "reading the bootstrap state of cluster t0: connection refused",
+		},
+		"the stored bundle": {
+			talosconfig: func(t *testing.T) *machineconfigcontrollermock.MockTalosconfig {
+				talosconfig := aTalosconfig(t)
+				talosconfig.EXPECT().InMaintenance(mock.Anything, mock.Anything).Return(false, nil)
+				talosconfig.EXPECT().Bootstrapped(mock.Anything, mock.Anything).Return(true, nil)
+				talosconfig.EXPECT().StoredBundle(mock.Anything, mock.Anything).
+					Return("", false, errors.New("forbidden"))
+
+				return talosconfig
+			},
+			renderer: aRendererNeverCalled,
+			says:     "reading the secret bundle of cluster t0 from the cluster: forbidden",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := declare(t, filesOnDisk(t), failure.renderer(t), failure.talosconfig(t), fullSpec())
+
+			require.Error(t, err)
+			assert.Equal(t, failure.says, err.Error())
+		})
+	}
 }
 
 func TestAVariableHoldingNothingIsRefusedNamingTheClusterAndTheVariableBeforeAnyFileIsRead(t *testing.T) {
 	t.Setenv(theVariable, "")
 
-	_, err := machineconfigcontroller.New(
+	_, err := declare(t,
 		fsadaptermock.NewMockFS(t),
 		machineconfigcontrollermock.NewMockRenderer(t),
 		machineconfigcontrollermock.NewMockTalosconfig(t),
-	).Declare(citypes.DeclareInput{Root: "/w", Spec: fullSpec()})
+		fullSpec())
 
 	require.Error(t, err)
 	assert.Equal(t,
@@ -159,9 +376,8 @@ func TestATalosconfigTheAdapterRefusesIsAnErrorNamingTheClusterAndNeverThePath(t
 	talosconfig.EXPECT().Context(citypes.Secret(thePath)).
 		Return(citypes.TalosContext{}, errors.New("context \"t0\" names 2 nodes"))
 
-	_, err := machineconfigcontroller.New(
-		fsadaptermock.NewMockFS(t), machineconfigcontrollermock.NewMockRenderer(t), talosconfig,
-	).Declare(citypes.DeclareInput{Root: "/w", Spec: fullSpec()})
+	_, err := declare(t,
+		fsadaptermock.NewMockFS(t), machineconfigcontrollermock.NewMockRenderer(t), talosconfig, fullSpec())
 
 	require.Error(t, err)
 	assert.Equal(t,
@@ -169,35 +385,15 @@ func TestATalosconfigTheAdapterRefusesIsAnErrorNamingTheClusterAndNeverThePath(t
 	assert.NotContains(t, err.Error(), thePath)
 }
 
-func TestAMissingBundleFileIsRefusedNamingTheClusterAndTheFile(t *testing.T) {
+func TestAMissingPatchFileIsRefusedNamingTheClusterAndTheFileBeforeTheNodeIsReached(t *testing.T) {
 	exported(t)
 
 	fs := fsadaptermock.NewMockFS(t)
-	fs.EXPECT().
-		ReadFile(filepath.Join("/w", "secrets", "bundle.yaml")).
-		Return(nil, errors.New("no such file"))
-
-	_, err := machineconfigcontroller.New(fs, machineconfigcontrollermock.NewMockRenderer(t), aTalosconfig(t)).
-		Declare(citypes.DeclareInput{Root: "/w", Spec: fullSpec()})
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "reading the secret bundle of cluster t0 from secrets/bundle.yaml")
-	assert.Contains(t, err.Error(), "no such file")
-}
-
-func TestAMissingPatchFileIsRefusedNamingTheClusterAndTheFile(t *testing.T) {
-	exported(t)
-
-	fs := fsadaptermock.NewMockFS(t)
-	fs.EXPECT().
-		ReadFile(filepath.Join("/w", "secrets", "bundle.yaml")).
-		Return([]byte(storedBundle), nil)
 	fs.EXPECT().
 		ReadFile(filepath.Join("/w", "talos", "controlplane.patch.yaml")).
 		Return(nil, errors.New("no such file"))
 
-	_, err := machineconfigcontroller.New(fs, aRenderer(t), aTalosconfig(t)).
-		Declare(citypes.DeclareInput{Root: "/w", Spec: fullSpec()})
+	_, err := declare(t, fs, machineconfigcontrollermock.NewMockRenderer(t), aTalosconfig(t), fullSpec())
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(),
@@ -205,19 +401,19 @@ func TestAMissingPatchFileIsRefusedNamingTheClusterAndTheFile(t *testing.T) {
 	assert.Contains(t, err.Error(), "no such file")
 }
 
-func TestEachAbsentSpecKeyIsRefusedByNameBeforeAnyFileIsRead(t *testing.T) {
+func TestEachAbsentSpecKeyIsRefusedByNameBeforeAnythingIsRead(t *testing.T) {
 	exported(t)
 
-	for _, key := range []string{"clusterName", "kubernetesVersion", "talosconfigEnv", "bundleFile", "patchFile"} {
+	for _, key := range []string{"clusterName", "kubernetesVersion", "talosconfigEnv", "recoveryDirEnv", "patchFile"} {
 		t.Run(key, func(t *testing.T) {
 			spec := fullSpec()
 			delete(spec, key)
 
-			_, err := machineconfigcontroller.New(
+			_, err := declare(t,
 				fsadaptermock.NewMockFS(t),
 				machineconfigcontrollermock.NewMockRenderer(t),
-				aTalosconfig(t),
-			).Declare(citypes.DeclareInput{Root: "/w", Spec: spec})
+				machineconfigcontrollermock.NewMockTalosconfig(t),
+				spec)
 
 			require.Error(t, err)
 			assert.Equal(t, "this engine needs spec."+key+" and the spec does not name it", err.Error())
@@ -225,40 +421,29 @@ func TestEachAbsentSpecKeyIsRefusedByNameBeforeAnyFileIsRead(t *testing.T) {
 	}
 }
 
-func TestTheRetiredEndpointKeyIsRefusedByNameBeforeAnythingIsRead(t *testing.T) {
+func TestEachRetiredKeyIsRefusedByNameBeforeAnythingIsRead(t *testing.T) {
 	exported(t)
 
-	spec := fullSpec()
-	spec["endpoint"] = "https://node-a.example.invalid:6443"
+	for key, because := range map[string]string{
+		"endpoint": "the node and the endpoint come from the talosconfig the variable spec.talosconfigEnv names",
+		"nodes":    "the node and the endpoint come from the talosconfig the variable spec.talosconfigEnv names",
+		"bundleFile": "the bundle is minted on a node in maintenance and read from the cluster after, " +
+			"and no bundle file is ever read",
+	} {
+		t.Run(key, func(t *testing.T) {
+			spec := fullSpec()
+			spec[key] = "a retired value"
 
-	_, err := machineconfigcontroller.New(
-		fsadaptermock.NewMockFS(t),
-		machineconfigcontrollermock.NewMockRenderer(t),
-		machineconfigcontrollermock.NewMockTalosconfig(t),
-	).Declare(citypes.DeclareInput{Root: "/w", Spec: spec})
+			_, err := declare(t,
+				fsadaptermock.NewMockFS(t),
+				machineconfigcontrollermock.NewMockRenderer(t),
+				machineconfigcontrollermock.NewMockTalosconfig(t),
+				spec)
 
-	require.Error(t, err)
-	assert.Equal(t,
-		"this engine refuses spec.endpoint: the node and the endpoint come from the talosconfig "+
-			"the variable spec.talosconfigEnv names", err.Error())
-}
-
-func TestTheRetiredNodesKeyIsRefusedByNameBeforeAnythingIsRead(t *testing.T) {
-	exported(t)
-
-	spec := fullSpec()
-	spec["nodes"] = []any{map[string]any{"name": "one", "address": "node-a.example.invalid"}}
-
-	_, err := machineconfigcontroller.New(
-		fsadaptermock.NewMockFS(t),
-		machineconfigcontrollermock.NewMockRenderer(t),
-		machineconfigcontrollermock.NewMockTalosconfig(t),
-	).Declare(citypes.DeclareInput{Root: "/w", Spec: spec})
-
-	require.Error(t, err)
-	assert.Equal(t,
-		"this engine refuses spec.nodes: the node and the endpoint come from the talosconfig "+
-			"the variable spec.talosconfigEnv names", err.Error())
+			require.Error(t, err)
+			assert.Equal(t, "this engine refuses spec."+key+": "+because, err.Error())
+		})
+	}
 }
 
 func TestASpecKeyThatIsNotAStringIsRefusedByName(t *testing.T) {
@@ -267,11 +452,11 @@ func TestASpecKeyThatIsNotAStringIsRefusedByName(t *testing.T) {
 	spec := fullSpec()
 	spec["kubernetesVersion"] = 1.37
 
-	_, err := machineconfigcontroller.New(
+	_, err := declare(t,
 		fsadaptermock.NewMockFS(t),
 		machineconfigcontrollermock.NewMockRenderer(t),
 		machineconfigcontrollermock.NewMockTalosconfig(t),
-	).Declare(citypes.DeclareInput{Root: "/w", Spec: spec})
+		spec)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "spec.kubernetesVersion")
@@ -284,8 +469,7 @@ func TestABundleTheRendererRefusesIsAnErrorNamingTheCluster(t *testing.T) {
 	renderer.EXPECT().Load(citypes.Secret(storedBundle)).
 		Return("", errors.New("reading the stored talos secret bundle: it is not a secret bundle document"))
 
-	_, err := machineconfigcontroller.New(filesOnDisk(t), renderer, aTalosconfig(t)).
-		Declare(citypes.DeclareInput{Root: "/w", Spec: fullSpec()})
+	_, err := declare(t, filesOnDisk(t), renderer, aRunningCluster(t), fullSpec())
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "loading the secret bundle of cluster t0")
@@ -294,34 +478,27 @@ func TestABundleTheRendererRefusesIsAnErrorNamingTheCluster(t *testing.T) {
 func TestNoRefusalEverCarriesBundlePatchConfigOrTalosconfigBytes(t *testing.T) {
 	exported(t)
 
-	failures := map[string]func(*testing.T) (*fsadaptermock.MockFS, *machineconfigcontrollermock.MockRenderer){
-		"the bundle does not load": func(t *testing.T) (
-			*fsadaptermock.MockFS, *machineconfigcontrollermock.MockRenderer,
-		) {
+	failures := map[string]func(*testing.T) *machineconfigcontrollermock.MockRenderer{
+		"the bundle does not load": func(t *testing.T) *machineconfigcontrollermock.MockRenderer {
 			renderer := machineconfigcontrollermock.NewMockRenderer(t)
 			renderer.EXPECT().Load(citypes.Secret(storedBundle)).Return("", errors.New("not a bundle"))
 
-			return filesOnDisk(t), renderer
+			return renderer
 		},
-		"the config does not render": func(t *testing.T) (
-			*fsadaptermock.MockFS, *machineconfigcontrollermock.MockRenderer,
-		) {
+		"the config does not render": func(t *testing.T) *machineconfigcontrollermock.MockRenderer {
 			renderer := machineconfigcontrollermock.NewMockRenderer(t)
 			renderer.EXPECT().Load(citypes.Secret(storedBundle)).Return(citypes.Secret(loadedBundle), nil)
 			renderer.EXPECT().
 				MachineConfig(citypes.Secret(loadedBundle), theCluster(), patchText).
 				Return(citypes.Secret(renderedConfig), errors.New("patching failed"))
 
-			return filesOnDisk(t), renderer
+			return renderer
 		},
 	}
 
 	for name, failure := range failures {
 		t.Run(name, func(t *testing.T) {
-			fs, renderer := failure(t)
-
-			_, err := machineconfigcontroller.New(fs, renderer, aTalosconfig(t)).
-				Declare(citypes.DeclareInput{Root: "/w", Spec: fullSpec()})
+			_, err := declare(t, filesOnDisk(t), failure(t), aRunningCluster(t), fullSpec())
 
 			require.Error(t, err)
 

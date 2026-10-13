@@ -7,7 +7,7 @@ baseURL: "https://raw.githubusercontent.com/alexandremahdhaoui/forge-ci/refs/hea
 docs:
   - name: "usage"
     title: "ci-artifact-talos usage"
-    description: "Declare the machine config and the bootstrap of one cluster, rendered from a secret bundle and a patch under the pipeline root, reaching the node the talosconfig names."
+    description: "Declare the machine config, the bootstrap and the secret bundle of one cluster, minting the bundle on a node in maintenance and reading it from the cluster after."
     url: "cmd/ci-artifact-talos/docs/usage.md"
     tags: ["usage", "artifact"]
     required: true
