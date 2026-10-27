@@ -27,9 +27,18 @@ import (
 )
 
 const (
-	patchDocument = `machine:
+	patchDocument = `apiVersion: v1alpha1
+kind: UnattendedInstallConfig
+installer:
+  image: factory.example.invalid/metal-installer@sha256:0000000000000000000000000000000000000000000000000000000000000000
+provisioning:
+  diskSelector:
+    match: disk.dev_path == "/dev/the-disk-the-patch-names"
+`
+	legacyPatchDocument = `machine:
   install:
     disk: /dev/the-disk-the-patch-names
+    image: factory.example.invalid/metal-installer@sha256:0000000000000000000000000000000000000000000000000000000000000000
 `
 	talosconfigDocument = `context: t0
 contexts:
@@ -95,6 +104,20 @@ func (n theNode) holding(bundle citypes.Secret) theNode {
 
 func handlersReaching(node theNode) Handlers {
 	return newHandlers(machineconfigcontroller.New(fsadapter.New(), talossecretsadapter.New(), node, node.registry))
+}
+
+func TestALegacyInstallImageIsNeverReadAndTheDeclareIsRefusedNamingTheUnattendedInstallDocument(t *testing.T) {
+	root := writeThrowawayCluster(t)
+	require.NoError(t, os.WriteFile(filepath.Join(root, "patch.yaml"), []byte(legacyPatchDocument), 0o600))
+
+	_, err := handlersReaching(aNode(t).inMaintenance()).
+		Declare(context.Background(), DeclareInput{Root: root, Spec: declaredSpec()})
+
+	require.Error(t, err)
+	assert.Equal(t,
+		"reading the installer image of cluster t0: the rendered config holds no installer image "+
+			"in an UnattendedInstallConfig document. declare installer.image there, pinned by digest",
+		err.Error())
 }
 
 func TestTheDeclareToolOnANodeInMaintenanceAnswersARenderedControlPlaneConfigThenTheBootstrapThenTheBundle(t *testing.T) {

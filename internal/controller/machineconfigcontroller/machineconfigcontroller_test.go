@@ -88,7 +88,7 @@ func aRendererFor(t *testing.T, bundle string) *machineconfigcontrollermock.Mock
 	renderer.EXPECT().
 		MachineConfig(citypes.Secret(loadedBundle), theCluster(), patchText).
 		Return(citypes.Secret(renderedConfig), nil).Maybe()
-	renderer.EXPECT().InstallerImage(citypes.Secret(renderedConfig)).Return("", nil).Maybe()
+	renderer.EXPECT().InstallerImage(citypes.Secret(renderedConfig)).Return(aDigestOnlyInstaller, nil).Maybe()
 
 	return renderer
 }
@@ -237,7 +237,7 @@ func TestTheRendererReceivesTheLoadedBundleTheClusterEndpointBuiltFromTheFirstCo
 	renderer.EXPECT().
 		MachineConfig(citypes.Secret(loadedBundle), theCluster(), patchText).
 		Return(citypes.Secret(renderedConfig), nil).Once()
-	renderer.EXPECT().InstallerImage(citypes.Secret(renderedConfig)).Return("", nil).Once()
+	renderer.EXPECT().InstallerImage(citypes.Secret(renderedConfig)).Return(aDigestOnlyInstaller, nil).Once()
 
 	_, err := declare(t, filesOnDisk(t), renderer, aNodeInMaintenance(t), fullSpec())
 
@@ -520,7 +520,55 @@ func TestNoRefusalEverCarriesBundlePatchConfigOrTalosconfigBytes(t *testing.T) {
 	}
 }
 
-const aDigestNoRegistryServes = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+const (
+	aDigestNoRegistryServes = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+	aDigestOnlyInstaller    = "factory.example.invalid/metal-installer@" + aDigestNoRegistryServes
+)
+
+func TestAnInstallerImageWithNoDigestIsRefusedNamingTheReferenceWithNoRegistryCall(t *testing.T) {
+	exported(t)
+
+	for name, reference := range map[string]string{
+		"a tag and no digest":           "factory.example.invalid/metal-installer:v1.14.0",
+		"a registry port and no digest": "registry.example.invalid:5000/metal-installer:v1.14.0",
+		"no tag and no digest":          "factory.example.invalid/metal-installer",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := declare(t, filesOnDisk(t), aMintingRendererPinning(t, reference), aNodeInMaintenance(t), fullSpec())
+			require.Error(t, err)
+			assert.Equal(t,
+				"checking the installer image "+reference+" of cluster t0: it names no digest, "+
+					"so a rebuild behind its tag would change what installs. pin it by digest",
+				err.Error())
+		})
+	}
+}
+
+func TestAnInstallerImageWithADigestAndNoTagIsDeclaredWithNoRegistryCall(t *testing.T) {
+	exported(t)
+
+	for name, reference := range map[string]string{
+		"a digest":                   aDigestOnlyInstaller,
+		"a registry port and digest": "registry.example.invalid:5000/metal-installer@" + aDigestNoRegistryServes,
+	} {
+		t.Run(name, func(t *testing.T) {
+			out, err := declare(t, filesOnDisk(t), aMintingRendererPinning(t, reference), aNodeInMaintenance(t), fullSpec())
+			require.NoError(t, err)
+			require.Len(t, out.Resources, 3)
+		})
+	}
+}
+
+func TestARenderedConfigWithNoInstallerImageInItsUnattendedInstallDocumentIsRefusedNamingTheDocument(t *testing.T) {
+	exported(t)
+
+	_, err := declare(t, filesOnDisk(t), aMintingRendererPinning(t, ""), aNodeInMaintenance(t), fullSpec())
+	require.Error(t, err)
+	assert.Equal(t,
+		"reading the installer image of cluster t0: the rendered config holds no installer image "+
+			"in an UnattendedInstallConfig document. declare installer.image there, pinned by digest",
+		err.Error())
+}
 
 func aRegistryServingAnInstaller(t *testing.T) (string, string) {
 	t.Helper()

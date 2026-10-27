@@ -99,11 +99,16 @@ between them, so a second comparison here would be a second authority over
 the same question.
 
 The engine reads the installer image from the UnattendedInstallConfig
-document of the rendered config. When the image pins both a tag and a
-digest, the engine resolves the tag against its registry anonymously and
-refuses by name a tag that resolves to another digest. The refusal names the
-image, the tag, the resolved digest and the pinned digest. A registry that
-cannot be reached is an error naming the image.
+document of the rendered config and never from the legacy install field. A
+rendered config with no installer image in that document is refused naming
+the document. An image with no digest is refused naming the image, because a
+rebuild behind its tag would change what installs. An image with a digest
+and no tag passes with no registry call, because a digest never moves. When
+the image pins both a tag and a digest, the engine resolves the tag against
+its registry anonymously and refuses by name a tag that resolves to another
+digest. The refusal names the image, the tag, the resolved digest and the
+pinned digest. A registry that cannot be reached is an error naming the
+image.
 
 Every spec key is required and an absent one is refused by name before
 anything is read. A variable holding nothing is refused naming the

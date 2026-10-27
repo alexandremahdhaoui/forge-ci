@@ -108,7 +108,7 @@ func (c *Controller) Declare(ctx context.Context, in citypes.DeclareInput) (city
 		return citypes.DeclareOutput{}, err
 	}
 
-	if err := c.refuseAnInstallerTagThatMovedOffItsDigest(ctx, cluster.Name, config); err != nil {
+	if err := c.refuseAnInstallerImageNotPinnedByDigest(ctx, cluster.Name, config); err != nil {
 		return citypes.DeclareOutput{}, err
 	}
 
@@ -271,7 +271,7 @@ func (c *Controller) render(
 	return config, nil
 }
 
-func (c *Controller) refuseAnInstallerTagThatMovedOffItsDigest(
+func (c *Controller) refuseAnInstallerImageNotPinnedByDigest(
 	ctx context.Context, clusterName string, config citypes.Secret,
 ) error {
 	reference, err := c.renderer.InstallerImage(config)
@@ -279,8 +279,23 @@ func (c *Controller) refuseAnInstallerTagThatMovedOffItsDigest(
 		return fmt.Errorf("reading the installer image of cluster %s: %w", clusterName, err)
 	}
 
-	tagged, tag, pinned, both := tagAndDigestOf(reference)
-	if !both {
+	if reference == "" {
+		return fmt.Errorf(
+			"reading the installer image of cluster %s: the rendered config holds no installer image "+
+				"in an UnattendedInstallConfig document. declare installer.image there, pinned by digest",
+			clusterName)
+	}
+
+	tagged, pinned, digested := strings.Cut(reference, "@")
+	if !digested {
+		return fmt.Errorf(
+			"checking the installer image %s of cluster %s: it names no digest, so a rebuild behind its tag "+
+				"would change what installs. pin it by digest",
+			reference, clusterName)
+	}
+
+	tag, named := tagOf(tagged)
+	if !named {
 		return nil
 	}
 
@@ -298,18 +313,13 @@ func (c *Controller) refuseAnInstallerTagThatMovedOffItsDigest(
 	return nil
 }
 
-func tagAndDigestOf(reference string) (tagged, tag, digest string, both bool) {
-	tagged, digest, pinned := strings.Cut(reference, "@")
-	if !pinned {
-		return "", "", "", false
+func tagOf(repository string) (string, bool) {
+	colon := strings.LastIndex(repository, ":")
+	if colon <= strings.LastIndex(repository, "/") {
+		return "", false
 	}
 
-	colon := strings.LastIndex(tagged, ":")
-	if colon <= strings.LastIndex(tagged, "/") {
-		return "", "", "", false
-	}
-
-	return tagged, tagged[colon+1:], digest, true
+	return repository[colon+1:], true
 }
 
 func requiredString(spec map[string]any, key string) (string, error) {
