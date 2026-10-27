@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/execadapter"
+	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/forgeadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/fsadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/gitadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/computecontroller"
@@ -37,6 +38,17 @@ func (s *stubHarvester) Harvest(dir string, since time.Time) (*citypes.ForgeResu
 	s.since = since
 
 	return s.result, s.err
+}
+
+func compute(
+	t *testing.T, runner execadapter.Runner, harvester forgeadapter.Harvester, fs fsadapter.FS, git gitadapter.Git,
+) *computecontroller.Controller {
+	t.Helper()
+
+	ctrl, err := computecontroller.New(runner, harvester, fs, git, nil)
+	require.NoError(t, err)
+
+	return ctrl
 }
 
 func passing() execadapter.Result { return execadapter.Result{Stdout: "ok\n"} }
@@ -87,7 +99,7 @@ func TestACheckoutWhoseGitIgnoresEnvrcGetsAnEmptyOneBeforeItsTargetRuns(t *testi
 		}).
 		Return(passing(), nil).Once()
 
-	out, err := computecontroller.New(runner, nil, fsadapter.New(), realGit(), nil).Run(context.Background(), in)
+	out, err := compute(t, runner, &stubHarvester{}, fsadapter.New(), realGit()).Run(context.Background(), in)
 	require.NoError(t, err)
 	require.Equal(t, citypes.StatusPassed, out.Status)
 }
@@ -100,7 +112,7 @@ func TestAnExistingEnvrcIsNeverOverwritten(t *testing.T) {
 	runner, in := runningBuildIn(t, dir)
 	runner.EXPECT().RunEnv(mock.Anything, dir, mock.Anything, "forge", "test-all").Return(passing(), nil).Once()
 
-	_, err := computecontroller.New(runner, nil, fsadapter.New(), gitadaptermock.NewMockGit(t), nil).Run(context.Background(), in)
+	_, err := compute(t, runner, &stubHarvester{}, fsadapter.New(), gitadaptermock.NewMockGit(t)).Run(context.Background(), in)
 	require.NoError(t, err)
 
 	content, err := os.ReadFile(envrc)
@@ -114,7 +126,7 @@ func TestADirectoryThatIsNoGitRepositoryGetsNoEnvrcAndItsTargetStillRuns(t *test
 	runner, in := runningBuildIn(t, dir)
 	runner.EXPECT().RunEnv(mock.Anything, dir, mock.Anything, "forge", "test-all").Return(passing(), nil).Once()
 
-	out, err := computecontroller.New(runner, nil, fsadapter.New(), realGit(), nil).Run(context.Background(), in)
+	out, err := compute(t, runner, &stubHarvester{}, fsadapter.New(), realGit()).Run(context.Background(), in)
 	require.NoError(t, err)
 	require.Equal(t, citypes.StatusPassed, out.Status)
 	require.NoFileExists(t, filepath.Join(dir, ".envrc"))
@@ -125,7 +137,7 @@ func TestACheckoutWithNoEnvrcWhoseGitDoesNotIgnoreItIsRefusedByNameBeforeItsTarg
 
 	runner, in := runningBuildIn(t, dir)
 
-	_, err := computecontroller.New(runner, nil, fsadapter.New(), realGit(), nil).Run(context.Background(), in)
+	_, err := compute(t, runner, &stubHarvester{}, fsadapter.New(), realGit()).Run(context.Background(), in)
 	require.EqualError(t, err, "running target \"build\" in "+dir+": it holds no .envrc and its git does not ignore .envrc, "+
 		"so the engine will not write one git could carry. add /.envrc to its .gitignore")
 	require.NoFileExists(t, filepath.Join(dir, ".envrc"))
@@ -138,7 +150,7 @@ func TestAMissingCheckoutGetsNoEnvrcAndTheRunnerReportsIt(t *testing.T) {
 	runner.EXPECT().RunEnv(mock.Anything, missing, mock.Anything, "forge", "test-all").
 		Return(execadapter.Result{}, errBoom).Once()
 
-	_, err := computecontroller.New(runner, nil, fsadapter.New(), gitadaptermock.NewMockGit(t), nil).Run(context.Background(), in)
+	_, err := compute(t, runner, &stubHarvester{}, fsadapter.New(), gitadaptermock.NewMockGit(t)).Run(context.Background(), in)
 	require.ErrorIs(t, err, errBoom)
 	require.NoDirExists(t, missing, "the engine never creates a checkout to hold an .envrc")
 }
@@ -179,7 +191,7 @@ func TestAFailureGivingACloneItsEnvrcIsAnErrorNamingTheDir(t *testing.T) {
 			git := gitadaptermock.NewMockGit(t)
 			arrange(fs, git)
 
-			_, err := computecontroller.New(execadaptermock.NewMockRunner(t), nil, fs, git, nil).Run(context.Background(), citypes.RunInput{
+			_, err := compute(t, execadaptermock.NewMockRunner(t), &stubHarvester{}, fs, git).Run(context.Background(), citypes.RunInput{
 				Root:    "/work",
 				Targets: []citypes.Target{{Alias: "build", Binary: "forge", Args: []string{"test-all"}}},
 			})
@@ -195,7 +207,7 @@ func TestForgeTargetRunsInTheNamedRepo(t *testing.T) {
 		RunEnv(mock.Anything, "/work/golden-rust", mock.Anything, "forge", "test-all").
 		Return(passing(), nil).Once()
 
-	out, err := computecontroller.New(runner, nil, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t), nil).Run(context.Background(), citypes.RunInput{
+	out, err := compute(t, runner, &stubHarvester{}, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t)).Run(context.Background(), citypes.RunInput{
 		Root:    "/work",
 		Targets: []citypes.Target{{Alias: "build", Binary: "forge", Args: []string{"test-all"}, In: []string{"golden-rust"}}},
 	})
@@ -224,7 +236,7 @@ func TestSyncConvergesTheWorkspaceBeforeAnyTarget(t *testing.T) {
 	runner.EXPECT().RunEnv(mock.Anything, "/work/golden-rust", mock.Anything, "forge", "test-all").
 		RunAndReturn(record("target")).Once()
 
-	out, err := computecontroller.New(runner, nil, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t), nil).Run(context.Background(), citypes.RunInput{
+	out, err := compute(t, runner, &stubHarvester{}, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t)).Run(context.Background(), citypes.RunInput{
 		Root:    "/work",
 		Sync:    true,
 		Targets: []citypes.Target{{Alias: "build", Binary: "forge", Args: []string{"test-all"}, In: []string{"golden-rust"}}},
@@ -240,7 +252,7 @@ func TestAFailingConvergenceFailsTheRunAndStopsIt(t *testing.T) {
 	runner.EXPECT().RunEnv(mock.Anything, "/work", mock.Anything, "forge-factory", "sync").
 		Return(execadapter.Result{ExitCode: 1, Stderr: "no engine is registered\n"}, nil).Once()
 
-	out, err := computecontroller.New(runner, nil, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t), nil).Run(context.Background(), citypes.RunInput{
+	out, err := compute(t, runner, &stubHarvester{}, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t)).Run(context.Background(), citypes.RunInput{
 		Root:    "/work",
 		Sync:    true,
 		Targets: []citypes.Target{{Alias: "build", Binary: "forge", Args: []string{"test-all"}, In: []string{"golden-rust"}}},
@@ -256,7 +268,7 @@ func TestNoSyncMeansNoConvergence(t *testing.T) {
 	runner.EXPECT().RunEnv(mock.Anything, "/work/golden-rust", mock.Anything, "forge", "test-all").
 		Return(passing(), nil).Once()
 
-	out, err := computecontroller.New(runner, nil, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t), nil).Run(context.Background(), citypes.RunInput{
+	out, err := compute(t, runner, &stubHarvester{}, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t)).Run(context.Background(), citypes.RunInput{
 		Root:    "/work",
 		Targets: []citypes.Target{{Alias: "build", Binary: "forge", Args: []string{"test-all"}, In: []string{"golden-rust"}}},
 	})
@@ -269,7 +281,7 @@ func TestNoRepoMeansTheRoot(t *testing.T) {
 	runner := execadaptermock.NewMockRunner(t)
 	runner.EXPECT().RunEnv(mock.Anything, "/work", mock.Anything, "forge-ci", "apply").Return(passing(), nil).Once()
 
-	out, err := computecontroller.New(runner, nil, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t), nil).Run(context.Background(), citypes.RunInput{
+	out, err := compute(t, runner, &stubHarvester{}, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t)).Run(context.Background(), citypes.RunInput{
 		Root:    "/work",
 		Targets: []citypes.Target{{Alias: "self", Binary: "forge-ci", Args: []string{"apply"}}},
 	})
@@ -282,7 +294,7 @@ func TestACheckoutPathWins(t *testing.T) {
 	runner.EXPECT().RunEnv(mock.Anything, "/checkouts/abc/golden-rust", mock.Anything, "forge", "test-all").
 		Return(passing(), nil).Once()
 
-	_, err := computecontroller.New(runner, nil, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t), nil).Run(context.Background(), citypes.RunInput{
+	_, err := compute(t, runner, &stubHarvester{}, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t)).Run(context.Background(), citypes.RunInput{
 		Root:    "/work",
 		Repos:   []citypes.RepoCheckout{{Name: "golden-rust", Path: "/checkouts/abc/golden-rust"}},
 		Targets: []citypes.Target{{Alias: "build", Binary: "forge", Args: []string{"test-all"}, In: []string{"golden-rust"}}},
@@ -295,7 +307,7 @@ func TestAFailingTestIsNotAnError(t *testing.T) {
 	runner.EXPECT().RunEnv(mock.Anything, mock.Anything, mock.Anything, "forge", "test-all").
 		Return(execadapter.Result{ExitCode: 1, Stderr: "two tests failed\n"}, nil).Once()
 
-	out, err := computecontroller.New(runner, nil, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t), nil).Run(context.Background(), citypes.RunInput{
+	out, err := compute(t, runner, &stubHarvester{}, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t)).Run(context.Background(), citypes.RunInput{
 		Root:    "/work",
 		Targets: []citypes.Target{{Alias: "build", Binary: "forge", Args: []string{"test-all"}}},
 	})
@@ -310,7 +322,7 @@ func TestABrokenRunnerIsAnError(t *testing.T) {
 	runner.EXPECT().RunEnv(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 		Return(execadapter.Result{}, errBoom).Once()
 
-	_, err := computecontroller.New(runner, nil, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t), nil).Run(context.Background(), citypes.RunInput{
+	_, err := compute(t, runner, &stubHarvester{}, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t)).Run(context.Background(), citypes.RunInput{
 		Root:    "/work",
 		Targets: []citypes.Target{{Alias: "build", Binary: "forge", Args: []string{"test-all"}}},
 	})
@@ -323,7 +335,7 @@ func TestAFailedTargetStopsTheRest(t *testing.T) {
 	runner.EXPECT().RunEnv(mock.Anything, mock.Anything, mock.Anything, "forge", "one").
 		Return(execadapter.Result{ExitCode: 2}, nil).Once()
 
-	out, err := computecontroller.New(runner, nil, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t), nil).Run(context.Background(), citypes.RunInput{
+	out, err := compute(t, runner, &stubHarvester{}, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t)).Run(context.Background(), citypes.RunInput{
 		Root: "/work",
 		Targets: []citypes.Target{
 			{Alias: "first", Binary: "forge", Args: []string{"one"}},
@@ -340,7 +352,7 @@ func TestParamsAreTemplatedIntoTheTarget(t *testing.T) {
 		RunEnv(mock.Anything, "/work", mock.Anything, "forge", "run", "deploy", "--region", "eu-west-1", "--cell", "a").
 		Return(passing(), nil).Once()
 
-	_, err := computecontroller.New(runner, nil, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t), nil).Run(context.Background(), citypes.RunInput{
+	_, err := compute(t, runner, &stubHarvester{}, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t)).Run(context.Background(), citypes.RunInput{
 		Root:    "/work",
 		Params:  map[string]string{"region": "eu-west-1", "cell": "a"},
 		Targets: []citypes.Target{{Alias: "deploy", Binary: "forge", Args: []string{"run", "deploy", "--region", "{{.Params.region}}", "--cell", "{{.Params.cell}}"}}},
@@ -351,7 +363,7 @@ func TestParamsAreTemplatedIntoTheTarget(t *testing.T) {
 func TestAMissingParamIsAnError(t *testing.T) {
 	runner := execadaptermock.NewMockRunner(t)
 
-	_, err := computecontroller.New(runner, nil, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t), nil).Run(context.Background(), citypes.RunInput{
+	_, err := compute(t, runner, &stubHarvester{}, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t)).Run(context.Background(), citypes.RunInput{
 		Root:    "/work",
 		Targets: []citypes.Target{{Alias: "deploy", Binary: "forge", Args: []string{"run", "deploy", "--cell", "{{.Params.cell}}"}}},
 	})
@@ -362,7 +374,7 @@ func TestAMissingParamIsAnError(t *testing.T) {
 func TestABrokenTemplateIsAnError(t *testing.T) {
 	runner := execadaptermock.NewMockRunner(t)
 
-	_, err := computecontroller.New(runner, nil, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t), nil).Run(context.Background(), citypes.RunInput{
+	_, err := compute(t, runner, &stubHarvester{}, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t)).Run(context.Background(), citypes.RunInput{
 		Root:    "/work",
 		Targets: []citypes.Target{{Alias: "deploy", Binary: "forge", Args: []string{"run", "{{.Params."}}},
 	})
@@ -377,7 +389,7 @@ func TestATargetNeedsABinary(t *testing.T) {
 		{Alias: "neither"},
 		{Alias: "blank", Binary: "  ", Args: []string{"a"}},
 	} {
-		_, err := computecontroller.New(runner, nil, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t), nil).Run(context.Background(), citypes.RunInput{
+		_, err := compute(t, runner, &stubHarvester{}, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t)).Run(context.Background(), citypes.RunInput{
 			Root: "/work", Targets: []citypes.Target{target},
 		})
 		require.ErrorIs(t, err, computecontroller.ErrTarget)
@@ -385,7 +397,7 @@ func TestATargetNeedsABinary(t *testing.T) {
 }
 
 func TestNoTargetsIsAnError(t *testing.T) {
-	_, err := computecontroller.New(execadaptermock.NewMockRunner(t), nil, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t), nil).
+	_, err := compute(t, execadaptermock.NewMockRunner(t), &stubHarvester{}, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t)).
 		Run(context.Background(), citypes.RunInput{Root: "/work"})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "no targets given")
@@ -401,7 +413,7 @@ func TestForgeResultsAreHarvestedAndMerged(t *testing.T) {
 		TestReports: []forge.TestReport{{Stage: "unit", Status: "passed"}},
 	}}
 
-	out, err := computecontroller.New(runner, h, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t), nil).Run(context.Background(), citypes.RunInput{
+	out, err := compute(t, runner, h, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t)).Run(context.Background(), citypes.RunInput{
 		Root:    "/work",
 		Targets: []citypes.Target{{Alias: "build", Binary: "forge", Args: []string{"test-all"}, In: []string{"a", "b"}}},
 	})
@@ -419,7 +431,7 @@ func TestTheRevisionReachesTheTargetEnvironment(t *testing.T) {
 			map[string]string{"FORGE_CI_REVISION": "abc123def456"}, "forge", "test-all").
 		Return(passing(), nil).Once()
 
-	_, err := computecontroller.New(runner, nil, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t), nil).Run(context.Background(), citypes.RunInput{
+	_, err := compute(t, runner, &stubHarvester{}, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t)).Run(context.Background(), citypes.RunInput{
 		Root:     "/work",
 		Revision: "abc123def456",
 		Targets:  []citypes.Target{{Alias: "build", Binary: "forge", Args: []string{"test-all"}}},
@@ -440,7 +452,7 @@ func TestHarvestedArtifactLocationsAreRebasedOntoTheRoot(t *testing.T) {
 		},
 	}}
 
-	out, err := computecontroller.New(runner, h, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t), nil).Run(context.Background(), citypes.RunInput{
+	out, err := compute(t, runner, h, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t)).Run(context.Background(), citypes.RunInput{
 		Root:    "/work",
 		Targets: []citypes.Target{{Alias: "build", Binary: "forge", Args: []string{"test-all"}, In: []string{"member"}}},
 	})
@@ -454,7 +466,7 @@ func TestNothingToHarvestIsFine(t *testing.T) {
 	runner := execadaptermock.NewMockRunner(t)
 	runner.EXPECT().RunEnv(mock.Anything, mock.Anything, mock.Anything, "forge", "test-all").Return(passing(), nil).Once()
 
-	out, err := computecontroller.New(runner, &stubHarvester{}, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t), nil).Run(context.Background(), citypes.RunInput{
+	out, err := compute(t, runner, &stubHarvester{}, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t)).Run(context.Background(), citypes.RunInput{
 		Root: "/work", Targets: []citypes.Target{{Alias: "build", Binary: "forge", Args: []string{"test-all"}}},
 	})
 	require.NoError(t, err)
@@ -465,7 +477,7 @@ func TestAHarvestFailureIsAnError(t *testing.T) {
 	runner := execadaptermock.NewMockRunner(t)
 	runner.EXPECT().RunEnv(mock.Anything, mock.Anything, mock.Anything, "forge", "test-all").Return(passing(), nil).Once()
 
-	_, err := computecontroller.New(runner, &stubHarvester{err: errBoom}, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t), nil).
+	_, err := compute(t, runner, &stubHarvester{err: errBoom}, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t)).
 		Run(context.Background(), citypes.RunInput{
 			Root: "/work", Targets: []citypes.Target{{Alias: "build", Binary: "forge", Args: []string{"test-all"}}},
 		})
@@ -478,7 +490,7 @@ func TestEveryTargetIsHarvested(t *testing.T) {
 
 	h := &stubHarvester{result: &citypes.ForgeResult{Artifacts: []forge.Artifact{{Name: "x"}}}}
 
-	out, err := computecontroller.New(runner, h, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t), nil).Run(context.Background(), citypes.RunInput{
+	out, err := compute(t, runner, h, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t)).Run(context.Background(), citypes.RunInput{
 		Root: "/work", Targets: []citypes.Target{{Alias: "self", Binary: "forge-ci", Args: []string{"apply"}}},
 	})
 	require.NoError(t, err)
@@ -487,9 +499,17 @@ func TestEveryTargetIsHarvested(t *testing.T) {
 }
 
 func TestComputeDeclaresNoResources(t *testing.T) {
-	out, err := computecontroller.New(nil, nil, nil, nil, nil).Declare(nil)
+	out, err := compute(t, nil, &stubHarvester{}, nil, nil).Declare(nil)
 	require.NoError(t, err)
 	require.Empty(t, out.Resources)
+}
+
+func TestANilHarvesterIsRefusedByNameAtConstruction(t *testing.T) {
+	ctrl, err := computecontroller.New(
+		execadaptermock.NewMockRunner(t), nil, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t), nil)
+	require.EqualError(t, err, "building the compute controller: it was handed no harvester, "+
+		"and every run reads what forge built through one")
+	require.Nil(t, ctrl)
 }
 
 func TestTheHarvesterIsToldWhenTheRunStarted(t *testing.T) {
@@ -500,10 +520,13 @@ func TestTheHarvesterIsToldWhenTheRunStarted(t *testing.T) {
 
 	h := &stubHarvester{result: &citypes.ForgeResult{}}
 
-	_, err := computecontroller.New(runner, h, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t), func() time.Time { return started }).
-		Run(context.Background(), citypes.RunInput{
-			Root: "/work", Targets: []citypes.Target{{Alias: "build", Binary: "forge", Args: []string{"test-all"}}},
-		})
+	ctrl, err := computecontroller.New(
+		runner, h, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t), func() time.Time { return started })
+	require.NoError(t, err)
+
+	_, err = ctrl.Run(context.Background(), citypes.RunInput{
+		Root: "/work", Targets: []citypes.Target{{Alias: "build", Binary: "forge", Args: []string{"test-all"}}},
+	})
 	require.NoError(t, err)
 	require.Equal(t, started, h.since)
 }
@@ -520,7 +543,7 @@ func TestWithNoNeedsTheDirsRunOneAtATimeInOrder(t *testing.T) {
 			return passing(), nil
 		}).Times(3)
 
-	out, err := computecontroller.New(runner, nil, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t), nil).Run(context.Background(), citypes.RunInput{
+	out, err := compute(t, runner, &stubHarvester{}, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t)).Run(context.Background(), citypes.RunInput{
 		Root: "/work",
 		Repos: []citypes.RepoCheckout{
 			{Name: "c"}, {Name: "a"}, {Name: "b"},
@@ -559,7 +582,7 @@ func TestAWaveRunsItsMembersAtOnce(t *testing.T) {
 	done := make(chan citypes.RunOutput, 1)
 
 	go func() {
-		out, err := computecontroller.New(runner, nil, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t), nil).Run(context.Background(), citypes.RunInput{
+		out, err := compute(t, runner, &stubHarvester{}, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t)).Run(context.Background(), citypes.RunInput{
 			Root: "/work",
 			Repos: []citypes.RepoCheckout{
 				{Name: "one"},
@@ -604,7 +627,7 @@ func TestAFailedWaveFinishesAndStopsTheNext(t *testing.T) {
 	runner.EXPECT().RunEnv(mock.Anything, "/work/two", mock.Anything, "forge", "test-all").
 		Return(execadapter.Result{ExitCode: 1, Stdout: "two broke\n"}, nil).Once()
 
-	out, err := computecontroller.New(runner, nil, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t), nil).Run(context.Background(), citypes.RunInput{
+	out, err := compute(t, runner, &stubHarvester{}, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t)).Run(context.Background(), citypes.RunInput{
 		Root: "/work",
 		Repos: []citypes.RepoCheckout{
 			{Name: "one"},
@@ -622,7 +645,7 @@ func TestAFailedWaveFinishesAndStopsTheNext(t *testing.T) {
 }
 
 func TestACycleIsAnError(t *testing.T) {
-	out, err := computecontroller.New(execadaptermock.NewMockRunner(t), nil, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t), nil).
+	out, err := compute(t, execadaptermock.NewMockRunner(t), &stubHarvester{}, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t)).
 		Run(context.Background(), citypes.RunInput{
 			Root: "/work",
 			Repos: []citypes.RepoCheckout{
@@ -641,7 +664,7 @@ func TestAnArgumentHoldingASpaceStaysOneArgument(t *testing.T) {
 		RunEnv(mock.Anything, "/work", mock.Anything, "sh", "-c", "echo one two").
 		Return(passing(), nil).Once()
 
-	_, err := computecontroller.New(runner, nil, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t), nil).Run(context.Background(), citypes.RunInput{
+	_, err := compute(t, runner, &stubHarvester{}, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t)).Run(context.Background(), citypes.RunInput{
 		Root:    "/work",
 		Targets: []citypes.Target{{Alias: "say", Binary: "sh", Args: []string{"-c", "echo one two"}}},
 	})
@@ -665,7 +688,7 @@ func TestALongOutputIsTruncatedFromTheFrontByTheSpec(t *testing.T) {
 				RunEnv(mock.Anything, "/work/repo", mock.Anything, "forge", "test-all").
 				Return(execadapter.Result{Stdout: long, ExitCode: 1}, nil)
 
-			out, err := computecontroller.New(runner, nil, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t), nil).Run(context.Background(), citypes.RunInput{
+			out, err := compute(t, runner, &stubHarvester{}, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t)).Run(context.Background(), citypes.RunInput{
 				Revision: "abc", Root: "/work", Spec: tc.spec,
 				Targets: []citypes.Target{{Alias: "t", Binary: "forge", Args: []string{"test-all"}, In: []string{"repo"}}},
 			})

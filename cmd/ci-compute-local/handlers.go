@@ -17,11 +17,15 @@ import (
 func NewHandlers() Handlers {
 	files := fsadapter.New()
 	runner := execadapter.New()
-	ctrl := computecontroller.New(runner, forgeadapter.New(files), files, gitadapter.New(runner), nil)
+	ctrl, built := computecontroller.New(runner, forgeadapter.New(files), files, gitadapter.New(runner), nil)
 	artifactDir := artifactdircontroller.New(files)
 
 	return Handlers{
 		Declare: func(_ context.Context, in DeclareInput) (*DeclareOutput, error) {
+			if built != nil {
+				return nil, built
+			}
+
 			out, err := ctrl.Declare(in.Spec)
 			if err != nil {
 				return nil, err
@@ -30,6 +34,10 @@ func NewHandlers() Handlers {
 			return &DeclareOutput{Resources: fromResources(out.Resources)}, nil
 		},
 		Run: func(ctx context.Context, in RunInput) (*RunOutput, error) {
+			if built != nil {
+				return nil, built
+			}
+
 			out, err := ctrl.Run(ctx, toRunInput(in))
 			if err != nil {
 				return nil, err

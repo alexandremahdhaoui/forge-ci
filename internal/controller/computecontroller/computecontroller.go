@@ -31,12 +31,18 @@ type Controller struct {
 func New(
 	runner execadapter.Runner, harvester forgeadapter.Harvester, fs fsadapter.FS, git gitadapter.Git,
 	now func() time.Time,
-) *Controller {
+) (*Controller, error) {
+	if harvester == nil {
+		return nil, errors.New(
+			"building the compute controller: it was handed no harvester, " +
+				"and every run reads what forge built through one")
+	}
+
 	if now == nil {
 		now = time.Now
 	}
 
-	return &Controller{runner: runner, harvester: harvester, fs: fs, git: git, now: now}
+	return &Controller{runner: runner, harvester: harvester, fs: fs, git: git, now: now}, nil
 }
 
 func (c *Controller) Declare(spec map[string]any) (citypes.DeclareOutput, error) {
@@ -124,10 +130,6 @@ func (c *Controller) Run(ctx context.Context, in citypes.RunInput) (citypes.RunO
 					if res.ExitCode != 0 && out.Status != citypes.StatusFailed {
 						out.Status = citypes.StatusFailed
 						out.Message = fmt.Sprintf("target %q exited %d in %s", target.Alias, res.ExitCode, dir)
-					}
-
-					if c.harvester == nil {
-						return
 					}
 
 					harvested, err := c.harvester.Harvest(dir, started)
