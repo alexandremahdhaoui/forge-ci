@@ -14,7 +14,7 @@ require (
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/siderolabs/talos/pkg/machinery v1.14.0
 	github.com/stretchr/testify v1.12.1
-	golang.org/x/crypto v0.55.0
+	golang.org/x/crypto v0.56.0
 	helm.sh/helm/v4 v4.3.0
 	k8s.io/api v0.37.0
 	k8s.io/apimachinery v0.37.0
