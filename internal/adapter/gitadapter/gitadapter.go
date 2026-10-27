@@ -21,62 +21,26 @@ type Git interface {
 	IsRepo(ctx context.Context, dir string) (bool, error)
 	IgnoresPath(ctx context.Context, dir, path string) (bool, error)
 	Add(ctx context.Context, dir, path string) error
-	// Commit records what paths hold. Callers pass the paths they staged:
-	// a pathspec-less commit takes the whole index, including a human's.
 	Commit(ctx context.Context, dir, message string, paths ...string) error
 	HeadSHA(ctx context.Context, dir string) (string, error)
 	RemoteSHA(ctx context.Context, url, ref string) (string, error)
-	// Staged reports whether these paths have anything waiting in the index.
-	// Scoped for the same reason Commit is.
 	Staged(ctx context.Context, dir string, paths ...string) (bool, error)
 	LatestTag(ctx context.Context, dir, prefix string) (string, error)
 	SubjectsSince(ctx context.Context, dir, tag string) ([]string, error)
 	WorktreeHash(ctx context.Context, dir string, exclude ...string) (string, error)
-	// TreeHash is the identity of what HEAD holds, minus the paths the
-	// patterns name. Two commits with the same tree hash carry the same
-	// files, whatever their messages say; two that differ only under an
-	// ignored path hash the same. Patterns are root-relative globs: "/*.md"
-	// is the root's markdown, "docs/**" is everything under docs.
 	TreeHash(ctx context.Context, dir string, ignore ...string) (string, error)
-	// Tag points a tag at one commit and pushes it.
 	Tag(ctx context.Context, dir, tag, sha string) error
-	// TagAt answers the commit a tag points at, and whether dir carries the
-	// tag at all.
 	TagAt(ctx context.Context, dir, tag string) (string, bool, error)
-	// RemoteTagAt answers where origin's copy of the tag points, and whether
-	// origin carries it. The local list is not the authority: a CI checkout
-	// is a fresh clone with no tags, so only the remote knows what was
-	// already published. An unreachable remote is an error, never "absent".
 	RemoteTagAt(ctx context.Context, dir, tag string) (string, bool, error)
-	// HasRemote reports whether dir has an origin to push to. A checkout
-	// with none is a legitimate state, not a failure.
 	HasRemote(ctx context.Context, dir string) (bool, error)
-	// Branch answers the branch HEAD is on. A detached HEAD answers an
-	// empty string, which nothing can push.
 	Branch(ctx context.Context, dir string) (string, error)
-	// Push sends the branch to origin. A rejected push is ErrRejected: the
-	// remote moved, and only a human can decide what wins.
 	Push(ctx context.Context, dir, branch string) error
-	// PullRebase fetches origin and replays local commits on top. It is how
-	// a store whose records are one file each recovers from a concurrent
-	// run without anybody choosing a winner.
 	PullRebase(ctx context.Context, dir, branch string) error
-	// LFSInstall wires the LFS filters into this one repo's config. It must
-	// run before the first add of an LFS-tracked path - the clean filter is
-	// what turns the blob into a pointer, and adding without it commits the
-	// full content under an attribute that promises otherwise. A machine
-	// without git-lfs is an error that names the missing tool.
 	LFSInstall(ctx context.Context, dir string) error
 }
 
-// ErrNoRemote marks a checkout with no origin. It is not a failure: a
-// workspace on a laptop has one, a scratch fixture does not, and a manager
-// that settles by pushing simply has nowhere to send it.
 var ErrNoRemote = errors.New("the checkout has no origin to push to")
 
-// ErrRejected marks a push the remote refused, which is a remote that moved
-// under this run. Merging is somebody's decision and never the pipeline's,
-// so this is fatal and stays fatal.
 var ErrRejected = errors.New("the remote rejected the push")
 
 type CLI struct {
@@ -143,10 +107,6 @@ func (g *CLI) IgnoresPath(ctx context.Context, dir, path string) (bool, error) {
 func (g *CLI) Add(ctx context.Context, dir, path string) error {
 	res, err := g.run(ctx, dir, "staging "+path, "add", path)
 
-	// Record keys embed caller-chosen names (a stage called "build", say),
-	// so an unanchored output pattern in the state repo's .gitignore can
-	// swallow a record path. Name the fix, or the refusal reads like a
-	// broken engine.
 	if err != nil && strings.Contains(res.Stderr, ".gitignore") {
 		return fmt.Errorf(
 			"%w - the repo's .gitignore matches this record path; anchor output patterns to the repo root (write /build/, not build/)",
@@ -156,14 +116,6 @@ func (g *CLI) Add(ctx context.Context, dir, path string) error {
 	return err
 }
 
-// Commit records what these paths hold. A commit writes a git object, so it
-// needs an identity the host may not have: see gitident.
-//
-// The pathspec is not decoration. A bare `git commit -m` commits the whole
-// index, so a developer with anything staged had their work published under
-// the pipeline's name and pushed. Both callers stage an explicit list and
-// both were undone by this; passing that same list here is what makes the
-// promise true.
 func (g *CLI) Commit(ctx context.Context, dir, message string, paths ...string) error {
 	args := append(gitident.Args(ctx, g.runner, dir), "commit", "-m", message)
 	args = append(args, pathspec(paths)...)
@@ -173,11 +125,6 @@ func (g *CLI) Commit(ctx context.Context, dir, message string, paths ...string) 
 	return err
 }
 
-// Staged reports whether these paths have anything waiting in the index.
-//
-// It is scoped for the same reason Commit is. Asked about the whole index it
-// answered yes because of somebody else's staged file, and the commit that
-// followed swept that file up.
 func (g *CLI) Staged(ctx context.Context, dir string, paths ...string) (bool, error) {
 	args := append([]string{"diff", "--cached", "--name-only"}, pathspec(paths)...)
 
@@ -189,8 +136,6 @@ func (g *CLI) Staged(ctx context.Context, dir string, paths ...string) (bool, er
 	return strings.TrimSpace(res.Stdout) != "", nil
 }
 
-// pathspec renders paths as a git pathspec. No paths means the whole tree,
-// which both callers must avoid, so they always pass what they staged.
 func pathspec(paths []string) []string {
 	if len(paths) == 0 {
 		return nil
@@ -226,12 +171,6 @@ func (g *CLI) RemoteSHA(ctx context.Context, url, ref string) (string, error) {
 	return fields[0], nil
 }
 
-// WorktreeHash fingerprints a repo's uncommitted changes. Paths in exclude
-// are left out of the measurement, repo-relative: they name the files the
-// factory generates, whose churn is the register moving versions rather
-// than drift. The exclusion applies identically here and wherever the
-// trigger polls, because a poll and an apply that disagree on what counts
-// as a move re-split the two decisions one commit already unified.
 func (g *CLI) WorktreeHash(ctx context.Context, dir string, exclude ...string) (string, error) {
 	pathspec := []string{"--", "."}
 	for _, path := range exclude {
@@ -261,14 +200,6 @@ func (g *CLI) WorktreeHash(ctx context.Context, dir string, exclude ...string) (
 	return hex.EncodeToString(sum[:])[:12], nil
 }
 
-// LatestTag is the highest version this prefix's line carries, without the
-// prefix. A repo with no tag on the line answers empty rather than failing,
-// because a workspace that has never released has nothing to report.
-//
-// The prefix is a namespace. Reading a tag from another prefix would make two
-// factories that share a repo take turns overwriting each other's line, so a
-// tag that does not carry this prefix is not this line's history and is
-// skipped.
 func (g *CLI) LatestTag(ctx context.Context, dir, prefix string) (string, error) {
 	pattern := "v[0-9]*"
 	if prefix != "" {
@@ -292,12 +223,6 @@ func (g *CLI) LatestTag(ctx context.Context, dir, prefix string) (string, error)
 			tag = rest
 		}
 
-		// Only a tag the version rule can read. git sorts every tag it
-		// has, so one legacy tag sorting above the release line - "v1.2",
-		// "wip" - was returned as the previous version, and the whole
-		// release then failed on "not a semver tag", for every member.
-		// A repo that carries release history from before this pipeline
-		// existed is exactly the case this has to survive.
 		if citypes.SemverTag.MatchString(tag) {
 			return tag, nil
 		}
@@ -306,9 +231,6 @@ func (g *CLI) LatestTag(ctx context.Context, dir, prefix string) (string, error)
 	return "", nil
 }
 
-// TreeHash hashes `git ls-tree -r HEAD` with the ignored paths dropped. The
-// blob ids git already computed carry the content, so this reads no file:
-// it is one listing and one sha256 over the lines that survive the filter.
 func (g *CLI) TreeHash(ctx context.Context, dir string, ignore ...string) (string, error) {
 	res, err := g.run(ctx, dir, "listing the tree", "ls-tree", "-r", "HEAD")
 	if err != nil {
@@ -323,8 +245,6 @@ func (g *CLI) TreeHash(ctx context.Context, dir string, ignore ...string) (strin
 			continue
 		}
 
-		// "<mode> <type> <sha>\t<path>": the path is what the patterns
-		// match, the whole line is what the hash covers.
 		_, path, ok := strings.Cut(line, "\t")
 		if !ok || Ignored(path, ignore) {
 			continue
@@ -338,11 +258,6 @@ func (g *CLI) TreeHash(ctx context.Context, dir string, ignore ...string) (strin
 	return hex.EncodeToString(sum[:]), nil
 }
 
-// Ignored answers whether a root-relative path matches any pattern. Three
-// shapes cover what a factory writes: "/*.md" anchors at the root and never
-// crosses a slash; "docs/**" is a directory and everything under it; any
-// other pattern is a plain glob against the whole path and, failing that,
-// against the base name, so "**.md" reads as every markdown file.
 func Ignored(path string, patterns []string) bool {
 	for _, pattern := range patterns {
 		pattern = strings.TrimSpace(pattern)
@@ -386,15 +301,10 @@ func Ignored(path string, patterns []string) bool {
 	return false
 }
 
-// filepathMatch is path.Match on slash-separated paths, which is what git
-// lists whatever the host separator is.
 func filepathMatch(pattern, name string) (bool, error) {
 	return path.Match(pattern, name)
 }
 
-// SubjectsSince is every commit subject a checkout gained after tag. A tag the
-// repo does not carry answers the whole history, which is the right answer for
-// a member joining a line that already exists: all of it is new to that line.
 func (g *CLI) SubjectsSince(ctx context.Context, dir, tag string) ([]string, error) {
 	args := []string{"log", "--no-merges", "--format=%s"}
 
@@ -425,21 +335,6 @@ func (g *CLI) SubjectsSince(ctx context.Context, dir, tag string) ([]string, err
 	return out, nil
 }
 
-// Tag converges origin's tag onto one commit. It decides on the union of
-// local and remote state, because the local list alone lied: a CI checkout
-// is a fresh clone with no tags, so a re-run of an already-published
-// revision read "absent", re-created the tag, and the push was rejected by
-// the only party that actually knew.
-//
-//   - remote carries the tag at sha: convergence, a no-op.
-//   - remote carries it elsewhere: refused. A moved tag changes what a
-//     consumer already pinned.
-//   - remote absent: create the tag if the checkout lacks it, then push.
-//     A local tag already at sha is an interrupted run's leftover, and the
-//     push is what finishes that job.
-//
-// A checkout with no origin skips the remote read and the push: a scratch
-// repo is a legitimate state, and a test fixture is always in it.
 func (g *CLI) Tag(ctx context.Context, dir, tag, sha string) error {
 	hasRemote, err := g.HasRemote(ctx, dir)
 	if err != nil {
@@ -449,9 +344,6 @@ func (g *CLI) Tag(ctx context.Context, dir, tag, sha string) error {
 	if hasRemote {
 		remoteAt, onRemote, err := g.RemoteTagAt(ctx, dir, tag)
 		if err != nil {
-			// Never fall through to "absent": re-creating the tag on a
-			// remote this run could not read is the exact mistake reading
-			// the remote exists to remove.
 			return err
 		}
 
@@ -478,12 +370,6 @@ func (g *CLI) Tag(ctx context.Context, dir, tag, sha string) error {
 	}
 
 	if !exists {
-		// Annotated, with the tag as its message: a lightweight tag dies with
-		// "no tag message" on a machine whose global config signs tags, while an
-		// annotated tag works signed and unsigned alike.
-		//
-		// An annotated tag is an object git writes, so it needs a committer
-		// identity exactly as a commit does, and a runner has none.
 		args := append(gitident.Args(ctx, g.runner, dir), "tag", "-m", tag, tag, sha)
 
 		if _, err := g.run(ctx, dir, "tagging "+tag, args...); err != nil {
@@ -500,11 +386,6 @@ func (g *CLI) Tag(ctx context.Context, dir, tag, sha string) error {
 	return err
 }
 
-// RemoteTagAt reads origin's copy of one tag with ls-remote, asking for the
-// peeled ^{} ref alongside the tag so an annotated tag answers the commit it
-// wraps rather than its own object. Absent is the ordinary first-release
-// case; a remote that cannot be read is an error, because treating it as
-// absent would re-create a tag that may already exist.
 func (g *CLI) RemoteTagAt(ctx context.Context, dir, tag string) (string, bool, error) {
 	res, err := g.run(ctx, dir, "reading tag "+tag+" of origin",
 		"ls-remote", "origin", "refs/tags/"+tag, "refs/tags/"+tag+"^{}")
@@ -538,8 +419,6 @@ func (g *CLI) RemoteTagAt(ctx context.Context, dir, tag string) (string, bool, e
 	return "", false, nil
 }
 
-// LFSInstall configures the LFS filters for one repository. --local keeps it
-// out of the operator's global config: the store opted in, not the machine.
 func (g *CLI) LFSInstall(ctx context.Context, dir string) error {
 	_, err := g.run(ctx, dir, "installing git-lfs filters in "+dir, "lfs", "install", "--local")
 	if err != nil && strings.Contains(err.Error(), "not a git command") {
@@ -568,9 +447,6 @@ func (g *CLI) Branch(ctx context.Context, dir string) (string, error) {
 
 	name := strings.TrimSpace(res.Stdout)
 	if name == "HEAD" {
-		// A detached HEAD is what a CI checkout of a tag looks like. There
-		// is no branch to push, and inventing one would put the commit
-		// somewhere nobody asked for.
 		return "", nil
 	}
 
@@ -595,10 +471,6 @@ func (g *CLI) Push(ctx context.Context, dir, branch string) error {
 	return nil
 }
 
-// PullRebase replays this checkout's commits on top of origin's.
-//
-// It carries an identity for the same reason Commit does: a rebase writes
-// commit objects, and a runner has no ambient one.
 func (g *CLI) PullRebase(ctx context.Context, dir, branch string) error {
 	if _, err := g.run(ctx, dir, "fetching origin in "+dir, "fetch", "origin", branch); err != nil {
 		return err
@@ -611,9 +483,6 @@ func (g *CLI) PullRebase(ctx context.Context, dir, branch string) error {
 	return err
 }
 
-// TagAt answers where a tag points, and whether the repo carries it. A repo
-// that does not have the tag is not an error: that is the ordinary case, and
-// it is what a first release of a member looks like.
 func (g *CLI) TagAt(ctx context.Context, dir, tag string) (string, bool, error) {
 	listed, err := g.run(ctx, dir, "reading tag "+tag, "tag", "--list", tag)
 	if err != nil {
@@ -624,8 +493,6 @@ func (g *CLI) TagAt(ctx context.Context, dir, tag string) (string, bool, error) 
 		return "", false, nil
 	}
 
-	// An annotated tag's own object is not the commit, so rev-list asks for
-	// what it points at. It is a no-op on a lightweight tag.
 	res, err := g.run(ctx, dir, "resolving tag "+tag, "rev-list", "-n", "1", tag)
 	if err != nil {
 		return "", false, err

@@ -130,8 +130,6 @@ func TestAddAndCommit(t *testing.T) {
 	require.NoError(t, g.Commit(context.Background(), "/repo", "ci: x"))
 }
 
-// A host that already names a committer keeps it, so a local run stays
-// attributed to whoever ran it rather than to the engine.
 func TestCommitLeavesAnExistingIdentityAlone(t *testing.T) {
 	r := execadaptermock.NewMockRunner(t)
 	r.EXPECT().Run(mock.Anything, "/repo", "git", "var", "GIT_COMMITTER_IDENT").
@@ -142,9 +140,6 @@ func TestCommitLeavesAnExistingIdentityAlone(t *testing.T) {
 	require.NoError(t, gitadapter.New(r).Commit(context.Background(), "/repo", "ci: x"))
 }
 
-// A runner has no identity and git exits 128 on "empty ident name". The
-// engine supplies its own rather than failing, and turns signing off with it:
-// a host with no identity has no signing key either.
 func TestCommitSuppliesAnIdentityWhenTheHostHasNone(t *testing.T) {
 	r := execadaptermock.NewMockRunner(t)
 	r.EXPECT().Run(mock.Anything, "/repo", "git", "var", "GIT_COMMITTER_IDENT").
@@ -160,10 +155,6 @@ func TestCommitSuppliesAnIdentityWhenTheHostHasNone(t *testing.T) {
 	require.NoError(t, gitadapter.New(r).Commit(context.Background(), "/repo", "ci: x"))
 }
 
-// A state repo whose .gitignore carries an unanchored output pattern (build/
-// instead of /build/) swallows record paths like runs/<rev>/build/x.json.
-// The refusal must name the fix, not read like a broken engine. Live case:
-// forge-self-state blocked every run record this way.
 func TestAnIgnoredRecordPathNamesTheGitignoreFix(t *testing.T) {
 	r := execadaptermock.NewMockRunner(t)
 	r.EXPECT().Run(mock.Anything, "/state", "git", "add", "runs/abc/build/default.json").
@@ -267,8 +258,6 @@ func TestStagedIsTrueWhenTheIndexHoldsAnything(t *testing.T) {
 	require.False(t, clean)
 }
 
-// git sorts every tag a repo carries, and a repo that predates this pipeline
-// carries tags this pipeline cannot read.
 func TestLatestTagSkipsWhatTheVersionRuleCannotRead(t *testing.T) {
 	r := execadaptermock.NewMockRunner(t)
 	r.EXPECT().Run(mock.Anything, "/w/a", "git", "tag", "--sort=-v:refname", "--list", "v[0-9]*").
@@ -279,10 +268,6 @@ func TestLatestTagSkipsWhatTheVersionRuleCannotRead(t *testing.T) {
 	require.Equal(t, "v0.44.4", got)
 }
 
-// A prefix is a namespace. Reading another prefix's tag as this line's
-// previous version is how two factories sharing one repo take turns
-// overwriting each other, so the prefix is stripped and a tag without it is
-// not this line's history.
 func TestLatestTagReadsOnlyItsOwnPrefix(t *testing.T) {
 	r := execadaptermock.NewMockRunner(t)
 	r.EXPECT().Run(mock.Anything, "/w/a", "git", "tag", "--sort=-v:refname", "--list", "forge-v[0-9]*").
@@ -293,9 +278,6 @@ func TestLatestTagReadsOnlyItsOwnPrefix(t *testing.T) {
 	require.Equal(t, "v0.50.0", got, "the prefix is a namespace, not part of the version")
 }
 
-// SubjectsSince is what the semantic strategy reads. A tag the repo does not
-// carry answers the whole history, because a member joining a line that
-// already exists brings all of itself with it.
 func TestSubjectsSinceReadsTheWholeHistoryWhenTheTagIsUnknown(t *testing.T) {
 	r := execadaptermock.NewMockRunner(t)
 	r.EXPECT().Run(mock.Anything, "/w/a", "git", "tag", "--list", "v0.49.0").
@@ -320,14 +302,6 @@ func TestSubjectsSinceReadsTheRangeWhenTheTagIsKnown(t *testing.T) {
 	require.Equal(t, []string{"feat: only the new one"}, got)
 }
 
-// The test that would have caught this, and the only shape that can. Every
-// mocked case above passes against a broken Commit, because the thing that
-// failed was real git reading real config. This runs real git with no
-// ambient identity anywhere - no global config, no system config, an empty
-// HOME - which is exactly the state a CI runner is in.
-//
-// Live case: seven consecutive forge-self pipeline runs died here with
-// "fatal: empty ident name", while every developer machine passed.
 func TestCommitWorksOnAHostWithNoGitIdentityAtAll(t *testing.T) {
 	dir := t.TempDir()
 
@@ -335,10 +309,6 @@ func TestCommitWorksOnAHostWithNoGitIdentityAtAll(t *testing.T) {
 	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
 	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
 
-	// Unset, not empty. A runner leaves these absent, and that distinction
-	// decides the fix: git reads an empty GIT_COMMITTER_NAME as an identity
-	// of "", and the environment beats -c, so an empty one cannot be
-	// overridden while an absent one can. t.Setenv registers the restore.
 	for _, k := range []string{
 		"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL",
 		"GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL",
@@ -362,7 +332,6 @@ func TestCommitWorksOnAHostWithNoGitIdentityAtAll(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "record.json"), []byte("{}\n"), 0o600))
 	require.NoError(t, g.Add(ctx, dir, "record.json"))
 
-	// Prove the premise before proving the fix: a bare commit here fails.
 	bare, err := execadapter.New().Run(ctx, dir, "git", "commit", "-m", "bare")
 	require.NoError(t, err)
 	require.NotZero(t, bare.ExitCode, "a bare commit must fail with no identity, or this test proves nothing")
@@ -380,13 +349,6 @@ func TestCommitWorksOnAHostWithNoGitIdentityAtAll(t *testing.T) {
 	require.Contains(t, author.Stdout, "alexandre.mahdhaoui@gmail.com")
 }
 
-// stripIdentity puts the process in the state a CI runner is in: no global
-// config, no system config, an empty HOME, and no identity variables.
-//
-// Unset, not empty. That distinction is the whole fix: git reads an empty
-// GIT_COMMITTER_NAME as an identity of "", and the environment beats -c, so
-// an empty one cannot be overridden while an absent one can. t.Setenv
-// registers the restore before the unset.
 func stripIdentity(t *testing.T) {
 	t.Helper()
 
@@ -403,12 +365,6 @@ func stripIdentity(t *testing.T) {
 	}
 }
 
-// An annotated tag is an object git writes, so it needs a committer identity
-// exactly as a commit does. This shipped as a second instance of the same
-// defect after the commit one was fixed, in a different adapter, and it was
-// the release step of a run that had already passed every stage.
-//
-// Real git again, for the same reason: a mock cannot fail on empty ident.
 func TestTagWorksOnAHostWithNoGitIdentityAtAll(t *testing.T) {
 	dir := t.TempDir()
 
@@ -434,30 +390,21 @@ func TestTagWorksOnAHostWithNoGitIdentityAtAll(t *testing.T) {
 	sha, err := g.HeadSHA(ctx, dir)
 	require.NoError(t, err)
 
-	// Absent is not an error. It is what a first release of a member looks
-	// like, and a release that treated it as one would never publish.
 	at, found, err := g.TagAt(ctx, dir, "v0.2.0")
 	require.NoError(t, err)
 	require.False(t, found)
 	require.Empty(t, at)
 
-	// Prove the premise: a bare annotated tag here fails.
 	bare, err := exec.Run(ctx, dir, "git", "tag", "-m", "bare", "bare", sha)
 	require.NoError(t, err)
 	require.NotZero(t, bare.ExitCode, "a bare annotated tag must fail with no identity, or this test proves nothing")
 
-	// No origin here, so the push half fails and the tag half must already
-	// have run: what is under test is that git wrote the object at all.
 	_ = g.Tag(ctx, dir, "v0.2.0", sha)
 
 	at, found, err = g.TagAt(ctx, dir, "v0.2.0")
 	require.NoError(t, err)
 	require.True(t, found, "the annotated tag must exist; a missing identity is what stopped it before")
 
-	// rev-list resolves the tag OBJECT to the commit it points at. Without
-	// that step an annotated tag answers its own sha, and the release then
-	// reads every already-tagged member as pointing somewhere else and
-	// refuses to publish.
 	require.Equal(t, sha, at)
 
 	tagger, err := exec.Run(ctx, dir, "git", "for-each-ref", "--format=%(taggeremail)", "refs/tags/v0.2.0")
@@ -466,8 +413,6 @@ func TestTagWorksOnAHostWithNoGitIdentityAtAll(t *testing.T) {
 	require.Contains(t, tagger.Stdout, "alexandre.mahdhaoui@gmail.com")
 }
 
-// A tag is never moved, because moving it changes what a consumer already
-// pinned.
 func TestTagRefusesToMoveOne(t *testing.T) {
 	dir := t.TempDir()
 
@@ -489,8 +434,6 @@ func TestTagRefusesToMoveOne(t *testing.T) {
 
 	require.NoError(t, g.Tag(ctx, dir, "v0.2.0", sha))
 
-	// The same sha is convergence, not a move: refusing it is what made a
-	// re-run of an already-tagged member terminal instead of idempotent.
 	require.NoError(t, g.Tag(ctx, dir, "v0.2.0", sha))
 
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "a-file"), []byte("y\n"), 0o600))
@@ -505,9 +448,6 @@ func TestTagRefusesToMoveOne(t *testing.T) {
 	require.Contains(t, err.Error(), "never moved")
 }
 
-// tagFixture stands up a checkout with one commit and a bare origin, which is
-// the shape every release actually runs against: the remote exists and is the
-// only party that knows what was already published.
 func tagFixture(t *testing.T) (g *gitadapter.CLI, dir, sha string) {
 	t.Helper()
 
@@ -542,18 +482,12 @@ func tagFixture(t *testing.T) (g *gitadapter.CLI, dir, sha string) {
 	return g, dir, sha
 }
 
-// The defect this pins: run 35 published v0.45.9, run 36 was a fresh clone
-// whose local tag list said "absent", so it re-created the tag and the push
-// was rejected by the only party that knew. The remote is the authority, and
-// a tag already there at the same commit is convergence, not work.
 func TestATagOnTheRemoteButNotInTheCheckoutConverges(t *testing.T) {
 	g, dir, sha := tagFixture(t)
 	ctx := context.Background()
 
 	require.NoError(t, g.Tag(ctx, dir, "v0.9.0", sha))
 
-	// A second checkout of the same origin: no local tags, like every CI
-	// re-run. The old code re-created the tag here and died on the push.
 	fresh := filepath.Join(t.TempDir(), "fresh")
 
 	urlRes, err := execadapter.New().Run(ctx, dir, "git", "remote", "get-url", "origin")
@@ -576,8 +510,6 @@ func TestATagOnTheRemoteButNotInTheCheckoutConverges(t *testing.T) {
 	require.Equal(t, sha, at)
 }
 
-// A remote tag at another commit refuses loudly: moving it would change what
-// a consumer already pinned, and no fresh clone may decide that.
 func TestARemoteTagAtAnotherCommitRefuses(t *testing.T) {
 	g, dir, sha := tagFixture(t)
 	ctx := context.Background()
@@ -591,8 +523,6 @@ func TestARemoteTagAtAnotherCommitRefuses(t *testing.T) {
 	moved, err := g.HeadSHA(ctx, dir)
 	require.NoError(t, err)
 
-	// Delete the local tag so only origin's copy can refuse - that is the
-	// CI shape, and the refusal must name origin as the authority.
 	res, err := execadapter.New().Run(ctx, dir, "git", "tag", "-d", "v0.9.0")
 	require.NoError(t, err)
 	require.Zero(t, res.ExitCode, res.Stderr)
@@ -603,9 +533,6 @@ func TestARemoteTagAtAnotherCommitRefuses(t *testing.T) {
 	require.Contains(t, err.Error(), "origin")
 }
 
-// An unreadable remote is an error, never "absent". Treating it as absent
-// would re-create a tag the remote may hold, which is the exact mistake
-// reading the remote exists to remove.
 func TestAnUnreadableRemoteIsAnErrorNotAbsent(t *testing.T) {
 	g, dir, sha := tagFixture(t)
 	ctx := context.Background()
@@ -626,9 +553,6 @@ func TestAnUnreadableRemoteIsAnErrorNotAbsent(t *testing.T) {
 	require.False(t, found, "an unreadable remote must stop the tag before it is created")
 }
 
-// A local tag left behind by an interrupted run - tagged, then the push was
-// lost - is finished by the next run, not refused: the remote lacks it, the
-// checkout has it at the right commit, and the push is the remaining half.
 func TestALeftoverLocalTagIsPushedNotRefused(t *testing.T) {
 	g, dir, sha := tagFixture(t)
 	ctx := context.Background()
@@ -651,10 +575,6 @@ func TestALeftoverLocalTagIsPushedNotRefused(t *testing.T) {
 	require.Equal(t, sha, at)
 }
 
-// RemoteTagAt must answer the commit an annotated tag wraps, not the tag
-// object's own sha - the same peel TagAt does with rev-list, done remotely
-// with the ^{} ref. Without it every already-published member reads as
-// pointing somewhere else and the release refuses to converge.
 func TestRemoteTagAtPeelsAnAnnotatedTag(t *testing.T) {
 	g, dir, sha := tagFixture(t)
 	ctx := context.Background()
@@ -667,9 +587,6 @@ func TestRemoteTagAtPeelsAnAnnotatedTag(t *testing.T) {
 	require.Equal(t, sha, at, "an annotated tag must answer the commit it wraps")
 }
 
-// A push the remote refuses is ErrRejected and not a generic failure. The
-// remote moved under this run, and merging is somebody's decision, never the
-// pipeline's, so the caller has to be able to tell this apart.
 func TestPushSeparatesARejectionFromABreakage(t *testing.T) {
 	stripIdentity(t)
 
@@ -714,8 +631,6 @@ func TestPushSeparatesARejectionFromABreakage(t *testing.T) {
 
 	require.NoError(t, g.Push(ctx, dir, branch))
 
-	// Somebody else pushes, then this checkout tries to push a commit that
-	// does not build on theirs.
 	other := t.TempDir()
 	res, err = exec.Run(ctx, "", "git", "clone", "-q", remote, other)
 	require.NoError(t, err)
@@ -734,9 +649,6 @@ func TestPushSeparatesARejectionFromABreakage(t *testing.T) {
 	require.ErrorIs(t, err, gitadapter.ErrRejected)
 }
 
-// A detached HEAD is what a CI checkout of a tag looks like. There is no
-// branch to push, and inventing one would put the commit somewhere nobody
-// named.
 func TestBranchIsEmptyOnADetachedHead(t *testing.T) {
 	stripIdentity(t)
 
@@ -764,9 +676,6 @@ func TestBranchIsEmptyOnADetachedHead(t *testing.T) {
 	require.Empty(t, branch)
 }
 
-// An excluded path stays out of both measurements: the status and the diff
-// carry the same exclude pathspec, so a repo whose only change is an
-// excluded file hashes to nothing.
 func TestWorktreeHashExcludesTheNamedPaths(t *testing.T) {
 	r := execadaptermock.NewMockRunner(t)
 	r.EXPECT().Run(mock.Anything, "/repo", "git",

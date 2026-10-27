@@ -11,27 +11,9 @@ import (
 	"github.com/alexandremahdhaoui/forge/pkg/forge"
 )
 
-// A build leaves files on one runner's disk and the run record keeps only
-// their paths, so a release on a runner that never built them reads
-// nothing. put and get are the door out of that: put hands a run's files
-// to a place this engine can serve again, get brings them back.
-//
-// This engine's place is a directory under the root, keyed by revision,
-// and the location it hands back is one URL shape:
-//
-//	forge-ci-artifact://<revision>/<root-relative path>
-//
-// The local engine serves it from the directory alone. The GitHub engine
-// serves the same directory through the workflow it renders, which uploads
-// it after the build job and downloads it before the release job, so both
-// engines share one controller and one URL, and only the transport differs.
-
 const (
-	// ArtifactScheme prefixes every location a put answers.
 	ArtifactScheme = "forge-ci-artifact://"
-	// ArtifactDir is where put keeps the files, under the root. Declared
-	// in citypes, because the GitHub renderer packs the same directory.
-	ArtifactDir = citypes.ArtifactDir
+	ArtifactDir    = citypes.ArtifactDir
 )
 
 var (
@@ -40,10 +22,6 @@ var (
 	ErrArtifactSum  = errors.New("an artifact came back with different bytes")
 )
 
-// Put copies every path-located artifact into the revision's directory and
-// answers the records with their locations rewritten. A record whose
-// location is already a URL, an image reference say, passes through: it is
-// somebody else's to serve.
 func (c *Controller) Put(in citypes.ArtifactPutInput) (citypes.ArtifactPutOutput, error) {
 	if strings.TrimSpace(in.Revision) == "" {
 		return citypes.ArtifactPutOutput{}, errors.New("putting artifacts: no revision given")
@@ -69,11 +47,6 @@ func (c *Controller) Put(in citypes.ArtifactPutInput) (citypes.ArtifactPutOutput
 			return citypes.ArtifactPutOutput{}, fmt.Errorf("putting %s: %w", rel, err)
 		}
 
-		// A directory artifact travels when a release reads it: an image
-		// layout is a tree of blobs the registry push needs. Any other tree
-		// - a generated tree, a command's whole output directory, which can
-		// be the repo itself - stays where it was built, because copying
-		// every file forge ever wrote is not what a release needs.
 		if dir && !treeTravels(artifact) {
 			out.Artifacts = append(out.Artifacts, artifact)
 
@@ -97,22 +70,6 @@ func (c *Controller) Put(in citypes.ArtifactPutInput) (citypes.ArtifactPutOutput
 	return out, nil
 }
 
-// Get copies every artifact a put answered back to its path under the root
-// and verifies the bytes against the copy put kept. A location this engine
-// never answered is refused rather than guessed at.
-//
-// An artifact whose bytes are not here is SKIPPED rather than refused, and
-// that is the difference between a carry-forward and a contract. A substage
-// that already passed for this revision is read from its run record instead
-// of run again, so a later run of the same revision inherits the record -
-// which names files - without inheriting the files: the transport that
-// carried them belongs to the run that built them. Several runs of one
-// revision is the ordinary case, not a strange one, because every watched
-// repo that moves sends its own trigger.
-//
-// Nothing is hidden by skipping. What needs a file fails on that file: a
-// release digests every asset it plans to upload before it writes anything,
-// and says which one is missing.
 func (c *Controller) Get(in citypes.ArtifactGetInput) (citypes.ArtifactGetOutput, error) {
 	fs := c.fs
 	out := citypes.ArtifactGetOutput{Artifacts: make([]forge.Artifact, 0, len(in.Artifacts))}
@@ -120,8 +77,6 @@ func (c *Controller) Get(in citypes.ArtifactGetInput) (citypes.ArtifactGetOutput
 	for _, artifact := range in.Artifacts {
 		rest, ok := strings.CutPrefix(artifact.Location, ArtifactScheme)
 		if !ok {
-			// A path is already home and a foreign URL is not ours to
-			// fetch; both pass through.
 			out.Artifacts = append(out.Artifacts, artifact)
 
 			continue
@@ -135,10 +90,6 @@ func (c *Controller) Get(in citypes.ArtifactGetInput) (citypes.ArtifactGetOutput
 		src := filepath.Join(in.Root, ArtifactDir, revision, filepath.FromSlash(rel))
 		dst := filepath.Join(in.Root, filepath.FromSlash(rel))
 
-		// Nothing to carry: this run never put these bytes, because the
-		// substage that made them was read from its run record instead of
-		// run again. Say nothing and move on; whoever needs the file fails
-		// on the file.
 		here, err := fs.Exists(src)
 		if err != nil {
 			return citypes.ArtifactGetOutput{}, fmt.Errorf("getting %s: %w", rel, err)
@@ -153,9 +104,6 @@ func (c *Controller) Get(in citypes.ArtifactGetInput) (citypes.ArtifactGetOutput
 			return citypes.ArtifactGetOutput{}, fmt.Errorf("getting %s: %w", rel, err)
 		}
 
-		// A tree comes back file by file, each verified, and its location
-		// is answered as the absolute file URL a layout reader expects. A
-		// file comes back as the root-relative path a release reads.
 		if dir {
 			files, err := fs.Walk(src)
 			if err != nil {
@@ -185,15 +133,10 @@ func (c *Controller) Get(in citypes.ArtifactGetInput) (citypes.ArtifactGetOutput
 	return out, nil
 }
 
-// treeTravels answers whether a directory artifact is one a release reads
-// on another machine. The container type is forge's own word for an image
-// layout, and the registry push is what reads it.
 func treeTravels(artifact forge.Artifact) bool {
 	return artifact.Type == forge.TypeContainer
 }
 
-// restoreFile copies one kept file back and verifies the bytes against
-// the copy put kept.
 func restoreFile(fs fsadapter.FS, src, dst string) error {
 	if err := copyFile(fs, src, dst); err != nil {
 		return err
@@ -216,7 +159,6 @@ func restoreFile(fs fsadapter.FS, src, dst string) error {
 	return nil
 }
 
-// copyTree copies every file under src to the same place under dst.
 func copyTree(fs fsadapter.FS, src, dst string) error {
 	files, err := fs.Walk(src)
 	if err != nil {
@@ -232,9 +174,6 @@ func copyTree(fs fsadapter.FS, src, dst string) error {
 	return nil
 }
 
-// localPath answers the root-relative path of a location that is a file
-// under the root, and false for anything else: an empty location, a URL, an
-// image reference, or a path that escapes the root.
 func localPath(root, location string) (string, bool) {
 	if trimmed, ok := strings.CutPrefix(location, "file://"); ok {
 		location = trimmed
@@ -273,10 +212,6 @@ func copyFile(fs fsadapter.FS, src, dst string) error {
 		return err
 	}
 
-	// The mode travels with the bytes. Without this a put wrote every file
-	// 0o600, so a binary that a later stage has to RUN arrived unexecutable
-	// and the stage died on "permission denied" - about the file, never
-	// about the build that made it.
 	mode, err := fs.Mode(src)
 	if err != nil {
 		return err

@@ -13,12 +13,6 @@ import (
 	"github.com/alexandremahdhaoui/forge/pkg/forge"
 )
 
-// NewHandlers wires the local compute into the generated tool surface.
-//
-// A generated wire type is not an internal type, so the mapping happens here.
-// It is explicit field by field, except for the forge section: forge owns
-// TestReport and Artifact, their schema lives in forge, and a copy here would
-// drift from what forge emits. That section travels as the JSON it already is.
 func NewHandlers() Handlers {
 	files := fsadapter.New()
 	runner := execadapter.New()
@@ -124,9 +118,6 @@ func toRunInput(in RunInput) citypes.RunInput {
 	}
 }
 
-// asObject turns forge's own records into the JSON object the wire carries.
-// Marshalling is the mapping here on purpose: the target shape is whatever
-// forge emits, and describing it again is what we are avoiding.
 func asObject(in *citypes.ForgeResult) (ForgeResult, error) {
 	if in == nil {
 		return nil, nil
@@ -158,9 +149,6 @@ func fromResources(in []citypes.Resource) []Resource {
 	return out
 }
 
-// toArtifacts reads forge's own records off the wire and fromArtifacts puts
-// them back. Marshalling is the mapping on purpose: the shape is whatever
-// forge emits, and describing it again is what we are avoiding.
 func toArtifacts(in []ForgeArtifact) ([]forge.Artifact, error) {
 	out := make([]forge.Artifact, 0, len(in))
 

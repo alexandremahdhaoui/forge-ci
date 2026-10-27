@@ -21,8 +21,6 @@ import (
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/containeradapter"
 )
 
-// written is a layout on disk holding one index over the named architectures,
-// which is what the build engine writes.
 func written(t *testing.T, arches ...string) string {
 	t.Helper()
 
@@ -64,9 +62,6 @@ func localRegistry(t *testing.T) string {
 	return strings.TrimPrefix(srv.URL, "http://")
 }
 
-// Every tag must point at the SAME index. Two pushes that happen to produce
-// matching bytes is not the same thing as one index under two names, and the
-// difference shows the day one of them drifts.
 func TestEveryTagPointsAtTheSameIndex(t *testing.T) {
 	t.Parallel()
 
@@ -98,9 +93,6 @@ func TestEveryTagPointsAtTheSameIndex(t *testing.T) {
 	require.Len(t, digests, 1, "the version tag and the moving tag are one index, not two builds")
 }
 
-// The build wrote what it knew; the release adds what only it knows. Both
-// have to survive, in every architecture, or somebody holding the image for
-// one arch cannot find the revision.
 func TestTheReleaseLabelsReachEveryArchitectureAndTheBuildsSurvive(t *testing.T) {
 	t.Parallel()
 
@@ -129,8 +121,6 @@ func TestTheReleaseLabelsReachEveryArchitectureAndTheBuildsSurvive(t *testing.T)
 	}
 }
 
-// A layout with no manifest means the build that was supposed to write it did
-// not, and pushing it would leave a tag naming nothing.
 func TestAnEmptyLayoutIsRefused(t *testing.T) {
 	t.Parallel()
 

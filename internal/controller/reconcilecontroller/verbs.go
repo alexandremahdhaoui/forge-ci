@@ -12,12 +12,6 @@ func (c *Controller) Bootstrap(
 ) (Report, error) {
 	index := newIndex(p, root)
 
-	// true: the bootstrap is the one ceremony that writes credentials.
-	//
-	// The changed flag is read and dropped on purpose. A bootstrap runs no
-	// stages, so there is no run to supersede, and the manager has already
-	// made its changes durable - which is what lets the revision below hash
-	// a committed tree rather than the files this call just wrote.
 	actions, _, _, err := c.reconcileResources(ctx, p, index, root, true, opts)
 	if err != nil {
 		return Report{}, err

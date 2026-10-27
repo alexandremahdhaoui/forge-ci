@@ -12,11 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// A put hands a run's files to the engine's own place and answers
-// locations the engine serves again; a get brings them back to the same
-// paths with the same bytes. Anything that is not a file under the root -
-// an image reference, a generated tree - passes through untouched, because
-// it is somebody else's to serve or stays where it was built.
 func TestPutThenGetRoundTripsAFileByRevision(t *testing.T) {
 	t.Parallel()
 
@@ -43,8 +38,6 @@ func TestPutThenGetRoundTripsAFileByRevision(t *testing.T) {
 	require.Equal(t, "member/generated", put.Artifacts[2].Location, "a directory stays where it was built")
 	require.FileExists(t, filepath.Join(root, computecontroller.ArtifactDir, "rev1", rel))
 
-	// The runner that built the file is gone: the path is empty and only
-	// the engine's place has the bytes.
 	require.NoError(t, os.Remove(filepath.Join(root, rel)))
 
 	got, err := ctrl.Get(citypes.ArtifactGetInput{
@@ -59,9 +52,6 @@ func TestPutThenGetRoundTripsAFileByRevision(t *testing.T) {
 	require.Equal(t, "bytes", string(data))
 }
 
-// An image layout is a tree the registry push reads, so it travels: put
-// keeps every file under it and get brings the tree back, verified, at the
-// absolute file URL the layout reader expects.
 func TestAnImageLayoutTravelsAsATree(t *testing.T) {
 	t.Parallel()
 
@@ -92,8 +82,6 @@ func TestAnImageLayoutTravelsAsATree(t *testing.T) {
 	require.Equal(t, "layer", string(data))
 }
 
-// A location this engine never answered is refused rather than guessed
-// at, and a path that escapes the root is never copied.
 func TestGetRefusesALocationNoPutAnswered(t *testing.T) {
 	t.Parallel()
 
@@ -120,18 +108,6 @@ func TestPutNeedsARevision(t *testing.T) {
 	require.Error(t, err)
 }
 
-// A record outlives the run that wrote it, and the transport does not. A
-// substage that already passed for this revision is read from its record
-// instead of run again, so a later run inherits the artifact NAMES without
-// the bytes: nothing in that run built or uploaded them.
-//
-// A live pipeline died on exactly this. Seven member pushes made seven runs
-// of one revision; the last reused the first's test record and looked for a
-// binary among artifacts its own run had never put.
-//
-// Carrying forward is best effort, so the absent one is skipped and the
-// present one still arrives. The gate is at the point of use: a release
-// digests every asset it plans to upload and names the one it cannot find.
 func TestGetSkipsWhatThisRunNeverPut(t *testing.T) {
 	t.Parallel()
 
@@ -151,8 +127,6 @@ func TestGetSkipsWhatThisRunNeverPut(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, put.Artifacts, 1)
 
-	// The run record also names what an earlier run built. Same revision,
-	// same location shape, no bytes in this run.
 	absent := forge.Artifact{
 		Name:     "server",
 		Type:     "binary",
@@ -168,11 +142,6 @@ func TestGetSkipsWhatThisRunNeverPut(t *testing.T) {
 	require.Equal(t, "member/build/bin/here_linux_amd64", got.Artifacts[0].Location)
 }
 
-// The mode travels with the bytes. A put used to write every file 0o600,
-// so a binary a later stage had to RUN arrived unexecutable and that stage
-// died on "permission denied" - a message about the file, never about the
-// build that made it. The canary that starts four servers is what found it,
-// because it is the first thing that executes something it was handed.
 func TestPutThenGetKeepsTheExecutableBit(t *testing.T) {
 	t.Parallel()
 
@@ -194,7 +163,6 @@ func TestPutThenGetKeepsTheExecutableBit(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, os.FileMode(0o755), kept.Mode().Perm(), "the copy put keeps is still executable")
 
-	// The runner that built it is gone.
 	require.NoError(t, os.Remove(filepath.Join(root, rel)))
 
 	_, err = ctrl.Get(citypes.ArtifactGetInput{Revision: "rev1", Root: root, Artifacts: put.Artifacts})

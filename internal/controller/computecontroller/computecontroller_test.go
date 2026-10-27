@@ -204,9 +204,6 @@ func TestForgeTargetRunsInTheNamedRepo(t *testing.T) {
 	require.Contains(t, out.Output, "$ forge test-all (in /work/golden-rust)")
 }
 
-// Sync converges the workspace before any target: manifests, then the
-// dependency closure. It happens in the engine because this is the machine
-// the targets run on.
 func TestSyncConvergesTheWorkspaceBeforeAnyTarget(t *testing.T) {
 	runner := execadaptermock.NewMockRunner(t)
 
@@ -238,8 +235,6 @@ func TestSyncConvergesTheWorkspaceBeforeAnyTarget(t *testing.T) {
 		"manifests first, then the closure, then the build")
 }
 
-// A convergence that fails is a failed run, not a broken runner: the
-// machinery worked and the workspace said no. No target may run after it.
 func TestAFailingConvergenceFailsTheRunAndStopsIt(t *testing.T) {
 	runner := execadaptermock.NewMockRunner(t)
 	runner.EXPECT().RunEnv(mock.Anything, "/work", mock.Anything, "forge-factory", "sync").
@@ -256,7 +251,6 @@ func TestAFailingConvergenceFailsTheRunAndStopsIt(t *testing.T) {
 	require.Contains(t, out.Output, "no engine is registered")
 }
 
-// Without the flag nothing converges: the engine must not decide on its own.
 func TestNoSyncMeansNoConvergence(t *testing.T) {
 	runner := execadaptermock.NewMockRunner(t)
 	runner.EXPECT().RunEnv(mock.Anything, "/work/golden-rust", mock.Anything, "forge", "test-all").
@@ -418,8 +412,6 @@ func TestForgeResultsAreHarvestedAndMerged(t *testing.T) {
 	require.Equal(t, []string{filepath.Join("/work", "a"), filepath.Join("/work", "b")}, h.dirs)
 }
 
-// The revision reaches every target as FORGE_CI_REVISION, so an instance's
-// build can stamp the tuple it was proven with.
 func TestTheRevisionReachesTheTargetEnvironment(t *testing.T) {
 	runner := execadaptermock.NewMockRunner(t)
 	runner.EXPECT().
@@ -435,8 +427,6 @@ func TestTheRevisionReachesTheTargetEnvironment(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// A store records locations relative to its own repo, which means nothing
-// to the release side; harvested artifacts are rebased onto the root.
 func TestHarvestedArtifactLocationsAreRebasedOntoTheRoot(t *testing.T) {
 	runner := execadaptermock.NewMockRunner(t)
 	runner.EXPECT().RunEnv(mock.Anything, mock.Anything, mock.Anything, "forge", "test-all").
@@ -482,9 +472,6 @@ func TestAHarvestFailureIsAnError(t *testing.T) {
 	require.ErrorIs(t, err, errBoom)
 }
 
-// Whatever binary a target names, the store its dir may hold is read: the
-// engine names no binary to decide whether to look, and a dir without a
-// store harvests nothing on its own.
 func TestEveryTargetIsHarvested(t *testing.T) {
 	runner := execadaptermock.NewMockRunner(t)
 	runner.EXPECT().RunEnv(mock.Anything, mock.Anything, mock.Anything, "forge-ci", "apply").Return(passing(), nil).Once()
@@ -521,9 +508,6 @@ func TestTheHarvesterIsToldWhenTheRunStarted(t *testing.T) {
 	require.Equal(t, started, h.since)
 }
 
-// The compatibility guarantee at the engine, not just in the graph: with no
-// needs declared, the dirs run one at a time in the order given. This asserts
-// the sequence rather than the set, because that is what changed.
 func TestWithNoNeedsTheDirsRunOneAtATimeInOrder(t *testing.T) {
 	runner := execadaptermock.NewMockRunner(t)
 
@@ -549,10 +533,6 @@ func TestWithNoNeedsTheDirsRunOneAtATimeInOrder(t *testing.T) {
 		"a pipeline that declares nothing must run exactly as it did before dependencies existed")
 }
 
-// One edge, and the rest of the wave overlaps. The runner blocks until every
-// member of the wave has entered it, so the test passes only if they really
-// are concurrent - a sequential implementation deadlocks and fails on the
-// timeout rather than passing quietly.
 func TestAWaveRunsItsMembersAtOnce(t *testing.T) {
 	runner := execadaptermock.NewMockRunner(t)
 
@@ -596,8 +576,6 @@ func TestAWaveRunsItsMembersAtOnce(t *testing.T) {
 		done <- out
 	}()
 
-	// All three are inside the runner before any of them is let go, which no
-	// sequential loop can manage.
 	for range 3 {
 		select {
 		case <-entered:
@@ -618,9 +596,6 @@ func TestAWaveRunsItsMembersAtOnce(t *testing.T) {
 	}
 }
 
-// A wave finishes even when one of its members fails, so a red run names
-// every repo that broke rather than the one that broke first. The wave after
-// it does not start.
 func TestAFailedWaveFinishesAndStopsTheNext(t *testing.T) {
 	runner := execadaptermock.NewMockRunner(t)
 
@@ -646,8 +621,6 @@ func TestAFailedWaveFinishesAndStopsTheNext(t *testing.T) {
 	require.Contains(t, out.Output, "two broke", "the whole wave is reported, not just the first failure")
 }
 
-// A cycle among the repos a target names is machinery that cannot run, not a
-// build that failed.
 func TestACycleIsAnError(t *testing.T) {
 	out, err := computecontroller.New(execadaptermock.NewMockRunner(t), nil, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t), nil).
 		Run(context.Background(), citypes.RunInput{
@@ -662,9 +635,6 @@ func TestACycleIsAnError(t *testing.T) {
 	require.Empty(t, out.Status)
 }
 
-// Arguments reach the binary one per element and are never split: an
-// argument holding a space is one argument, which is what a shell-quoted
-// argument in a target used to lose.
 func TestAnArgumentHoldingASpaceStaysOneArgument(t *testing.T) {
 	runner := execadaptermock.NewMockRunner(t)
 	runner.EXPECT().
@@ -678,9 +648,6 @@ func TestAnArgumentHoldingASpaceStaysOneArgument(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// How much output a run record keeps is the engine's spec: `outputLimit`
-// bytes from the end, 16 KiB when the spec names none. The core keeps
-// whatever the engine answered and cuts nothing itself.
 func TestALongOutputIsTruncatedFromTheFrontByTheSpec(t *testing.T) {
 	long := strings.Repeat("x", 20000) + "THE INTERESTING PART\n"
 

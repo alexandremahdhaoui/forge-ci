@@ -18,9 +18,6 @@ import (
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 )
 
-// ErrTarget means a target names no executable. The pipeline schema refuses
-// that first; this is the last line, for an input that reached the engine
-// without the schema.
 var ErrTarget = errors.New("a target needs a binary")
 
 type Controller struct {
@@ -56,26 +53,13 @@ func (c *Controller) Run(ctx context.Context, in citypes.RunInput) (citypes.RunO
 	started := c.now()
 	out := citypes.RunOutput{Status: citypes.StatusPassed}
 
-	// How much of a run's output the record keeps is this engine's spec, not
-	// a number in the core: `outputLimit` bytes from the end, the default
-	// when the spec names none.
 	limit := outputLimit(in.Spec)
 
-	// The revision and the version both reach every target as environment
-	// variables. The revision is the tuple a build was proven with, and the
-	// release side keys the distribution on the same id. The version is the
-	// number the release will carry, decided before any stage ran, so a
-	// binary stamps the release it ships in rather than the nearest tag its
-	// own repo happens to hold.
 	env := map[string]string{"FORGE_CI_REVISION": in.Revision}
 	if in.Version != "" {
 		env["FORGE_CI_VERSION"] = in.Version
 	}
 
-	// The workspace converges before anything builds: manifests first, then
-	// the dependency closure. It happens here, in the engine, because this
-	// is the machine the targets actually run on - a core-side exec would
-	// converge the operator's machine and never a remote runner's.
 	if in.Sync {
 		for _, verb := range []string{"sync", "lock"} {
 			res, err := c.runner.RunEnv(ctx, in.Root, env, "forge-factory", verb)
@@ -85,8 +69,6 @@ func (c *Controller) Run(ctx context.Context, in citypes.RunInput) (citypes.RunO
 
 			fmt.Fprintf(&log, "$ forge-factory %s (in %s)\n%s%s", verb, in.Root, res.Stdout, res.Stderr)
 
-			// A convergence that fails is a failed run, not a broken runner:
-			// the machinery worked and the workspace said no.
 			if res.ExitCode != 0 {
 				out.Status = citypes.StatusFailed
 				out.Message = fmt.Sprintf("forge-factory %s exited %d in %s", verb, res.ExitCode, in.Root)
@@ -97,9 +79,6 @@ func (c *Controller) Run(ctx context.Context, in citypes.RunInput) (citypes.RunO
 		}
 	}
 
-	// One mutex over everything a wave's members share: the log, the status
-	// and the harvested artifacts. A wave runs its dirs at once, so all three
-	// are written concurrently.
 	var mu sync.Mutex
 
 	for _, target := range in.Targets {
@@ -117,17 +96,10 @@ func (c *Controller) Run(ctx context.Context, in citypes.RunInput) (citypes.RunO
 
 		for _, wave := range waves {
 			var (
-				wg sync.WaitGroup
-				// broke is the first machinery failure, kept apart from a
-				// target that merely exited non-zero. A runner that could not
-				// start is broken; a build that failed is a failed build.
+				wg    sync.WaitGroup
 				broke error
 			)
 
-			// A wave finishes before the next starts, and it finishes even
-			// when one of its members fails. Cancelling the rest would report
-			// the first failure and hide every other one, and somebody
-			// reading a red run wants every repo that broke.
 			for _, dir := range pathsFor(wave, in) {
 				wg.Add(1)
 
@@ -147,8 +119,6 @@ func (c *Controller) Run(ctx context.Context, in citypes.RunInput) (citypes.RunO
 						return
 					}
 
-					// One Fprintf per dir, under the lock, so two members of
-					// a wave cannot interleave halfway through a line.
 					fmt.Fprintf(&log, "$ %s (in %s)\n%s%s", shown, dir, res.Stdout, res.Stderr)
 
 					if res.ExitCode != 0 && out.Status != citypes.StatusFailed {
@@ -156,9 +126,6 @@ func (c *Controller) Run(ctx context.Context, in citypes.RunInput) (citypes.RunO
 						out.Message = fmt.Sprintf("target %q exited %d in %s", target.Alias, res.ExitCode, dir)
 					}
 
-					// Whatever the target was, the store it may have written is
-					// read. A dir with no store harvests nothing, so the engine
-					// names no binary to decide whether to look.
 					if c.harvester == nil {
 						return
 					}
@@ -256,10 +223,6 @@ func (c *Controller) giveACloneItsEnvrc(ctx context.Context, dir string) error {
 	return nil
 }
 
-// CommandFor answers the binary and the expanded arguments one target
-// runs, one argument per element and never split on whitespace, so an
-// argument holding a space stays one argument. It is shared with the remote
-// compute engines, so a target means the same thing wherever it executes.
 func CommandFor(t citypes.Target, params map[string]string) (string, []string, error) {
 	if strings.TrimSpace(t.Binary) == "" {
 		return "", nil, fmt.Errorf("target %q: %w", t.Alias, ErrTarget)
@@ -279,8 +242,6 @@ func CommandFor(t citypes.Target, params map[string]string) (string, []string, e
 	return t.Binary, args, nil
 }
 
-// pathsFor puts one wave's repo names on disk. The empty name is the
-// workspace root, which is what a target naming no repo runs in.
 func pathsFor(wave []string, in citypes.RunInput) []string {
 	paths := make([]string, 0, len(wave))
 
@@ -325,9 +286,6 @@ func expand(raw string, params map[string]string) (string, error) {
 	return b.String(), nil
 }
 
-// rebase rewrites harvested artifact locations to be relative to the
-// pipeline root: a store records them relative to its own repo, which means
-// nothing to the release side. URLs pass through untouched.
 func rebase(result *citypes.ForgeResult, root, dir string) {
 	if result == nil {
 		return
@@ -339,8 +297,6 @@ func rebase(result *citypes.ForgeResult, root, dir string) {
 	}
 
 	for i, artifact := range result.Artifacts {
-		// A colon marks a URL or an image reference; a local relative path
-		// never carries one, and only those are rebased.
 		if artifact.Location == "" || strings.Contains(artifact.Location, ":") ||
 			filepath.IsAbs(artifact.Location) {
 			continue
@@ -365,13 +321,8 @@ func merge(into, from *citypes.ForgeResult) *citypes.ForgeResult {
 	return into
 }
 
-// DefaultOutputLimit is how many bytes of a run's output the record keeps
-// when the engine's spec names no `outputLimit`.
 const DefaultOutputLimit = 16384
 
-// outputLimit reads `outputLimit` from the engine's spec: a JSON number
-// arrives as float64, an integer written by a Go caller as int. Anything
-// else, or nothing, is the default.
 func outputLimit(spec map[string]any) int {
 	switch v := spec["outputLimit"].(type) {
 	case float64:
@@ -387,7 +338,6 @@ func outputLimit(spec map[string]any) int {
 	return DefaultOutputLimit
 }
 
-// tail keeps the last limit bytes of s and says that the rest was dropped.
 func tail(s string, limit int) string {
 	if len(s) <= limit {
 		return s
