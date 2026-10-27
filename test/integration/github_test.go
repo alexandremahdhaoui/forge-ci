@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -28,8 +29,6 @@ const (
 	releaseURI       = "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-artifact-release@v0.1.0"
 )
 
-// fakeGitHub is enough of the API for the manager and the compute engine:
-// a repo key, write-only secrets, workflow enablement, dispatch and runs.
 type fakeGitHub struct {
 	mu       sync.Mutex
 	pub      *[32]byte
@@ -39,8 +38,6 @@ type fakeGitHub struct {
 	marker   string
 	conclude string
 
-	// releasedTag is the tag the last created release carried, and uploaded
-	// is every asset name attached to it.
 	releasedTag string
 	uploaded    []string
 	issues      []string
@@ -72,13 +69,8 @@ func (f *fakeGitHub) handle(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewDecoder(r.Body).Decode(&in)
 		f.releasedTag = in.TagName
 
-		// The real upload_url is on uploads.github.com, a different host
-		// from the API base. One server is enough to prove the engine sends
-		// where the RELEASE said rather than where the base is: the path is
-		// one this handler would not otherwise serve.
 		fmt.Fprintf(w, `{"id":1,"draft":true,"html_url":"http://fake/releases/1","upload_url":"http://%s/upload/assets{?name,label}"}`, r.Host)
 	case strings.HasSuffix(r.URL.Path, "/releases/1") && r.Method == http.MethodPatch:
-		// The publish of the draft: the last write of a release.
 		fmt.Fprint(w, `{"id":1,"draft":false,"html_url":"http://fake/releases/1"}`)
 	case strings.HasPrefix(r.URL.Path, "/upload/assets"):
 		f.uploaded = append(f.uploaded, r.URL.Query().Get("name"))
@@ -97,9 +89,6 @@ func (f *fakeGitHub) handle(w http.ResponseWriter, r *http.Request) {
 	case strings.HasSuffix(r.URL.Path, "/actions/secrets/public-key"):
 		fmt.Fprintf(w, `{"key_id":"k1","key":"%s"}`, base64.StdEncoding.EncodeToString(f.pub[:]))
 	case strings.Contains(r.URL.Path, "/actions/secrets/") && r.Method == http.MethodGet:
-		// The existence read. GitHub answers metadata and never the value,
-		// which is why existence is the only state a manager can compare
-		// against, and 404 when the repo does not carry it.
 		if _, ok := f.secrets[filepath.Base(r.URL.Path)]; !ok {
 			w.WriteHeader(http.StatusNotFound)
 
@@ -117,10 +106,6 @@ func (f *fakeGitHub) handle(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)
 	case strings.Contains(r.URL.Path, "/actions/workflows/") &&
 		strings.HasSuffix(r.URL.Path, ".yaml") && r.Method == http.MethodGet:
-		// The state read that stops the enable running every time. An
-		// enable of an already-enabled workflow succeeds, so without this a
-		// reconcile would report a change forever and no run would ever
-		// reach a stage.
 		if !slices.Contains(f.enabled, filepath.Base(r.URL.Path)) {
 			w.WriteHeader(http.StatusNotFound)
 
@@ -195,15 +180,9 @@ func TestTheGitHubManagerRealizesEveryKindOverMCP(t *testing.T) {
 		"the sealed secret must decrypt to the token the environment carried")
 	require.Equal(t, []string{"intake.yaml"}, fake.enabled)
 
-	// A bool is the field a handler drops without a compile error, and the
-	// whole stop mechanism rides on this one. In process it passed while the
-	// wire carried false; only this can tell.
 	require.True(t, out.Changed, "nothing existed, so every kind converged something")
 }
 
-// dryRun and force are bools, so a handler that drops one compiles, passes
-// every unit test, and fails only here. Dropping dryRun is a plan that
-// writes, which is the worst failure this surface has.
 func TestADryRunOverMCPWritesNothingAndStillSaysWhatWouldChange(t *testing.T) {
 	fake, srv := newFakeGitHub(t, "success")
 	t.Setenv("GITHUB_TOKEN", "pat-under-test")
@@ -237,9 +216,6 @@ func TestADryRunOverMCPWritesNothingAndStillSaysWhatWouldChange(t *testing.T) {
 	}
 }
 
-// An existing secret is kept unless force says otherwise. This is the one
-// collision git cannot arbitrate: the API never returns a value, so two
-// operators with different credentials would leave one winner in silence.
 func TestForceOverMCPIsWhatRewritesAnExistingSecret(t *testing.T) {
 	fake, srv := newFakeGitHub(t, "success")
 
@@ -284,11 +260,6 @@ func TestForceOverMCPIsWhatRewritesAnExistingSecret(t *testing.T) {
 		"a rotation is asked for, and force is how")
 }
 
-// The second half, and the one that decides whether a pipeline ever runs
-// again: over the same fake, with everything already as declared, the
-// manager must answer changed false. A file it kept, a workflow already
-// active and a secret that already exists are all no-ops, and each of the
-// three has a shape that succeeds while changing nothing.
 func TestTheGitHubManagerReportsNoChangeWhenEverythingAlreadyMatchesOverMCP(t *testing.T) {
 	_, srv := newFakeGitHub(t, "success")
 	t.Setenv("GITHUB_TOKEN", "pat-under-test")
@@ -357,6 +328,32 @@ func TestTheGitHubComputeDeclaresItsSurfaceOverMCP(t *testing.T) {
 	}, ids)
 }
 
+func TestTheGitHubComputeReadsTheContainerPinUnderTheRootOverMCP(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, ".forge"), 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(root, ".forge", "toolchain-image"),
+		[]byte("ghcr.io/an-owner/a-toolchain:v9.9.9\n"), 0o600))
+
+	var out citypes.DeclareOutput
+
+	err := caller().Call(context.Background(), githubComputeURI, "declare",
+		map[string]any{"root": root, "spec": map[string]any{
+			"repo":      "o/r",
+			"container": map[string]any{"file": ".forge/toolchain-image"},
+			"workspace": map[string]any{"bootstrapCommand": "true"},
+			"runner":    map[string]any{"name": "ci-runner", "secret": "FORGE_CI_GITHUB_TOKEN"},
+		}}, &out)
+	require.NoError(t, err)
+
+	contents := make([]string, 0, len(out.Resources))
+	for _, r := range out.Resources {
+		content, _ := r.Spec["content"].(string)
+		contents = append(contents, content)
+	}
+
+	require.Contains(t, strings.Join(contents, "\n"), "image: ghcr.io/an-owner/a-toolchain:v9.9.9")
+}
+
 func TestTheGitHubComputeReportsARedRunAsFailedOverMCP(t *testing.T) {
 	_, srv := newFakeGitHub(t, "failure")
 	t.Setenv("GITHUB_TOKEN", "pat-under-test")
@@ -383,13 +380,6 @@ func TestTheGitHubComputeReportsARedRunAsFailedOverMCP(t *testing.T) {
 	require.Contains(t, out.Message, "concluded failure")
 }
 
-// The release engine over real MCP against a real HTTP server.
-//
-// The wire is what this proves. spec.repo is new, and a key the core sends
-// and the engine drops is invisible to every unit test on either side: that
-// is exactly how the version field went missing and shipped a release of
-// mis-stamped binaries. It also proves the asset goes to the host the
-// RELEASE named rather than the API base.
 func TestTheReleaseEngineCreatesAReleaseOverMCP(t *testing.T) {
 	fake, srv := newFakeGitHub(t, "success")
 	t.Setenv("GITHUB_TOKEN", "pat-under-test")
@@ -400,9 +390,7 @@ func TestTheReleaseEngineCreatesAReleaseOverMCP(t *testing.T) {
 		citypes.ArtifactInput{
 			Revision: "abc123",
 			Version:  "v0.2.0",
-			// No repos: tagging is git in a checkout and has its own tests.
-			// What is under test here is the half that crosses the network.
-			Repos: map[string]string{},
+			Repos:    map[string]string{},
 			Spec: map[string]any{
 				"repo":       "o/r",
 				"apiBaseURL": srv.URL,
@@ -415,13 +403,9 @@ func TestTheReleaseEngineCreatesAReleaseOverMCP(t *testing.T) {
 	require.Equal(t, "http://fake/releases/1", out.URL)
 	require.Equal(t, "v0.2.0", fake.releasedTag)
 
-	// index.json is always published: it maps the revision to the measured
-	// digest of every asset, and forge-factory sync consumes it.
 	require.Contains(t, fake.uploaded, "index.json")
 }
 
-// A release with no repo named fails rather than guessing one off a
-// checkout's remote. Every other engine here is told what it acts on.
 func TestTheReleaseEngineRefusesWithoutARepo(t *testing.T) {
 	_, srv := newFakeGitHub(t, "success")
 	t.Setenv("GITHUB_TOKEN", "pat-under-test")

@@ -13,11 +13,12 @@ import (
 )
 
 func NewHandlers() Handlers {
+	disk := fsadapter.New()
 	ctrl := workflowcontroller.New(func(spec workflowcontroller.Spec) githubadapter.API {
 		return githubadapter.New(nil, spec.APIBaseURL, citypes.SecretFromEnv(spec.TokenEnv))
-	}, nil, nil)
+	}, disk, nil, nil)
 
-	artifactDir := artifactdircontroller.New(fsadapter.New())
+	artifactDir := artifactdircontroller.New(disk)
 
 	return Handlers{
 		Declare: func(_ context.Context, in DeclareInput) (*DeclareOutput, error) {

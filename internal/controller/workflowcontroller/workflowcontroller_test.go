@@ -17,14 +17,11 @@ import (
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/githubadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/workflowcontroller"
+	"github.com/alexandremahdhaoui/forge-ci/internal/mocks/fsadaptermock"
 	"github.com/alexandremahdhaoui/forge-ci/internal/mocks/githubadaptermock"
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 )
 
-// registerSpec reproduces one real pipeline's GitHub surface. The golden
-// files under testdata are byte copies of that pipeline's hand-written
-// workflows; rendering must match them exactly, because the realized
-// files replace them in place.
 func registerSpec() workflowcontroller.Spec {
 	return workflowcontroller.Spec{
 		Repo: "alexandremahdhaoui/golden-register",
@@ -124,10 +121,6 @@ func TestRenderMatchesTheHandWrittenWorkflows(t *testing.T) {
 	assert.Contains(t, byName["ci-runner"], "${{ inputs.script }}")
 }
 
-// assertGolden compares against testdata and, with UPDATE_GOLDEN set, writes
-// it instead. A deliberate change is then one environment variable and an
-// accidental one is still a failure, which is the point: these files are the
-// only thing standing between a rendering change and every consumer's CI.
 func assertGolden(t *testing.T, name, got, msg string, args ...any) {
 	t.Helper()
 
@@ -142,8 +135,6 @@ func assertGolden(t *testing.T, name, got, msg string, args ...any) {
 	assert.Equalf(t, string(want), got, msg, args...)
 }
 
-// A job that runs inside a prebuilt toolchain image installs no toolchain,
-// and still checks the workspace out: a container carries tools, not members.
 func TestAContainerReplacesTheToolchainInstallAndNotTheCheckout(t *testing.T) {
 	t.Parallel()
 
@@ -162,9 +153,6 @@ func TestAContainerReplacesTheToolchainInstallAndNotTheCheckout(t *testing.T) {
 	assertGolden(t, "intake-container", byName["intake"],
 		"a command workflow in a container must render exactly this")
 
-	// release is in this list because it stands the workspace up too: its
-	// toolchain script does `cd <member> && go install`, so a lone checkout
-	// of this repo leaves that step with no directory to enter.
 	for _, name := range []string{"intake", "request", "ci-runner", "release"} {
 		got := byName[name]
 
@@ -177,25 +165,19 @@ func TestAContainerReplacesTheToolchainInstallAndNotTheCheckout(t *testing.T) {
 			"%s: the checkout stays - a container carries tools and not a workspace", name)
 	}
 
-	// A fan-out curls a dispatch and nothing else. It builds no workspace and
-	// runs no toolchain, so it stays on the runner's own image.
 	assert.NotContains(t, byName["propagate"], "container:",
 		"a fan-out only curls a dispatch, so it needs no toolchain image")
 }
 
-// A container file keeps the version out of the pipeline file entirely: the
-// workspace sync resolves the pin into a generated file, and declare reads
-// it from there, so a register-advanced pin reaches the rendered workflows
-// on the next reconcile with nobody editing yaml.
-func TestAContainerFileResolvesThePinFromTheWorkspace(t *testing.T) {
+func TestAContainerFileResolvesThePinThroughTheFSTheConstructorReceived(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(root, ".forge"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(root, ".forge", "toolchain-image"),
-		[]byte("ghcr.io/an-owner/a-toolchain:v9.9.9\n"), 0o600))
+	root := "/a/workspace"
+	fs := fsadaptermock.NewMockFS(t)
+	fs.EXPECT().ReadFile(filepath.Join(root, ".forge", "toolchain-image")).
+		Return([]byte("ghcr.io/an-owner/a-toolchain:v9.9.9\n"), nil)
 
-	c := workflowcontroller.New(nil, nil, nil)
+	c := workflowcontroller.New(nil, fs, nil, nil)
 
 	spec := specMap(t)
 	spec["container"] = map[string]any{"file": ".forge/toolchain-image"}
@@ -219,24 +201,27 @@ func TestAContainerFileResolvesThePinFromTheWorkspace(t *testing.T) {
 func TestAMissingContainerFileNamesTheSyncThatWritesIt(t *testing.T) {
 	t.Parallel()
 
-	c := workflowcontroller.New(nil, nil, nil)
+	root := "/a/workspace"
+	fs := fsadaptermock.NewMockFS(t)
+	fs.EXPECT().ReadFile(filepath.Join(root, ".forge", "toolchain-image")).Return(nil, os.ErrNotExist)
+
+	c := workflowcontroller.New(nil, fs, nil, nil)
 
 	spec := specMap(t)
 	spec["container"] = map[string]any{"file": ".forge/toolchain-image"}
 
-	_, err := c.Declare(spec, t.TempDir(), nil, nil)
+	_, err := c.Declare(spec, root, nil, nil)
 	require.ErrorContains(t, err, "sync first")
 }
 
 func TestAnEmptyContainerFileIsRefused(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(root, ".forge"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(root, ".forge", "toolchain-image"),
-		[]byte("\n"), 0o600))
+	root := "/a/workspace"
+	fs := fsadaptermock.NewMockFS(t)
+	fs.EXPECT().ReadFile(filepath.Join(root, ".forge", "toolchain-image")).Return([]byte("\n"), nil)
 
-	c := workflowcontroller.New(nil, nil, nil)
+	c := workflowcontroller.New(nil, fs, nil, nil)
 
 	spec := specMap(t)
 	spec["container"] = map[string]any{"file": ".forge/toolchain-image"}
@@ -302,8 +287,6 @@ func TestParseSpecDefaultsAndRefusals(t *testing.T) {
 	_, err = workflowcontroller.ParseSpec(base)
 	require.ErrorContains(t, err, "workspace.bootstrapCommand is required")
 
-	// A container carries tools, not a checked-out workspace, so the
-	// bootstrap stays required however the job gets its toolchain.
 	noBootstrap := specMap(t)
 	noBootstrap["container"] = map[string]any{"ref": "an-image:v1"}
 	noBootstrap["workspace"] = map[string]any{"toolchainScript": "true\n"}
@@ -311,9 +294,6 @@ func TestParseSpecDefaultsAndRefusals(t *testing.T) {
 	require.ErrorContains(t, err, "workspace.bootstrapCommand is required")
 	require.ErrorContains(t, err, "supplies tools and not a workspace")
 
-	// Neither a script nor an image means nothing installs the toolchain.
-	// The refusal has to name the alternative, or the reader adds a script
-	// they did not need.
 	noToolchain := specMap(t)
 	noToolchain["workspace"] = map[string]any{"bootstrapCommand": "true"}
 	_, err = workflowcontroller.ParseSpec(noToolchain)
@@ -350,7 +330,7 @@ func specMap(t *testing.T) map[string]any {
 func TestDeclareEmitsEveryGitHubResource(t *testing.T) {
 	t.Parallel()
 
-	c := workflowcontroller.New(nil, nil, nil)
+	c := workflowcontroller.New(nil, fsadaptermock.NewMockFS(t), nil, nil)
 
 	spec := specMap(t)
 	spec["secrets"] = []any{map[string]any{"name": "FORGE_CI_GITHUB_TOKEN"}}
@@ -391,8 +371,6 @@ func TestDeclareEmitsEveryGitHubResource(t *testing.T) {
 		"a workflow file must follow its engine, drift included")
 }
 
-// fakeClock advances only when the controller sleeps, so a poll loop
-// finishes in microseconds.
 type fakeClock struct {
 	now time.Time
 }
@@ -416,7 +394,7 @@ func TestRunPassesOnASuccessConclusion(t *testing.T) {
 	api := githubadaptermock.NewMockAPI(t)
 	clock := &fakeClock{now: time.Unix(1000, 0)}
 	c := workflowcontroller.New(
-		func(workflowcontroller.Spec) githubadapter.API { return api }, clock.Now, clock.Sleep)
+		func(workflowcontroller.Spec) githubadapter.API { return api }, fsadaptermock.NewMockFS(t), clock.Now, clock.Sleep)
 
 	var marker string
 
@@ -450,11 +428,10 @@ func TestRunPassesOnASuccessConclusion(t *testing.T) {
 func TestRunAFailedConclusionIsAFailedRunNotAnError(t *testing.T) {
 	t.Parallel()
 
-	// The hard rule: a red build must never look like a broken runner.
 	api := githubadaptermock.NewMockAPI(t)
 	clock := &fakeClock{now: time.Unix(1000, 0)}
 	c := workflowcontroller.New(
-		func(workflowcontroller.Spec) githubadapter.API { return api }, clock.Now, clock.Sleep)
+		func(workflowcontroller.Spec) githubadapter.API { return api }, fsadaptermock.NewMockFS(t), clock.Now, clock.Sleep)
 
 	var marker string
 
@@ -484,7 +461,7 @@ func TestRunTimesOutWhenTheRunNeverAppears(t *testing.T) {
 	api := githubadaptermock.NewMockAPI(t)
 	clock := &fakeClock{now: time.Unix(1000, 0)}
 	c := workflowcontroller.New(
-		func(workflowcontroller.Spec) githubadapter.API { return api }, clock.Now, clock.Sleep)
+		func(workflowcontroller.Spec) githubadapter.API { return api }, fsadaptermock.NewMockFS(t), clock.Now, clock.Sleep)
 
 	api.EXPECT().Dispatch(mock.Anything, "o/r", "ci-runner.yaml", "main", mock.Anything).Return(nil)
 	api.EXPECT().ListRuns(mock.Anything, "o/r", "ci-runner.yaml", mock.Anything).
@@ -500,7 +477,7 @@ func TestRunErrorsWhenTheMachineryBreaks(t *testing.T) {
 	api := githubadaptermock.NewMockAPI(t)
 	clock := &fakeClock{now: time.Unix(1000, 0)}
 	c := workflowcontroller.New(
-		func(workflowcontroller.Spec) githubadapter.API { return api }, clock.Now, clock.Sleep)
+		func(workflowcontroller.Spec) githubadapter.API { return api }, fsadaptermock.NewMockFS(t), clock.Now, clock.Sleep)
 
 	api.EXPECT().Dispatch(mock.Anything, "o/r", "ci-runner.yaml", "main", mock.Anything).
 		Return(assert.AnError)
@@ -512,7 +489,7 @@ func TestRunErrorsWhenTheMachineryBreaks(t *testing.T) {
 func TestRunRefusesMissingRunnerOrTargets(t *testing.T) {
 	t.Parallel()
 
-	c := workflowcontroller.New(nil, nil, nil)
+	c := workflowcontroller.New(nil, fsadaptermock.NewMockFS(t), nil, nil)
 
 	in := runInput(map[string]any{"repo": "o/r"})
 	_, err := c.Run(t.Context(), in)
@@ -527,8 +504,6 @@ func TestRunRefusesMissingRunnerOrTargets(t *testing.T) {
 func TestRenderAllRefusesAnUnrenderableKind(t *testing.T) {
 	t.Parallel()
 
-	// ParseSpec blocks unknown kinds at the door; this pins the renderer's
-	// own refusal for a hand-built spec.
 	_, err := workflowcontroller.RenderAll(workflowcontroller.Spec{
 		Workflows: []workflowcontroller.WorkflowSpec{{Name: "x", Kind: "weird"}},
 	})
@@ -565,7 +540,7 @@ func TestRenderFanOutDefaultsTheTagPattern(t *testing.T) {
 func TestDeclareRefusesANamelessSecret(t *testing.T) {
 	t.Parallel()
 
-	c := workflowcontroller.New(nil, nil, nil)
+	c := workflowcontroller.New(nil, fsadaptermock.NewMockFS(t), nil, nil)
 
 	spec := specMap(t)
 	spec["secrets"] = []any{map[string]any{"fromEnv": "X"}}
@@ -577,7 +552,7 @@ func TestDeclareRefusesANamelessSecret(t *testing.T) {
 func TestRunRefusesABrokenTarget(t *testing.T) {
 	t.Parallel()
 
-	c := workflowcontroller.New(nil, nil, nil)
+	c := workflowcontroller.New(nil, fsadaptermock.NewMockFS(t), nil, nil)
 
 	in := runInput(specMap(t))
 	in.Targets = []citypes.Target{{Alias: "none", Args: []string{"x"}}}
@@ -591,7 +566,7 @@ func TestRunSurfacesAPollError(t *testing.T) {
 	api := githubadaptermock.NewMockAPI(t)
 	clock := &fakeClock{now: time.Unix(1000, 0)}
 	c := workflowcontroller.New(
-		func(workflowcontroller.Spec) githubadapter.API { return api }, clock.Now, clock.Sleep)
+		func(workflowcontroller.Spec) githubadapter.API { return api }, fsadaptermock.NewMockFS(t), clock.Now, clock.Sleep)
 
 	api.EXPECT().Dispatch(mock.Anything, "o/r", "ci-runner.yaml", "main", mock.Anything).Return(nil)
 	api.EXPECT().ListRuns(mock.Anything, "o/r", "ci-runner.yaml", mock.Anything).
@@ -607,7 +582,7 @@ func TestRunSurfacesARunFetchError(t *testing.T) {
 	api := githubadaptermock.NewMockAPI(t)
 	clock := &fakeClock{now: time.Unix(1000, 0)}
 	c := workflowcontroller.New(
-		func(workflowcontroller.Spec) githubadapter.API { return api }, clock.Now, clock.Sleep)
+		func(workflowcontroller.Spec) githubadapter.API { return api }, fsadaptermock.NewMockFS(t), clock.Now, clock.Sleep)
 
 	var marker string
 
@@ -633,15 +608,13 @@ func TestRunPinsTheRevisionShasInTheScript(t *testing.T) {
 	api := githubadaptermock.NewMockAPI(t)
 	clock := &fakeClock{now: time.Unix(1000, 0)}
 	c := workflowcontroller.New(
-		func(workflowcontroller.Spec) githubadapter.API { return api }, clock.Now, clock.Sleep)
+		func(workflowcontroller.Spec) githubadapter.API { return api }, fsadaptermock.NewMockFS(t), clock.Now, clock.Sleep)
 
 	var marker string
 
 	api.EXPECT().Dispatch(mock.Anything, "o/r", "ci-runner.yaml", "main", mock.Anything).
 		RunAndReturn(func(_ context.Context, _, _, _ string, inputs map[string]string) error {
 			marker = inputs["marker"]
-			// The remote run must execute the code the revision names,
-			// not whatever the branch moved to.
 			assert.Contains(t, inputs["script"], `git -C 'r' fetch origin 'abc123'`)
 			assert.Contains(t, inputs["script"], `git -C 'r' checkout --detach 'abc123'`)
 
@@ -664,10 +637,7 @@ func TestRunPinsTheRevisionShasInTheScript(t *testing.T) {
 func TestRunRefusesADirtyRevision(t *testing.T) {
 	t.Parallel()
 
-	// A dirty revision covers uncommitted changes; a remote runner can
-	// never see them, so running it there would test other code than the
-	// revision names.
-	c := workflowcontroller.New(nil, nil, nil)
+	c := workflowcontroller.New(nil, fsadaptermock.NewMockFS(t), nil, nil)
 
 	in := runInput(specMap(t))
 	in.Revision = "abc123-dirty"
@@ -676,20 +646,6 @@ func TestRunRefusesADirtyRevision(t *testing.T) {
 	require.ErrorContains(t, err, "covers uncommitted changes")
 }
 
-// TestTheRenderedCheckoutStandsUpAWorkspace executes the checkout step the
-// generator writes, instead of comparing it to a golden file.
-//
-// The goldens could not catch what shipped: they were written from the
-// generator, so a generator that renders a broken checkout renders a golden
-// that agrees with it. This ran five hand-written lines for a week, cloning
-// a factory and calling its place script from the directory above it, and
-// every scheduled run failed at the same step while both goldens stayed
-// green.
-//
-// So this drives the block. The seed command is a stand-in, because the real
-// one fetches a module, but the shape under test is the one that broke: what
-// the step assumes about the working directory, and whether anything but the
-// spec's own command decides where files land.
 func TestTheRenderedCheckoutStandsUpAWorkspace(t *testing.T) {
 	t.Parallel()
 
@@ -715,9 +671,6 @@ func TestTheRenderedCheckoutStandsUpAWorkspace(t *testing.T) {
 	block := checkoutBlock(t, intake)
 	require.NotEmpty(t, block, "the rendered intake must carry a checkout step")
 
-	// A runner expands every ${{ }} before sh sees the block. Stand in for
-	// that, or sh reads the braces as its own syntax and fails on the line
-	// this test is not about.
 	block = expressions.ReplaceAllString(block, "expanded")
 
 	cmd := exec.Command("sh", "-e", "-c", block)
@@ -733,9 +686,6 @@ func TestTheRenderedCheckoutStandsUpAWorkspace(t *testing.T) {
 	}
 }
 
-// checkoutBlock lifts the run: block of the checkout step out of a rendered
-// workflow and strips its indentation, so the test drives the same text a
-// runner would.
 func checkoutBlock(t *testing.T, workflow string) string {
 	t.Helper()
 
@@ -762,19 +712,8 @@ func checkoutBlock(t *testing.T, workflow string) string {
 	return b.String()
 }
 
-// expressions matches an Actions ${{ }} expression, which a runner expands
-// before the shell ever sees it.
 var expressions = regexp.MustCompile(`\$\{\{[^}]*\}\}`)
 
-// TestOnlyAScheduledWorkflowRaisesItsOwnAlarm pins who gets a failure report.
-//
-// A scheduled run has no audience by construction, and one instance proved
-// what that costs: eight consecutive red runs over eight days, seen by
-// nobody, while the thing the schedule existed to maintain went stale. So a
-// cron workflow files an issue on itself.
-//
-// A dispatched run already has the person who dispatched it. Filing there
-// would turn a mistyped payload into repository noise.
 func TestOnlyAScheduledWorkflowRaisesItsOwnAlarm(t *testing.T) {
 	t.Parallel()
 
@@ -798,28 +737,15 @@ func TestOnlyAScheduledWorkflowRaisesItsOwnAlarm(t *testing.T) {
 	assert.Contains(t, scheduled, "TOKEN: ${{ github.token }}",
 		"reporting a failure must not need a secret somebody has to remember to seal")
 
-	// A repository_dispatch run looks attended and is not: somebody caused
-	// it from another repo, and they are watching that repo's checks. This
-	// was gated on cron alone until a second workspace needed a
-	// member-pushed pipeline and the hole showed.
 	dispatched := byName["request"]
 	assert.Contains(t, dispatched, "- name: Say that the run failed",
 		"a run somebody triggered from another repo has no audience here")
 	assert.Contains(t, dispatched, "issues: write")
 
-	// A push to this repo, or a workflow_dispatch somebody typed, has a
-	// person already looking at these checks.
 	assert.NotContains(t, byName["propagate"], "Say that the run failed",
 		"a tag push here is watched by whoever pushed the tag")
 }
 
-// TestEveryGeneratedWorkflowCanBeFiredByHand pins the trigger that makes a
-// workflow testable.
-//
-// A workflow only a schedule or another repo can fire cannot be run by the
-// person who just changed it. They push the change and wait, which is how one
-// of these went eight days without completing a run: nobody could try it, so
-// nobody did.
 func TestEveryGeneratedWorkflowCanBeFiredByHand(t *testing.T) {
 	t.Parallel()
 
@@ -837,15 +763,6 @@ func TestEveryGeneratedWorkflowCanBeFiredByHand(t *testing.T) {
 	}
 }
 
-// TestAPublishingWorkflowGetsACredentialAndThePermissionToUseIt pins the gap
-// that would have failed the first release at its last step.
-//
-// Nothing else puts a token into the environment the pipeline command runs
-// in. Engines inherit forge-ci's environment and nothing else, and the
-// secrets a bootstrap seals into Actions are sealed on the operator's laptop:
-// they put nothing into a running job. So a release engine that shells out to
-// the API, or pushes to a registry, had no credential at all, and would have found
-// that out after the build and the tags.
 func TestAPublishingWorkflowGetsACredentialAndThePermissionToUseIt(t *testing.T) {
 	t.Parallel()
 
@@ -873,8 +790,6 @@ func TestAPublishingWorkflowGetsACredentialAndThePermissionToUseIt(t *testing.T)
 	assert.Contains(t, got, "contents: write")
 }
 
-// A workflow that publishes nothing must not carry a credential it does not
-// need. A token in an environment is a token something can read.
 func TestAWorkflowThatPublishesNothingCarriesNoToken(t *testing.T) {
 	t.Parallel()
 
@@ -896,16 +811,6 @@ func TestAWorkflowThatPublishesNothingCarriesNoToken(t *testing.T) {
 	assert.NotContains(t, got, "packages: write")
 }
 
-// TestTheWorkflowSecretReachesTheCommandAndNotOnlyTheCheckout pins the gap
-// that failed the pipeline at its real work.
-//
-// An apply reconciles the resources it declares before it runs anything, and
-// a sealed Actions secret is realized by PUTTING it: the API is write-only,
-// so a put is the only convergence there is, and a put needs the value. The
-// secret reached the checkout step's git config and nothing else, so every
-// run died on "environment variable FORGE_CI_GITHUB_TOKEN is empty" - advice
-// written for an operator's laptop, printed inside a runner that has no
-// .envrc to fix.
 func TestTheWorkflowSecretReachesTheCommandAndNotOnlyTheCheckout(t *testing.T) {
 	t.Parallel()
 
@@ -930,8 +835,6 @@ func TestTheWorkflowSecretReachesTheCommandAndNotOnlyTheCheckout(t *testing.T) {
 		"the checkout still gets it too")
 }
 
-// A workflow that names no secret carries none. A credential in an
-// environment is a credential something can read.
 func TestAWorkflowWithNoSecretCarriesNoSecretEnv(t *testing.T) {
 	t.Parallel()
 
@@ -949,13 +852,6 @@ func TestAWorkflowWithNoSecretCarriesNoSecretEnv(t *testing.T) {
 	assert.NotContains(t, rendered[0].Content, "secrets.FORGE_CI_GITHUB_TOKEN")
 }
 
-// A factory's own pipeline needs both: nothing dispatches when the workspace
-// files themselves change, and two applies at once race the state repo.
-//
-// Live case: the hand-written workflow these replace carried a concurrency
-// group with the comment "apply is idempotent, and two at once would race the
-// state repo", and seven dispatches arrived within seconds of each other the
-// day this was written.
 func TestAPipelineCanRunOnItsOwnPushAndOnlyOneAtATime(t *testing.T) {
 	t.Parallel()
 
@@ -978,24 +874,14 @@ func TestAPipelineCanRunOnItsOwnPushAndOnlyOneAtATime(t *testing.T) {
 	got := files[0].Content
 	assert.Contains(t, got, "  push:\n    branches: [main]\n")
 
-	// The engine's own guarantee, never a knob: one push wave dispatches
-	// once per member, so a command workflow without this races itself on
-	// the state repo. The group is the platform's own name for the
-	// workflow; nothing is hand-typed anywhere.
 	assert.Contains(t, got, "\nconcurrency:\n  group: ${{ github.workflow }}\n  cancel-in-progress: false\n")
 
-	// Queued, never cancelled. An apply already writing state has to finish,
-	// or the store keeps a revision with no run beside it.
 	assert.NotContains(t, got, "cancel-in-progress: true")
 
 	var parsed map[string]any
 	require.NoError(t, yaml.Unmarshal([]byte(got), &parsed), "the rendered workflow must be valid YAML")
 }
 
-// The push trigger is rendered only when asked; the concurrency group is
-// never asked for - every command workflow serializes its own runs, because
-// one push wave dispatches once per member and a workflow without the group
-// races itself on the state repo.
 func TestPushTriggerIsOptionalAndSerializationIsNot(t *testing.T) {
 	t.Parallel()
 
@@ -1007,8 +893,6 @@ func TestPushTriggerIsOptionalAndSerializationIsNot(t *testing.T) {
 		byName[f.Name] = f.Content
 	}
 
-	// Only the command workflows. A fan-out fires on a tag push by
-	// definition, so "push:" there is its trigger and not this feature.
 	for _, name := range []string{"intake", "request", "ci-runner"} {
 		assert.NotContainsf(t, byName[name], "  push:\n    branches:",
 			"%s asked for no push trigger", name)
