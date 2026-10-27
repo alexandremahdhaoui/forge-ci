@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 
+	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/execadapter"
+	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/forgeadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/fsadapter"
+	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/gitadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/githubadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/computecontroller"
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/workflowcontroller"
@@ -17,7 +20,9 @@ func NewHandlers() Handlers {
 		return githubadapter.New(nil, spec.APIBaseURL, citypes.SecretFromEnv(spec.TokenEnv))
 	}, nil, nil)
 
-	files := computecontroller.New(nil, nil, fsadapter.New(), nil, nil)
+	disk := fsadapter.New()
+	runner := execadapter.New()
+	files := computecontroller.New(runner, forgeadapter.New(disk), disk, gitadapter.New(runner), nil)
 
 	return Handlers{
 		Declare: func(_ context.Context, in DeclareInput) (*DeclareOutput, error) {
