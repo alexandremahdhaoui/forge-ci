@@ -1,14 +1,17 @@
 package machineconfigcontroller_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/registry"
@@ -662,6 +665,52 @@ func TestAnInstallerRegistryThatCannotBeReachedIsRefusedNamingTheReference(t *te
 	_, err := declareAgainstTheRegistry(t, aMintingRendererPinning(t, reference))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "resolving the installer image "+reference+" of cluster t0: ")
+}
+
+func TestAnInstallerRegistryThatAcceptsAndNeverAnswersIsRefusedNamingTheReferenceAndTheCeiling(t *testing.T) {
+	exported(t)
+
+	silent := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	t.Cleanup(silent.Close)
+
+	reference := strings.TrimPrefix(silent.URL, "http://") + "/metal-installer:v1.14.0@" + aDigestNoRegistryServes
+
+	shortened, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+	defer cancel()
+
+	_, err := machineconfigcontroller.New(
+		filesOnDisk(t), aMintingRendererPinning(t, reference), aNodeInMaintenance(t), &containeradapter.Remote{},
+	).Declare(shortened, citypes.DeclareInput{Root: "/w", Spec: fullSpec()})
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Contains(t, err.Error(),
+		"resolving the installer image "+reference+" of cluster t0: the registry did not answer within 30s: ")
+}
+
+func TestTheRegistryIsAskedWithADeadlineThirtySecondsAway(t *testing.T) {
+	exported(t)
+
+	var deadline time.Time
+
+	registry := machineconfigcontrollermock.NewMockRegistry(t)
+	registry.EXPECT().Digest(mock.Anything, "registry.example.invalid/metal-installer:v1.14.0").
+		RunAndReturn(func(ctx context.Context, _ string) (string, error) {
+			deadline, _ = ctx.Deadline()
+
+			return aDigestNoRegistryServes, nil
+		}).Once()
+
+	asked := time.Now()
+
+	_, err := machineconfigcontroller.New(
+		filesOnDisk(t),
+		aMintingRendererPinning(t, "registry.example.invalid/metal-installer:v1.14.0@"+aDigestNoRegistryServes),
+		aNodeInMaintenance(t), registry,
+	).Declare(t.Context(), citypes.DeclareInput{Root: "/w", Spec: fullSpec()})
+	require.NoError(t, err)
+	require.False(t, deadline.IsZero(), "the registry call carries a deadline")
+	assert.WithinDuration(t, asked.Add(30*time.Second), deadline, 5*time.Second)
 }
 
 func TestAnInstallerImageTheRendererCannotReadIsAnErrorNamingTheCluster(t *testing.T) {

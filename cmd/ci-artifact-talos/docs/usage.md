@@ -108,7 +108,8 @@ the image pins both a tag and a digest, the engine resolves the tag against
 its registry anonymously and refuses by name a tag that resolves to another
 digest. The refusal names the image, the tag, the resolved digest and the
 pinned digest. A registry that cannot be reached is an error naming the
-image.
+image. A registry that does not answer within 30 seconds is refused naming
+the image and that ceiling.
 
 Every spec key is required and an absent one is refused by name before
 anything is read. A variable holding nothing is refused naming the

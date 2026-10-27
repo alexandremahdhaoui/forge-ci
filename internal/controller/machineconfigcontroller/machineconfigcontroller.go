@@ -7,6 +7,7 @@ import (
 	"net"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/fsadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/talossecretsadapter"
@@ -19,6 +20,8 @@ const (
 	kindSecretBundle     = "secret-bundle"
 
 	apiServerPort = "6443"
+
+	installerResolveCeiling = 30 * time.Second
 
 	nodeFromTheTalosconfig = "the node and the endpoint come from the talosconfig " +
 		"the variable spec.talosconfigEnv names"
@@ -299,7 +302,15 @@ func (c *Controller) refuseAnInstallerImageNotPinnedByDigest(
 		return nil
 	}
 
-	resolved, err := c.registry.Digest(ctx, tagged)
+	bounded, cancel := context.WithTimeout(ctx, installerResolveCeiling)
+	defer cancel()
+
+	resolved, err := c.registry.Digest(bounded, tagged)
+	if errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Errorf("resolving the installer image %s of cluster %s: the registry did not answer within %s: %w",
+			reference, clusterName, installerResolveCeiling, err)
+	}
+
 	if err != nil {
 		return fmt.Errorf("resolving the installer image %s of cluster %s: %w", reference, clusterName, err)
 	}
