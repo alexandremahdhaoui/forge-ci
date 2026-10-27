@@ -12,20 +12,12 @@ import (
 	"github.com/alexandremahdhaoui/forge/pkg/forge"
 )
 
-// NewHandlers wires the github compute into the generated tool surface.
-//
-// The API client is built per run from the parsed spec: base URL and
-// token variable come from the pipeline, and the token itself is read
-// from the environment - it never crosses the wire.
 func NewHandlers() Handlers {
 	ctrl := workflowcontroller.New(func(spec workflowcontroller.Spec) githubadapter.API {
 		return githubadapter.New(nil, spec.APIBaseURL, citypes.SecretFromEnv(spec.TokenEnv))
 	}, nil, nil)
 
-	// put and get are the same controller the local engine runs: the files
-	// live under the root either way, and the rendered workflow is what
-	// carries that directory between jobs.
-	files := computecontroller.New(nil, nil, nil, nil)
+	files := computecontroller.New(nil, nil, fsadapter.New(), nil)
 
 	return Handlers{
 		Declare: func(_ context.Context, in DeclareInput) (*DeclareOutput, error) {
@@ -54,7 +46,7 @@ func NewHandlers() Handlers {
 				return nil, err
 			}
 
-			out, err := files.Put(fsadapter.New(), citypes.ArtifactPutInput{
+			out, err := files.Put(citypes.ArtifactPutInput{
 				Revision: in.Revision, Artifacts: artifacts, Root: in.Root, Spec: in.Spec,
 			})
 			if err != nil {
@@ -74,7 +66,7 @@ func NewHandlers() Handlers {
 				return nil, err
 			}
 
-			out, err := files.Get(fsadapter.New(), citypes.ArtifactGetInput{
+			out, err := files.Get(citypes.ArtifactGetInput{
 				Revision: in.Revision, Artifacts: artifacts, Root: in.Root, Spec: in.Spec,
 			})
 			if err != nil {
@@ -130,9 +122,6 @@ func fromResources(in []citypes.Resource) []Resource {
 	return out
 }
 
-// toArtifacts reads forge's own records off the wire and fromArtifacts puts
-// them back. Marshalling is the mapping on purpose: the shape is whatever
-// forge emits, and describing it again is what we are avoiding.
 func toArtifacts(in []ForgeArtifact) ([]forge.Artifact, error) {
 	out := make([]forge.Artifact, 0, len(in))
 
@@ -175,9 +164,6 @@ func fromArtifacts(in []forge.Artifact) ([]ForgeArtifact, error) {
 	return out, nil
 }
 
-// toStages reads the pipeline's stages off the wire, the shape the phased
-// renderer lays its jobs out from. The display names come with them, so a job
-// is titled by the factory that declared it rather than by this engine.
 func toRepos(in []DeclaredRepo) []citypes.DeclaredRepo {
 	out := make([]citypes.DeclaredRepo, 0, len(in))
 

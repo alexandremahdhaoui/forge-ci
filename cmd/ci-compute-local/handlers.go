@@ -19,7 +19,8 @@ import (
 // TestReport and Artifact, their schema lives in forge, and a copy here would
 // drift from what forge emits. That section travels as the JSON it already is.
 func NewHandlers() Handlers {
-	ctrl := computecontroller.New(execadapter.New(), forgeadapter.New(fsadapter.New()), fsadapter.New(), nil)
+	files := fsadapter.New()
+	ctrl := computecontroller.New(execadapter.New(), forgeadapter.New(files), files, nil)
 
 	return Handlers{
 		Declare: func(_ context.Context, in DeclareInput) (*DeclareOutput, error) {
@@ -57,7 +58,7 @@ func NewHandlers() Handlers {
 				return nil, err
 			}
 
-			out, err := ctrl.Put(fsadapter.New(), citypes.ArtifactPutInput{
+			out, err := ctrl.Put(citypes.ArtifactPutInput{
 				Revision: in.Revision, Artifacts: artifacts, Root: in.Root, Spec: in.Spec,
 			})
 			if err != nil {
@@ -77,7 +78,7 @@ func NewHandlers() Handlers {
 				return nil, err
 			}
 
-			out, err := ctrl.Get(fsadapter.New(), citypes.ArtifactGetInput{
+			out, err := ctrl.Get(citypes.ArtifactGetInput{
 				Revision: in.Revision, Artifacts: artifacts, Root: in.Root, Spec: in.Spec,
 			})
 			if err != nil {

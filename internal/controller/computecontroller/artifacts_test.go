@@ -26,9 +26,9 @@ func TestPutThenGetRoundTripsAFileByRevision(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(root, rel), []byte("bytes"), 0o600))
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "member", "generated"), 0o750))
 
-	ctrl := computecontroller.New(nil, nil, nil, nil)
+	ctrl := computecontroller.New(nil, nil, fsadapter.New(), nil)
 
-	put, err := ctrl.Put(fsadapter.New(), citypes.ArtifactPutInput{
+	put, err := ctrl.Put(citypes.ArtifactPutInput{
 		Revision: "rev1", Root: root,
 		Artifacts: []forge.Artifact{
 			{Name: "tool", Type: "binary", Location: rel},
@@ -47,7 +47,7 @@ func TestPutThenGetRoundTripsAFileByRevision(t *testing.T) {
 	// the engine's place has the bytes.
 	require.NoError(t, os.Remove(filepath.Join(root, rel)))
 
-	got, err := ctrl.Get(fsadapter.New(), citypes.ArtifactGetInput{
+	got, err := ctrl.Get(citypes.ArtifactGetInput{
 		Revision: "rev1", Root: root, Artifacts: put.Artifacts,
 	})
 	require.NoError(t, err)
@@ -71,9 +71,9 @@ func TestAnImageLayoutTravelsAsATree(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(root, layout, "index.json"), []byte("{}"), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(root, layout, "blobs", "sha256", "abc"), []byte("layer"), 0o600))
 
-	ctrl := computecontroller.New(nil, nil, nil, nil)
+	ctrl := computecontroller.New(nil, nil, fsadapter.New(), nil)
 
-	put, err := ctrl.Put(fsadapter.New(), citypes.ArtifactPutInput{
+	put, err := ctrl.Put(citypes.ArtifactPutInput{
 		Revision: "rev1", Root: root,
 		Artifacts: []forge.Artifact{{Name: "tool", Type: "container", Location: "file://" + filepath.Join(root, layout)}},
 	})
@@ -83,7 +83,7 @@ func TestAnImageLayoutTravelsAsATree(t *testing.T) {
 
 	require.NoError(t, os.RemoveAll(filepath.Join(root, layout)))
 
-	got, err := ctrl.Get(fsadapter.New(), citypes.ArtifactGetInput{Revision: "rev1", Root: root, Artifacts: put.Artifacts})
+	got, err := ctrl.Get(citypes.ArtifactGetInput{Revision: "rev1", Root: root, Artifacts: put.Artifacts})
 	require.NoError(t, err)
 	require.Equal(t, "file://"+filepath.Join(root, layout), got.Artifacts[0].Location)
 
@@ -97,15 +97,15 @@ func TestAnImageLayoutTravelsAsATree(t *testing.T) {
 func TestGetRefusesALocationNoPutAnswered(t *testing.T) {
 	t.Parallel()
 
-	ctrl := computecontroller.New(nil, nil, nil, nil)
+	ctrl := computecontroller.New(nil, nil, fsadapter.New(), nil)
 
-	_, err := ctrl.Get(fsadapter.New(), citypes.ArtifactGetInput{
+	_, err := ctrl.Get(citypes.ArtifactGetInput{
 		Revision: "rev1", Root: t.TempDir(),
 		Artifacts: []forge.Artifact{{Name: "x", Location: computecontroller.ArtifactScheme + "rev1"}},
 	})
 	require.ErrorIs(t, err, computecontroller.ErrArtifactURL)
 
-	put, err := ctrl.Put(fsadapter.New(), citypes.ArtifactPutInput{
+	put, err := ctrl.Put(citypes.ArtifactPutInput{
 		Revision: "rev1", Root: t.TempDir(),
 		Artifacts: []forge.Artifact{{Name: "escape", Type: "binary", Location: "../outside_linux_amd64"}},
 	})
@@ -116,7 +116,7 @@ func TestGetRefusesALocationNoPutAnswered(t *testing.T) {
 func TestPutNeedsARevision(t *testing.T) {
 	t.Parallel()
 
-	_, err := computecontroller.New(nil, nil, nil, nil).Put(fsadapter.New(), citypes.ArtifactPutInput{Root: t.TempDir()})
+	_, err := computecontroller.New(nil, nil, fsadapter.New(), nil).Put(citypes.ArtifactPutInput{Root: t.TempDir()})
 	require.Error(t, err)
 }
 
@@ -136,14 +136,13 @@ func TestGetSkipsWhatThisRunNeverPut(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	fs := fsadapter.New()
-	ctrl := computecontroller.New(nil, nil, nil, nil)
+	ctrl := computecontroller.New(nil, nil, fsadapter.New(), nil)
 
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "member", "build", "bin"), 0o750))
 	require.NoError(t, os.WriteFile(
 		filepath.Join(root, "member", "build", "bin", "here_linux_amd64"), []byte("real"), 0o600))
 
-	put, err := ctrl.Put(fs, citypes.ArtifactPutInput{
+	put, err := ctrl.Put(citypes.ArtifactPutInput{
 		Revision: "rev1", Root: root,
 		Artifacts: []forge.Artifact{
 			{Name: "here", Type: "binary", Location: "member/build/bin/here_linux_amd64"},
@@ -160,7 +159,7 @@ func TestGetSkipsWhatThisRunNeverPut(t *testing.T) {
 		Location: computecontroller.ArtifactScheme + "rev1/member/build/bin/server_linux_amd64",
 	}
 
-	got, err := ctrl.Get(fs, citypes.ArtifactGetInput{
+	got, err := ctrl.Get(citypes.ArtifactGetInput{
 		Revision: "rev1", Root: root,
 		Artifacts: append(put.Artifacts, absent),
 	})
@@ -178,14 +177,13 @@ func TestPutThenGetKeepsTheExecutableBit(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	fs := fsadapter.New()
-	ctrl := computecontroller.New(nil, nil, nil, nil)
+	ctrl := computecontroller.New(nil, nil, fsadapter.New(), nil)
 	rel := filepath.Join("member", "build", "bin", "server")
 
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "member", "build", "bin"), 0o750))
 	require.NoError(t, os.WriteFile(filepath.Join(root, rel), []byte("#!/bin/sh\ntrue\n"), 0o755))
 
-	put, err := ctrl.Put(fs, citypes.ArtifactPutInput{
+	put, err := ctrl.Put(citypes.ArtifactPutInput{
 		Revision:  "rev1",
 		Root:      root,
 		Artifacts: []forge.Artifact{{Name: "server", Type: "binary", Location: rel}},
@@ -199,7 +197,7 @@ func TestPutThenGetKeepsTheExecutableBit(t *testing.T) {
 	// The runner that built it is gone.
 	require.NoError(t, os.Remove(filepath.Join(root, rel)))
 
-	_, err = ctrl.Get(fs, citypes.ArtifactGetInput{Revision: "rev1", Root: root, Artifacts: put.Artifacts})
+	_, err = ctrl.Get(citypes.ArtifactGetInput{Revision: "rev1", Root: root, Artifacts: put.Artifacts})
 	require.NoError(t, err)
 
 	back, err := os.Stat(filepath.Join(root, rel))

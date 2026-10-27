@@ -44,10 +44,12 @@ var (
 // answers the records with their locations rewritten. A record whose
 // location is already a URL, an image reference say, passes through: it is
 // somebody else's to serve.
-func (c *Controller) Put(fs fsadapter.FS, in citypes.ArtifactPutInput) (citypes.ArtifactPutOutput, error) {
+func (c *Controller) Put(in citypes.ArtifactPutInput) (citypes.ArtifactPutOutput, error) {
 	if strings.TrimSpace(in.Revision) == "" {
 		return citypes.ArtifactPutOutput{}, errors.New("putting artifacts: no revision given")
 	}
+
+	fs := c.fs
 
 	out := citypes.ArtifactPutOutput{Artifacts: make([]forge.Artifact, 0, len(in.Artifacts))}
 
@@ -111,7 +113,8 @@ func (c *Controller) Put(fs fsadapter.FS, in citypes.ArtifactPutInput) (citypes.
 // Nothing is hidden by skipping. What needs a file fails on that file: a
 // release digests every asset it plans to upload before it writes anything,
 // and says which one is missing.
-func (c *Controller) Get(fs fsadapter.FS, in citypes.ArtifactGetInput) (citypes.ArtifactGetOutput, error) {
+func (c *Controller) Get(in citypes.ArtifactGetInput) (citypes.ArtifactGetOutput, error) {
+	fs := c.fs
 	out := citypes.ArtifactGetOutput{Artifacts: make([]forge.Artifact, 0, len(in.Artifacts))}
 
 	for _, artifact := range in.Artifacts {
