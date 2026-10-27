@@ -19,6 +19,34 @@ func TestWriteCreatesTheParentDirectory(t *testing.T) {
 	require.Equal(t, "hi", string(body))
 }
 
+func TestModeReturnsThePermissionBitsAndNoFileTypeBits(t *testing.T) {
+	dir := t.TempDir()
+
+	file := filepath.Join(dir, "talosconfig")
+	require.NoError(t, os.WriteFile(file, []byte("x"), 0o600))
+	require.NoError(t, os.Chmod(file, 0o600))
+
+	mode, err := fsadapter.New().Mode(file)
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(0o600), mode)
+
+	sub := filepath.Join(dir, "recovery")
+	require.NoError(t, os.Mkdir(sub, 0o700))
+	require.NoError(t, os.Chmod(sub, 0o700))
+
+	mode, err = fsadapter.New().Mode(sub)
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(0o700), mode, "a directory answers 0700 without its directory bit")
+}
+
+func TestModeOfAMissingFileNamesIt(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "absent")
+
+	_, err := fsadapter.New().Mode(missing)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), missing)
+}
+
 func TestReadingAMissingFileNamesIt(t *testing.T) {
 	_, err := fsadapter.New().ReadFile("/nope/f.txt")
 	require.Error(t, err)
