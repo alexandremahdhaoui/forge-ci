@@ -49,92 +49,47 @@ type StageReport struct {
 	Advance bool          `json:"advance"`
 	Reason  string        `json:"reason"`
 
-	// Reused counts the runs answered from the recorded state instead of
-	// being executed: the revision already carried a green record for the
-	// substage, so nothing ran.
 	Reused int `json:"reused,omitempty"`
 
-	// Released is what the substages of this stage that publish answered.
 	Released []citypes.ArtifactOutput `json:"released,omitempty"`
 }
 
 type Report struct {
 	Revision citypes.Revision `json:"revision"`
 
-	// Version is the one number this apply would release under, derived
-	// before the first stage so the build stamp and the release tag cannot
-	// disagree.
 	Version string `json:"version,omitempty"`
 
 	Actions []string      `json:"actions"`
 	Stages  []StageReport `json:"stages"`
 
-	// Minted says the revision reached state. A revision nobody minted was
-	// never proven, so nothing downstream may act on it.
 	Minted bool `json:"minted"`
 
-	// Released is where each release landed, one per substage that published.
 	Released []citypes.ArtifactOutput `json:"released,omitempty"`
 
-	// Planned says this was a dry run. Nothing was written, anywhere, and
-	// Actions is what a real run would do instead.
 	Planned bool `json:"planned,omitempty"`
 
-	// Superseded says a manager found drift in the pipeline's own resources,
-	// corrected it, and made the correction durable. Nothing ran after that.
-	//
-	// This is not a failure. The run was measuring a tree that the reconcile
-	// it just performed had rewritten, so continuing would prove the wrong
-	// thing: the revision would carry the pipeline's own uncommitted output
-	// and the release would refuse it. The change is already durable, so the
-	// run it triggers reads the corrected state and reconciles to no change.
 	Superseded bool `json:"superseded,omitempty"`
 
-	// NothingNew says every run this apply reports was reused from the
-	// recorded state: the revision had already run green, so nothing
-	// executed. A serialized duplicate - two dispatches from one push wave,
-	// the second starting after the first finished - lands here, and the
-	// report says so instead of reading like a build that did work.
 	NothingNew bool `json:"nothingNew,omitempty"`
 
-	// Skipped says the release decision found nothing to release for this
-	// revision, and the run ended before any stage: the revision was
-	// already released, every commit since the last tag is one the
-	// vocabulary ignores, or the release set did not move. Reason says
-	// which. Not a failure: the next real change runs everything.
 	Skipped bool   `json:"skipped,omitempty"`
 	Reason  string `json:"reason,omitempty"`
 
-	// Evaluation is the one word the evaluate phase answers, skip or
-	// proceed, which a rendered workflow reads to decide whether the phases
-	// after it run at all. Empty outside that phase.
 	Evaluation string `json:"evaluation,omitempty"`
 
-	// Reconciliation is the one word the reconcile answers, superseded or
-	// converged, which a rendered workflow reads to decide whether the
-	// evaluate job runs at all. A whole apply that superseded itself stops
-	// in-process; a phased apply is cut into jobs, and without this word the
-	// job after the reconcile ran on the superseded state and released a
-	// version the superseding run then released again. Set whenever the
-	// reconcile ended the run or was the phase asked for.
 	Reconciliation string `json:"reconciliation,omitempty"`
 }
 
-// The words the evaluate phase answers.
 const (
 	EvaluationSkip    = "skip"
 	EvaluationProceed = "proceed"
 )
 
-// The words the self-reconcile phase answers.
 const (
 	ReconciliationSuperseded = "superseded"
 	ReconciliationConverged  = "converged"
 )
 
-// Advanced reports whether anything blocked. A superseded report did not
-// block: no stage failed, no gate refused, and the run that follows is the
-// one carrying the work.
 func (r Report) Advanced() bool {
 	for _, s := range r.Stages {
 		if !s.Advance {
@@ -145,53 +100,18 @@ func (r Report) Advanced() bool {
 	return true
 }
 
-// Options is how one verb was asked for.
-//
-// DryRun forbids every write and ends the run after the reconcile: no
-// revision is resolved, no stage runs, nothing is minted or released. It
-// takes the same code path a real run takes, with the write suppressed, so a
-// plan that says nothing would change is a promise the next run keeps.
-//
-// Force rewrites what cannot be compared, which today is one thing: an
-// Actions secret, whose value the API never returns.
 type Options struct {
 	DryRun bool
 	Force  bool
 
-	// Phase is which part of the apply to run: empty for the whole thing,
-	// or one of self-reconcile, evaluate, stages. Each phase reads
-	// and writes state, so a phase can run in a process of its own and the
-	// next phase carries on from the record. That is what lets a compute
-	// engine render one apply as several jobs, each visible on its own.
 	Phase string
 
-	// Stage narrows the stages phase to one stage by name, so a compute
-	// engine can render one job per stage. It refuses to run before the
-	// stage in front of it advanced, which it asks that stage's promotion
-	// over the run records its substages left. Substage narrows it further
-	// to one substage and its gates, for one job per substage.
 	Stage    string
 	Substage string
 
-	// Revision is the revision this phase is bound to: the one the evaluate
-	// phase decided for, handed on by whatever rendered the jobs. A run has
-	// exactly one revision, fixed before its first stage, and a phase in a
-	// process of its own has no other way to learn it - its own checkout
-	// answers whatever the repos hold NOW, which is a different question.
-	//
-	// A stage that publishes into a repo this pipeline writes moves that
-	// repo mid-run, so without this the next job resolves another revision
-	// and finds none of the records the run wrote under the first one.
 	Revision string
 }
 
-// The phases of an apply. PhaseAll is the whole loop in one process,
-// which is what every apply was before phases existed.
-//
-// There is no release phase. A release is a substage of a stage, so it runs
-// where the pipeline says it runs, under PhaseStages like everything else.
-// Hoisting it into a phase of its own was what made a whole apply and a
-// phased apply fire the same releases at different points.
 const (
 	PhaseAll           = ""
 	PhaseSelfReconcile = "self-reconcile"
@@ -199,7 +119,6 @@ const (
 	PhaseStages        = "stages"
 )
 
-// Phases is every phase name a caller may ask for.
 var Phases = []string{PhaseSelfReconcile, PhaseEvaluate, PhaseStages}
 
 type Controller struct {
@@ -216,9 +135,6 @@ func New(caller engineadapter.Caller, git gitadapter.Git, now func() time.Time) 
 		now = time.Now
 	}
 
-	// The real filesystem, not an injection point: the only read is the lock
-	// manifest at a root the caller already owns, and an absent file is the
-	// ordinary case a fixture wants anyway.
 	return &Controller{caller: caller, git: git, fs: fsadapter.New(), now: now}
 }
 
@@ -231,9 +147,6 @@ func (c *Controller) Apply(
 
 	var actions []string
 
-	// A phase after the reconcile trusts the reconcile that ran before it,
-	// in the process that ran it: the phases are one apply cut into jobs,
-	// and the first job is the one that converged the surface.
 	if phase == PhaseAll || phase == PhaseSelfReconcile {
 		return c.applyFrom(ctx, p, index, root, opts, phase)
 	}
@@ -241,8 +154,6 @@ func (c *Controller) Apply(
 	return c.applyPhases(ctx, p, index, root, opts, actions)
 }
 
-// applyFrom is an apply that starts at the reconcile: a whole run, or the
-// reconcile phase alone.
 func (c *Controller) applyFrom(
 	ctx context.Context,
 	p config.Pipeline,
@@ -251,43 +162,15 @@ func (c *Controller) applyFrom(
 	opts Options,
 	phase string,
 ) (Report, error) {
-	// false: an apply converges what can be converged and leaves credentials
-	// alone. Only a bootstrap is responsible for those.
 	actions, changed, published, err := c.reconcileResources(ctx, p, index, root, false, opts)
 	if err != nil {
 		return Report{}, err
 	}
 
-	// A plan ends here. Resolving a revision would be harmless and running a
-	// stage would not: a stage builds, writes and records, and none of that
-	// is a plan.
 	if opts.DryRun {
 		return Report{Actions: actions, Planned: true}, nil
 	}
 
-	// A reconcile that changed something ends the run here, before the
-	// revision is resolved.
-	//
-	// The reconcile above writes into the member checkouts, and the revision
-	// below hashes each member's HEAD plus its uncommitted changes. Resolving
-	// after converging measures the tree this run just rewrote: the revision
-	// comes out dirty, the release refuses it, and every run repeats that
-	// forever because a fresh clone starts from the same drift. Live run
-	// 33309087584 died exactly this way.
-	//
-	// So the reconcile is complete - every resource, never one per run - and
-	// the manager has already made its changes durable. The run those changes
-	// trigger starts from the corrected state, finds no drift, and does the
-	// work.
-	//
-	// Superseding is a promise that the superseding run exists, so it is
-	// allowed only when the settle PUBLISHED the changes - a push is what
-	// re-fires the pipeline. A change nobody published cannot re-trigger
-	// anything: stopping for one strands the pipeline forever, which is
-	// exactly what an empty state directory did to a live pipeline for two
-	// runs straight. Such a change is already durable on this machine, so
-	// the run continues and measures the converged state; if it dirtied a
-	// member tree the -dirty refusal at release stays the honest guard.
 	if changed && published {
 		return Report{Actions: actions, Superseded: true, Reconciliation: ReconciliationSuperseded}, nil
 	}
@@ -304,8 +187,6 @@ func (c *Controller) applyFrom(
 	return c.applyPhases(ctx, p, index, root, opts, actions)
 }
 
-// applyPhases is everything after the reconcile: the revision, the release
-// decision, the stages and the release, from the phase asked for onward.
 func (c *Controller) applyPhases(
 	ctx context.Context,
 	p config.Pipeline,
@@ -318,13 +199,6 @@ func (c *Controller) applyPhases(
 
 	phase := opts.Phase
 
-	// The revision is resolved here because a run record is keyed by it. It is
-	// not written yet. A revision in state is a claim that this tuple of
-	// commits was proven, and minting it before anything runs hands a broken
-	// build a revision that can propagate.
-	//
-	// Unless this phase was handed the one its run is bound to, in which case
-	// it reads it rather than deriving it: see pinned.go.
 	var (
 		revision citypes.Revision
 		pinned   releaseDecision
@@ -340,13 +214,6 @@ func (c *Controller) applyPhases(
 		return Report{}, err
 	}
 
-	// The release decision is made ONCE, before any stage runs, and carried
-	// from here. The build stamp and the release tag are then the same
-	// number by construction rather than by two computations agreeing: a
-	// binary that reports a different version from the release it shipped
-	// in is a lie the operator acts on. And a revision with nothing to
-	// release ends here, before anything builds: a docs commit is proven by
-	// the run that follows a real one.
 	var decision releaseDecision
 
 	if phase == PhaseAll || phase == PhaseEvaluate {
@@ -355,10 +222,6 @@ func (c *Controller) applyPhases(
 			return Report{}, err
 		}
 
-		// A phased apply hands the decision to the phases that follow in
-		// other processes through state, and the revision travels with it:
-		// a later phase resolving its own would answer for whatever the
-		// repos hold by then. A whole apply keeps both in hand.
 		if phase == PhaseEvaluate {
 			decision.Revision = revision
 
@@ -386,16 +249,6 @@ func (c *Controller) applyPhases(
 		return report, nil
 	}
 
-	// The revision is minted here, before the first stage, and nowhere else.
-	//
-	// It is the run's identity, not its verdict. Every job of a phased run
-	// answers to it, the artifacts a stage keeps are filed under it, and a
-	// consumer that resolves a module by revision gets an alias that is fixed
-	// from the moment the pipeline decided to build. Waiting for green made
-	// the identity depend on the outcome, which is backwards: whether these
-	// commits were PROVEN is answered by the run records and by the release,
-	// each of which says so in its own words. Nothing reads a revision record
-	// as proof.
 	if phase == PhaseEvaluate || phase == PhaseAll {
 		if err := c.mint(ctx, index, revision); err != nil {
 			return Report{}, err
@@ -414,17 +267,11 @@ func (c *Controller) applyPhases(
 		return report, nil
 	}
 
-	// One stage, or one substage, or one stage's promotion: a job of its
-	// own, carried on from the records the jobs before it wrote.
 	if opts.Stage != "" {
 		return c.applyNamedStage(ctx, p, index, root, revision, decision, opts, report)
 	}
 
 	for _, stage := range p.Stages {
-		// Everything a stage of this apply built is still on this disk, where
-		// it built it, so only a stage that PUBLISHES needs the records
-		// brought back: an artifact engine is handed locations, and put
-		// rewrote them to ones only it can serve.
 		var carried []forge.Artifact
 
 		if publishes(index, stage) {
@@ -447,10 +294,6 @@ func (c *Controller) applyPhases(
 		}
 	}
 
-	// Every run answered from the recorded state means this apply proved
-	// nothing new: the revision had already run green. The serialized
-	// duplicate of a push wave lands here, and the report says so rather
-	// than reading like a build that did work.
 	total, reused := 0, 0
 	for _, s := range report.Stages {
 		total += len(s.Runs)
@@ -462,15 +305,6 @@ func (c *Controller) applyPhases(
 	return report, nil
 }
 
-// releaseHome is the checkout the version line lives in: the one the release
-// is created in, because a workspace root is not a repo. It reports whether
-// this pipeline releases at all; one that does not has no line and needs no
-// version.
-//
-// The artifact engine names the remote as owner/name, and the checkout is
-// that name's last segment under the root - the same derivation the compute
-// engine makes from its own repo key. One declaration, so the repo the tags
-// are read from and the repo the release is created in can never disagree.
 func releaseHome(p config.Pipeline, index engineIndex, root string) (string, bool) {
 	engine, ok := firstArtifactEngine(p, index)
 	if !ok {
@@ -484,11 +318,6 @@ func releaseHome(p config.Pipeline, index engineIndex, root string) (string, boo
 	return root, true
 }
 
-// firstArtifactEngine is the engine of the first substage that publishes, in
-// stage then substage order. A pipeline that declares several releases - one
-// for the assets, one for the image - shares one version line, and the first
-// is where the pipeline's own words about it live: the repo the tags are read
-// from, and the members it leaves alone.
 func firstArtifactEngine(p config.Pipeline, index engineIndex) (config.Engine, bool) {
 	for _, stage := range p.Stages {
 		for _, sub := range stage.Substages {
@@ -504,9 +333,6 @@ func firstArtifactEngine(p config.Pipeline, index engineIndex) (config.Engine, b
 	return config.Engine{}, false
 }
 
-// commitScan is what the semantic strategy read: how far the release moves,
-// how many commits it read, the commit that decided the level, and one it
-// ignored - the words the decision is explained with.
 type commitScan struct {
 	Level    artifactcontroller.Level
 	Count    int
@@ -515,20 +341,6 @@ type commitScan struct {
 	Semantic bool
 }
 
-// bumpLevel is how far the release moves. The semantic strategy reads the
-// release set's commit subjects since the last release, because a factory
-// releases its members together and a breaking change in any one of them is
-// breaking for the number they all carry. Only the release set is read: a
-// pipeline repo the release never tags, a register that gains a commit every
-// run say, must not decide the number.
-//
-// A subject no list claims, under unmatched: error, fails here, before any
-// build: the vocabulary is a rule the team wrote, and a subject outside it
-// is a mistake to report rather than a patch to release quietly. Only the
-// newest commit of each repo is held to it. A bad message is fixed by
-// pushing a good commit on top, never by rewriting history, so an older
-// unmatched commit scores patch and is not reported: it will never change,
-// and a rule that blocked on it would block forever.
 func (c *Controller) bumpLevel(
 	ctx context.Context,
 	p config.Pipeline,
@@ -547,10 +359,6 @@ func (c *Controller) bumpLevel(
 
 		scan := commitScan{Semantic: true}
 
-		// The subjects come newest first. Under unmatched: error the newest
-		// one is the rule; the ones behind it are scored as if unmatched
-		// meant patch, because a commit nobody can change must not decide
-		// that nothing ever releases again.
 		scoring := vocab
 		if scoring.Unmatched == config.UnmatchedError {
 			scoring.Unmatched = "patch"
@@ -593,8 +401,6 @@ func (c *Controller) bumpLevel(
 	}
 }
 
-// knownKinds is every prefix the vocabulary and the self reconcile commit
-// use, the list a refused subject is told to pick from.
 func knownKinds(vocab config.Semantic, prefix string) []string {
 	out := []string{}
 
@@ -609,8 +415,6 @@ func knownKinds(vocab config.Semantic, prefix string) []string {
 	return out
 }
 
-// mint records the revision as proven. Writing it twice is harmless, because
-// the id is derived from the tuple and the record is the same.
 func (c *Controller) mint(ctx context.Context, index engineIndex, revision citypes.Revision) error {
 	var out citypes.StateGetOutput
 
@@ -634,21 +438,10 @@ func (c *Controller) mint(ctx context.Context, index engineIndex, revision cityp
 	return c.putJSON(ctx, index, KindRevision, revision.ID, toWire(revision))
 }
 
-// KindDependencyLock is the record family that pins a revision to the exact
-// dependency closure it was proven with. The store learns nothing about it -
-// the pipeline opts in by declaring the kind on its state engine.
 const KindDependencyLock = "dependency-lock"
 
-// lockManifestPath is where forge-factory's lock records what it resolved.
-// The path is the whole contract: this core never learns what a lockfile is,
-// only which bytes were locked and what they hashed to.
 const lockManifestPath = ".forge/dependency-locks.json"
 
-// generatedManifestPath is where forge-factory records the files it
-// generates, root-relative. The path is the whole contract, exactly like
-// the lock manifest's: this core never learns what those files are, only
-// that their churn is the factory's own doing and stays out of the dirty
-// measurement.
 const generatedManifestPath = ".forge/factory-generated.json"
 
 type generatedManifest struct {
@@ -656,15 +449,6 @@ type generatedManifest struct {
 	Files   []string `json:"files"`
 }
 
-// generatedExclusions maps each repo name to the repo-relative paths the
-// factory generates inside it. An absent or unreadable manifest answers
-// nothing: a factory that recorded nothing excludes nothing, and the
-// measurement is then what it always was. Root-level entries name no repo
-// and are dropped - the root is not a repo.
-//
-// The same reading lives in the trigger controller: a poll and an apply
-// that disagree on what counts as a move re-split two decisions one
-// commit already unified.
 func generatedExclusions(fs fsadapter.FS, root string) map[string][]string {
 	raw, err := fs.ReadFile(filepath.Join(root, filepath.FromSlash(generatedManifestPath)))
 	if err != nil {
@@ -698,10 +482,6 @@ type lockManifest struct {
 	} `json:"locks"`
 }
 
-// dependencyLockRecord is one stored lockfile: the revision it belongs to,
-// the file it came from, the hash that lets a reader verify the content, and
-// the content itself. The payload is a string - a byte array marshals to
-// base64 and the generated MCP schema refuses it.
 type dependencyLockRecord struct {
 	Revision string `json:"revision"`
 	Path     string `json:"path"`
@@ -709,14 +489,6 @@ type dependencyLockRecord struct {
 	Lockfile string `json:"lockfile"`
 }
 
-// recordDependencyLocks stores the closure a minted revision was proven
-// with. Nothing happens unless the pipeline opted in - the state engine
-// declares the kind - and nothing happens when the workspace's lock never
-// ran: an absent manifest is the ordinary single-repo case.
-//
-// A manifest hash that disagrees with the file refuses the record: the tree
-// moved between the lock and the mint, and recording either version would
-// pin the revision to bytes it was not proven with.
 func (c *Controller) recordDependencyLocks(
 	ctx context.Context,
 	index engineIndex,
@@ -776,9 +548,6 @@ func (c *Controller) recordDependencyLocks(
 	return nil
 }
 
-// stateDeclaresKind answers whether the state engine's spec names a kind in
-// spec.kinds. The core reads the list and nothing else: what a kind means
-// stays between the pipeline and its store.
 func stateDeclaresKind(spec map[string]any, kind string) bool {
 	list, ok := spec["kinds"].([]any)
 	if !ok {
@@ -821,10 +590,6 @@ func (c *Controller) applyStage(
 	published := make([]citypes.ArtifactOutput, len(stage.Substages))
 	advanced := make(map[string]bool, len(stage.Substages))
 
-	// Everything in a wave runs at once; a wave starts once the one before
-	// it is done. A substage whose need did not advance is not run, and a
-	// failed record stands in its place, because a promotion that never
-	// saw it would advance a stage half of which never happened.
 	for _, wave := range waves {
 		var wg sync.WaitGroup
 
@@ -892,11 +657,6 @@ func (c *Controller) applyStage(
 	return report, nil
 }
 
-// substageWaves orders a stage's substages by their needs. With no need
-// declared anywhere it is one wave of everything, which is what a stage
-// always was: citypes.Waves answers one wave PER name for an edgeless
-// graph, because a repo list ran one at a time before dependencies
-// existed, and a stage never did.
 func substageWaves(stage config.Stage) ([][]string, error) {
 	names := stage.SubstageNames()
 	needs := stage.SubstageNeeds()
@@ -913,8 +673,6 @@ func substageWaves(stage config.Stage) ([][]string, error) {
 	return waves, nil
 }
 
-// heldBy names the first need of this substage that did not advance, or
-// nothing when every need did.
 func heldBy(sub config.Substage, advanced map[string]bool) string {
 	for _, n := range sub.Needs {
 		if !advanced[n] {
@@ -944,11 +702,6 @@ func (c *Controller) applySubstage(
 	}
 
 	if existing != nil && existing.Status == citypes.StatusPassed && allGatesPassed(*existing) {
-		// A passed record is reused only when what it built is at hand.
-		// On the machine that ran it, it is. On a fresh runner it never is:
-		// a run of the same revision inherits the record without the files,
-		// and the stage after it fails on a file nothing carried. Golden run
-		// 50 died there, on a 0-second build and an empty tarball.
 		atHand, err := c.artifactsAtHand(ctx, index, sub, revision.ID, root, existing)
 		if err != nil {
 			return citypes.Run{}, false, citypes.ArtifactOutput{}, err
@@ -959,9 +712,6 @@ func (c *Controller) applySubstage(
 		}
 	}
 
-	// A substage either runs targets or publishes what the stages before it
-	// built. Both are ordinary substages: the same reuse record, the same
-	// gates, the same promotion. Only the tool differs.
 	if engine, err := index.require(sub.Engine, config.PortArtifact); err == nil {
 		return c.publishSubstage(ctx, p, index, stage, sub, engine, revision, decision, root, carried)
 	}
@@ -989,24 +739,11 @@ func (c *Controller) applySubstage(
 		return citypes.Run{}, false, citypes.ArtifactOutput{}, fmt.Errorf("stage %q substage %q: %w", stage.Name, sub.Name, err)
 	}
 
-	// What a green run built is handed to the engine that built it before
-	// the run is recorded, so the record carries locations the engine can
-	// serve again rather than paths on a disk that is gone with the runner.
 	if out.Status == citypes.StatusPassed {
 		if err := c.putArtifacts(ctx, engine, revision.ID, root, out.Forge); err != nil {
 			return citypes.Run{}, false, citypes.ArtifactOutput{}, fmt.Errorf("stage %q substage %q: keeping what it built: %w", stage.Name, sub.Name, err)
 		}
 
-		// The closure this run was proven with, recorded by the job that
-		// holds it. This used to hang off the mint, and the mint has moved to
-		// the evaluate phase - which is the wrong place for it: a revision is
-		// an identity, decided before anything is fetched, and the lock
-		// manifest exists only on the machine that resolved the closure.
-		//
-		// So a substage records whatever manifest the root holds when it
-		// finishes. A machine that never locked has none and this is a no-op;
-		// a machine that did writes the same bytes under the same key however
-		// many substages it runs.
 		if err := c.recordDependencyLocks(ctx, index, revision, root); err != nil {
 			return citypes.Run{}, false, citypes.ArtifactOutput{}, fmt.Errorf(
 				"stage %q substage %q: recording the closure it was proven with: %w",
@@ -1100,15 +837,6 @@ func (c *Controller) promote(
 	return out.Advance, out.Reason, nil
 }
 
-// reconcileResources realizes what every engine declares. bootstrap says
-// whether this is the provisioning ceremony: when it is not, a resource the
-// declaring engine marked bootstrapOnly is left alone.
-//
-// That is not an optimisation. A credential is written blind - nothing can
-// be read back to compare against - so reconciling one is only writing it
-// again, and a run that did so would have to hold the rights to rewrite the
-// secrets it runs under. The platform draws the same line: a workflow's own
-// token is excluded from the secrets API whatever its permissions say.
 func (c *Controller) reconcileResources(
 	ctx context.Context,
 	p config.Pipeline,
@@ -1127,11 +855,6 @@ func (c *Controller) reconcileResources(
 	for _, engine := range p.Engines {
 		var declared citypes.DeclareOutput
 
-		// The root rides along so an engine whose spec names workspace
-		// files - a resolved pin a sync generated - can read them at
-		// declare time, and the stage names so an engine that renders the
-		// run as jobs knows them. Both optional on the wire: an engine that
-		// reads nothing validates without them.
 		if err := c.caller.Call(ctx, engine.Engine, ToolDeclare,
 			citypes.DeclareInput{
 				Spec: orEmpty(engine.Spec), Root: root, Stages: declaredStages(p), Repos: declaredRepos(p),
@@ -1139,10 +862,6 @@ func (c *Controller) reconcileResources(
 			return nil, false, false, fmt.Errorf("asking engine %q what it needs: %w", engine.Alias, err)
 		}
 
-		// Everything declared is handed over, bootstrapOnly included. The
-		// manager decides what to realize; dropping a resource here would
-		// drop it from the ownership record too, and that record is what
-		// stops another manager claiming it.
 		byManager[engine.Manager] = append(byManager[engine.Manager], declared.Resources...)
 	}
 
@@ -1162,10 +881,6 @@ func (c *Controller) reconcileResources(
 		merged[o.Resource] = o
 	}
 
-	// Every manager is reconciled, and a manager that reported a change does
-	// not cut the loop short. Converging one resource per run would need one
-	// run per resource: a pipeline declaring a thousand resources would take
-	// a thousand runs to update, each one reporting the same thing.
 	for _, alias := range aliases {
 		manager, err := index.manager(alias)
 		if err != nil {
@@ -1174,22 +889,17 @@ func (c *Controller) reconcileResources(
 
 		var out citypes.ReconcileOutput
 
-		// The pipeline root rides in the manager spec so a relative
-		// resource name resolves against the root wherever forge-ci was
-		// started from, while ownership ids stay root-relative.
 		spec := orEmpty(manager.Spec)
 		spec["root"] = root
 
 		if err := c.caller.Call(ctx, manager.Engine, ToolReconcile, citypes.ReconcileInput{
-			Manager:   alias,
-			Resources: byManager[alias],
-			Owned:     owned,
-			Bootstrap: bootstrap,
-			Spec:      spec,
-			DryRun:    opts.DryRun,
-			Force:     opts.Force,
-			// The commit a settle writes starts with the pipeline's prefix,
-			// so the release decision recognizes the commit it caused.
+			Manager:      alias,
+			Resources:    byManager[alias],
+			Owned:        owned,
+			Bootstrap:    bootstrap,
+			Spec:         spec,
+			DryRun:       opts.DryRun,
+			Force:        opts.Force,
 			CommitPrefix: p.Versioning.CommitPrefix(),
 		}, &out); err != nil {
 			return nil, false, false, fmt.Errorf("manager %q: %w", alias, err)
@@ -1210,9 +920,6 @@ func (c *Controller) reconcileResources(
 		}
 	}
 
-	// The ownership record is a write like any other, and a plan performs
-	// none. Writing it would also commit and push the state repo, which is
-	// the loudest thing a dry run could possibly do.
 	if !opts.DryRun {
 		if err := c.writeOwnership(ctx, index, merged); err != nil {
 			return nil, false, false, err
@@ -1222,9 +929,6 @@ func (c *Controller) reconcileResources(
 	return actions, changed, published, nil
 }
 
-// declaredStages is the pipeline's stages with their substages, the shape an
-// engine that renders jobs is handed. The display names travel with them, so
-// what a person reads is decided by the factory rather than by the engine.
 func declaredStages(p config.Pipeline) []citypes.DeclaredStage {
 	out := make([]citypes.DeclaredStage, 0, len(p.Stages))
 
@@ -1255,11 +959,6 @@ func (c *Controller) resolveRevision(
 
 	worktrees := map[string]string{}
 
-	// The factory's generated files are excluded from the dirty
-	// measurement: the register moves them by design, so their churn is
-	// the system working rather than drift. The list comes from the
-	// factory itself - only a language engine knows those names - and an
-	// absent manifest excludes nothing.
 	exclusions := generatedExclusions(c.fs, root)
 
 	for _, repo := range p.Repos {
@@ -1414,12 +1113,9 @@ func checkouts(p config.Pipeline, root string, revision citypes.Revision) []city
 
 	for _, repo := range p.Repos {
 		out = append(out, citypes.RepoCheckout{
-			Name: repo.Name,
-			Path: filepath.Join(root, repo.Name),
-			SHA:  revision.Repos[repo.Name],
-			// The needs graph rides the checkout list every substage already
-			// receives, so a local run and a remote one order the work from
-			// the same declaration.
+			Name:  repo.Name,
+			Path:  filepath.Join(root, repo.Name),
+			SHA:   revision.Repos[repo.Name],
 			Needs: repo.Needs,
 		})
 	}
@@ -1427,9 +1123,6 @@ func checkouts(p config.Pipeline, root string, revision citypes.Revision) []city
 	return out
 }
 
-// declaredRepos is the pipeline's repos by name, the shape an engine that
-// keys a cache on the run's inputs is handed. The same list the revision
-// hashes, so a key over their heads is a key over the revision's inputs.
 func declaredRepos(p config.Pipeline) []citypes.DeclaredRepo {
 	out := make([]citypes.DeclaredRepo, 0, len(p.Repos))
 

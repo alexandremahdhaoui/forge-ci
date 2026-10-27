@@ -1,9 +1,3 @@
-// Package containeradapter pushes an assembled image to a registry. It is the
-// only thing here that reaches the outside world, and it holds no decision
-// about what to publish.
-//
-// go-containerregistry speaks the registry HTTP API directly, so there is no
-// daemon, no CLI and no login step: the auth handshake is part of the push.
 package containeradapter
 
 import (
@@ -22,32 +16,18 @@ import (
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 )
 
-// ErrEmptyLayout means the directory holds no manifest, so the build that was
-// supposed to write it did not.
 var ErrEmptyLayout = errors.New("the image layout holds no manifest")
 
-// Registry publishes an image somewhere people can pull it.
 type Registry interface {
-	// Push sends the index the layout at path holds, under every ref. One
-	// index and several names, so a moving tag and the version tag point at
-	// the same bytes rather than at two builds that happen to match.
 	Push(path string, refs []string, labels map[string]string) error
 }
 
-// Remote is the real registry. Token is the credential; GitHub Actions
-// injects secrets.GITHUB_TOKEN, which is why there is no secret to create,
-// seal or rotate.
 type Remote struct {
 	Token citypes.Secret
 }
 
 var _ Registry = (*Remote)(nil)
 
-// options carries the credential. With no token the requests go out
-// anonymous, which is enough to read a public registry and not enough to
-// write: the docker config file is deliberately not consulted, because an
-// engine that silently picks up whatever credential the machine happens to
-// hold publishes to somewhere nobody named.
 func (r *Remote) options() []remote.Option {
 	if r.Token == "" {
 		return []remote.Option{remote.WithAuth(authn.Anonymous)}
@@ -107,9 +87,6 @@ func (r *Remote) Digest(ctx context.Context, tag string) (string, error) {
 	return descriptor.Digest.String(), nil
 }
 
-// label writes the release's own labels into every architecture's config, so
-// somebody holding only the image can find the revision it was built from.
-// The build wrote what it knew; this adds what only the release knows.
 func label(idx v1.ImageIndex, labels map[string]string) (v1.ImageIndex, error) {
 	if len(labels) == 0 {
 		return idx, nil
