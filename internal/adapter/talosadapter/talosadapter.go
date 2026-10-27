@@ -22,12 +22,12 @@ import (
 	"github.com/siderolabs/talos/pkg/machinery/resources/runtime"
 	"github.com/siderolabs/talos/pkg/machinery/resources/v1alpha1"
 	"github.com/siderolabs/talos/pkg/machinery/role"
+	stockyaml "go.yaml.in/yaml/v4"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
-	"sigs.k8s.io/yaml"
 
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 )
@@ -171,7 +171,7 @@ type credential struct {
 func adminCredential(bundle citypes.Secret) (credential, error) {
 	held := &secrets.Bundle{Clock: secrets.NewClock()}
 
-	if err := yaml.Unmarshal([]byte(bundle), held); err != nil {
+	if err := stockyaml.Unmarshal([]byte(bundle), held); err != nil {
 		return credential{}, errors.New(
 			"minting the admin credential: the talos secret bundle is not a secret bundle document")
 	}

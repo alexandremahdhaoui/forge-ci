@@ -30,6 +30,7 @@ import (
 	"github.com/siderolabs/talos/pkg/machinery/config/generate/secrets"
 	configresource "github.com/siderolabs/talos/pkg/machinery/resources/config"
 	"github.com/siderolabs/talos/pkg/machinery/role"
+	stockyaml "go.yaml.in/yaml/v4"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
@@ -605,7 +606,7 @@ func throwawayBundle(t *testing.T) (citypes.Secret, *secrets.Bundle) {
 	minted, err := secrets.NewBundle(secrets.NewFixedClock(time.Now()), config.TalosVersionCurrent)
 	require.NoError(t, err)
 
-	raw, err := yaml.Marshal(minted)
+	raw, err := stockyaml.Marshal(minted)
 	require.NoError(t, err)
 
 	return citypes.Secret(raw), minted
@@ -616,6 +617,7 @@ func TestSavingTheAdminCredentialKeepsTheEndpointsTheOneNodeAndEveryOtherContext
 
 	path := writeTalosconfig(t, talosconfigWithTwoContexts)
 	bundle, minted := throwawayBundle(t)
+	require.Contains(t, string(bundle), "certs:", "the bundle is in the form stock talosctl writes")
 
 	saved, err := (&Node{}).SaveTalosconfig(path, bundle)
 	require.NoError(t, err)
@@ -692,6 +694,27 @@ func TestSavingRefusesSomethingThatIsNotABundleWithoutEchoingItAndLeavesTheTalos
 			assert.Equal(t, talosconfigWithTwoContexts, string(onDisk))
 		})
 	}
+}
+
+func TestSavingRefusesABundleInTheUpperCaseFormByNameAndLeavesTheTalosconfigAlone(t *testing.T) {
+	t.Parallel()
+
+	_, minted := throwawayBundle(t)
+
+	upperCase, err := yaml.Marshal(minted)
+	require.NoError(t, err)
+	require.Contains(t, string(upperCase), "Certs:")
+
+	path := writeTalosconfig(t, talosconfigWithTwoContexts)
+
+	_, err = (&Node{}).SaveTalosconfig(path, citypes.Secret(upperCase))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "minting the admin credential: validating the talos secret bundle")
+	assert.Contains(t, err.Error(), "certs is required")
+
+	onDisk, err := os.ReadFile(string(path))
+	require.NoError(t, err)
+	assert.Equal(t, talosconfigWithTwoContexts, string(onDisk))
 }
 
 func TestSavingIntoAMissingTalosconfigNamesTheReasonAndNotThePath(t *testing.T) {
