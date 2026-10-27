@@ -11,7 +11,6 @@ import (
 	"github.com/siderolabs/talos/pkg/machinery/config/generate/secrets"
 	"github.com/siderolabs/talos/pkg/machinery/config/machine"
 	stockyaml "go.yaml.in/yaml/v4"
-	"sigs.k8s.io/yaml"
 
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 )
@@ -130,7 +129,7 @@ func applyPatch(
 func unmarshalBundle(bundle citypes.Secret) (*secrets.Bundle, error) {
 	held := &secrets.Bundle{Clock: secrets.NewClock()}
 
-	if err := yaml.Unmarshal([]byte(bundle), held); err != nil {
+	if err := stockyaml.Unmarshal([]byte(bundle), held); err != nil {
 		return nil, errors.New(
 			"reading the stored talos secret bundle: it is not a secret bundle document")
 	}

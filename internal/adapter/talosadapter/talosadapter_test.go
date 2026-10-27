@@ -853,5 +853,5 @@ func TestTheEngineReadsTheBootstrapStateThroughTheSameSecureDialAsTheManager(t *
 	require.Error(t, err)
 	assert.False(t, bootstrapped)
 	assert.Contains(t, err.Error(), "getting the etcd service of node 127.0.0.1")
-	assert.Contains(t, err.Error(), "connection refused")
+	assert.Contains(t, err.Error(), "dial tcp "+theClosedPort+": connect: connection refused")
 }

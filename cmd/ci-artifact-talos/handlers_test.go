@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	stockyaml "go.yaml.in/yaml/v4"
+	"sigs.k8s.io/yaml"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/fsadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/talosadapter"
@@ -174,6 +175,25 @@ func TestTheBundleAFirstRunDeclaresLoadsThroughStockTalosctlWithEveryFieldItWrot
 	reencoded, err := stockyaml.Marshal(loaded)
 	require.NoError(t, err)
 	assert.Equal(t, string(declared), string(reencoded), "stock talosctl reads every field the engine wrote")
+}
+
+func TestALaterRunOverABundleStoredInTheUpperCaseFormIsRefusedByNameAndDeclaresNothing(t *testing.T) {
+	root := writeThrowawayCluster(t)
+
+	minted, err := secrets.NewBundle(secrets.NewClock(), config.TalosVersionCurrent)
+	require.NoError(t, err)
+
+	upperCase, err := yaml.Marshal(minted)
+	require.NoError(t, err)
+	require.Contains(t, string(upperCase), "Certs:")
+
+	out, err := handlersReaching(aNode(t).holding(citypes.Secret(upperCase))).
+		Declare(context.Background(), DeclareInput{Root: root, Spec: declaredSpec()})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "loading the secret bundle of cluster t0: validating the stored talos secret bundle")
+	assert.Contains(t, err.Error(), "certs is required")
+	assert.Nil(t, out)
 }
 
 func loadedConfig(t *testing.T, held any) config.Provider {
