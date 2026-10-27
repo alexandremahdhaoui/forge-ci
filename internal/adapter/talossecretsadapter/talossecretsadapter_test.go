@@ -14,7 +14,7 @@ import (
 	"github.com/siderolabs/talos/pkg/machinery/config/generate/secrets"
 	"github.com/siderolabs/talos/pkg/machinery/config/machine"
 	"github.com/siderolabs/talos/pkg/machinery/constants"
-	"sigs.k8s.io/yaml"
+	stockyaml "go.yaml.in/yaml/v4"
 
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 )
@@ -56,7 +56,7 @@ func throwawayBundle(t *testing.T) citypes.Secret {
 	minted, err := secrets.NewBundle(secrets.NewFixedClock(time.Now()), config.TalosVersionCurrent)
 	require.NoError(t, err)
 
-	raw, err := yaml.Marshal(minted)
+	raw, err := stockyaml.Marshal(minted)
 	require.NoError(t, err)
 
 	return citypes.Secret(raw)

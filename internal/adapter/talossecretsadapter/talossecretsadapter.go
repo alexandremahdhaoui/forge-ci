@@ -10,6 +10,7 @@ import (
 	"github.com/siderolabs/talos/pkg/machinery/config/generate"
 	"github.com/siderolabs/talos/pkg/machinery/config/generate/secrets"
 	"github.com/siderolabs/talos/pkg/machinery/config/machine"
+	stockyaml "go.yaml.in/yaml/v4"
 	"sigs.k8s.io/yaml"
 
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
@@ -142,7 +143,7 @@ func unmarshalBundle(bundle citypes.Secret) (*secrets.Bundle, error) {
 }
 
 func marshalBundle(held *secrets.Bundle) (citypes.Secret, error) {
-	raw, err := yaml.Marshal(held)
+	raw, err := stockyaml.Marshal(held)
 	if err != nil {
 		return "", errors.New("encoding the talos secret bundle: it does not marshal to yaml")
 	}

@@ -9,11 +9,13 @@ import (
 	"github.com/siderolabs/talos/pkg/machinery/config"
 	"github.com/siderolabs/talos/pkg/machinery/config/configdiff"
 	"github.com/siderolabs/talos/pkg/machinery/config/configloader"
+	"github.com/siderolabs/talos/pkg/machinery/config/generate/secrets"
 	"github.com/siderolabs/talos/pkg/machinery/config/machine"
 	"github.com/siderolabs/talos/pkg/machinery/constants"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	stockyaml "go.yaml.in/yaml/v4"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/fsadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/talosadapter"
@@ -150,6 +152,28 @@ func TestALaterRunRendersFromTheBundleTheFirstRunStoredAConfigTheVendorFindsNoPa
 	assert.Empty(t, patches, "a later run renders the config the first run applied")
 	assert.Equal(t, later.Resources[0].Spec["config"], again.Resources[0].Spec["config"])
 	assert.Equal(t, stored, later.Resources[2].Spec["bundle"])
+}
+
+func TestTheBundleAFirstRunDeclaresLoadsThroughStockTalosctlWithEveryFieldItWrote(t *testing.T) {
+	root := writeThrowawayCluster(t)
+
+	first, err := handlersReaching(aNode(t).inMaintenance()).
+		Declare(context.Background(), DeclareInput{Root: root, Spec: declaredSpec()})
+	require.NoError(t, err)
+
+	declared, ok := first.Resources[2].Spec["bundle"].(citypes.Secret)
+	require.True(t, ok)
+
+	path := filepath.Join(t.TempDir(), "secrets.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(declared), 0o600))
+
+	loaded, err := secrets.LoadBundle(path)
+	require.NoError(t, err)
+	require.NoError(t, loaded.Validate(config.TalosVersionCurrent), "stock talosctl reads a whole bundle")
+
+	reencoded, err := stockyaml.Marshal(loaded)
+	require.NoError(t, err)
+	assert.Equal(t, string(declared), string(reencoded), "stock talosctl reads every field the engine wrote")
 }
 
 func loadedConfig(t *testing.T, held any) config.Provider {
