@@ -4,7 +4,6 @@ set -eu
 FLOOR="${1:-90}"
 OUT="${2:-tmp/coverage.out}"
 PACKAGE_FLOOR="${3:-77}"
-PACKAGE_FLOOR_EXCLUDED='pkg/talos'
 
 mkdir -p "$(dirname "$OUT")"
 
@@ -44,8 +43,7 @@ END {
 
 printf '%s\n' "$PER_PACKAGE" | awk '{ print $1, $2 }'
 
-BELOW=$(printf '%s\n' "$PER_PACKAGE" | awk -v floor="$PACKAGE_FLOOR" -v skip="$PACKAGE_FLOOR_EXCLUDED" '
-    index($1, skip) { next }
+BELOW=$(printf '%s\n' "$PER_PACKAGE" | awk -v floor="$PACKAGE_FLOOR" '
     $3 + 0 < floor + 0 { print $1, $2 }')
 
 if [ -n "$BELOW" ]; then
@@ -55,4 +53,3 @@ if [ -n "$BELOW" ]; then
 fi
 
 echo "every package clears ${PACKAGE_FLOOR}%, and that floor ratchets up and never down"
-echo "${PACKAGE_FLOOR_EXCLUDED} is out of it because a unit test never reaches a node, the node client is proved against a VM, and the exclusion stands until its testenv-vm case lands"
