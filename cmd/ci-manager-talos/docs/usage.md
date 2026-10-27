@@ -79,8 +79,13 @@ machine-config resource that names no bundle or no recovery variable is
 refused by name, and an empty recovery variable is refused on a first run.
 A first run over a recovery directory that already holds `secrets.yaml` is
 refused by name before any write, any credential save and any apply, and a
-first run never overwrites a bundle. A dry run reaches both refusals the
-same way. A refusal names the variable slot and never the directory.
+first run never overwrites a bundle. A first run over a talosconfig file
+whose mode is wider than 0600 is refused by name before any write, any
+credential save and any apply, because the save puts an admin credential
+into that file. The refusal names the variable `spec.talosconfigEnv` and
+the mode it found. The operator sets the mode, and the manager never
+changes it. A dry run reaches all three refusals the same way. A refusal
+names the variable slot and never the directory or the file.
 
 After such an apply the node installs and
 reboots, so every later dial in the same run retries until a ceiling of ten

@@ -139,6 +139,10 @@ func (r TalosRealizer) realizeMachineConfig(res citypes.Resource, opts Options) 
 		if recoveryDir, err = r.recoveryDirHoldingNoBundle(res.Name, recoveryDirEnv); err != nil {
 			return Action{}, err
 		}
+
+		if err := r.refuseATalosconfigWiderThanOwnerOnly(res.Name, talosconfig); err != nil {
+			return Action{}, err
+		}
 	}
 
 	if opts.DryRun {
@@ -225,6 +229,24 @@ func (r TalosRealizer) recoveryDirHoldingNoBundle(name, recoveryDirEnv string) (
 	return dir, nil
 }
 
+func (r TalosRealizer) refuseATalosconfigWiderThanOwnerOnly(name string, talosconfig citypes.Secret) error {
+	mode, err := r.fs.Mode(string(talosconfig))
+	if err != nil {
+		return fmt.Errorf(
+			"reading the mode of the client configuration of %s from %s: %w",
+			name, talosconfigSource, withoutThePath(err))
+	}
+
+	if mode&^ownerOnlyFileMode != 0 {
+		return fmt.Errorf(
+			"reading the client configuration of %s: the file %s has mode %04o, wider than %04o, "+
+				"and a first run saves the admin credential into it. set it to %04o before a first run",
+			name, talosconfigSource, mode, ownerOnlyFileMode, ownerOnlyFileMode)
+	}
+
+	return nil
+}
+
 func (r TalosRealizer) prepareFirstRun(name string, talosconfig, bundle citypes.Secret, dir string) error {
 	if err := r.writeRecovery(dir, citypes.TalosRecoveryBundleFile, bundle); err != nil {
 		return fmt.Errorf("writing the secret bundle of %s into the recovery directory: %w", name, err)
@@ -235,12 +257,6 @@ func (r TalosRealizer) prepareFirstRun(name string, talosconfig, bundle citypes.
 		return fmt.Errorf(
 			"saving the admin credential of %s into the client configuration from %s: %w",
 			name, talosconfigSource, err)
-	}
-
-	if err := r.fs.Chmod(string(talosconfig), ownerOnlyFileMode); err != nil {
-		return fmt.Errorf(
-			"restricting the client configuration of %s from %s to its owner: %w",
-			name, talosconfigSource, withoutThePath(err))
 	}
 
 	if err := r.writeRecovery(dir, citypes.TalosRecoveryTalosconfigFile, saved); err != nil {
