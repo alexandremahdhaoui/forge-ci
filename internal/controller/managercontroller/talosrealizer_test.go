@@ -524,28 +524,33 @@ func TestAFirstRunThatCannotCopyTheTalosconfigIntoTheRecoveryDirectoryAppliesNot
 	talos.AssertNotCalled(t, "ApplyMachineConfig", mock.Anything, mock.Anything, mock.Anything)
 }
 
-func TestAFirstRunOverATalosconfigAt0644IsRefusedNamingTheVariableAndTheModeBeforeAnyWriteAnySaveAndAnyApply(t *testing.T) {
-	for name, opts := range aRealRunAndADryRun {
-		t.Run(name, func(t *testing.T) {
-			r, talos, files := talosRealizerWithFiles(t)
-			talos.EXPECT().MachineConfig(mock.Anything, mock.Anything).Return("", nil)
-			aRecoveryDirectoryHoldingNoBundle(files)
-			aTalosconfigAt(files, 0o644)
+func TestAFirstRunOverATalosconfigWiderThan0600IsRefusedNamingTheVariableAndTheModeBeforeAnyWriteAnySaveAndAnyApply(t *testing.T) {
+	for mode, shown := range map[os.FileMode]string{
+		0o644: "0644",
+		0o500: "0500",
+	} {
+		for name, opts := range aRealRunAndADryRun {
+			t.Run(shown+" in "+name, func(t *testing.T) {
+				r, talos, files := talosRealizerWithFiles(t)
+				talos.EXPECT().MachineConfig(mock.Anything, mock.Anything).Return("", nil)
+				aRecoveryDirectoryHoldingNoBundle(files)
+				aTalosconfigAt(files, mode)
 
-			_, err := r.Realize(machineConfig(controlplane), opts)
-			require.Error(t, err)
-			assert.Equal(t,
-				"reading the client configuration of t0-controlplane: the file "+
-					"the variable spec.talosconfigEnv names has mode 0644, wider than 0600, "+
-					"and a first run saves the admin credential into it. set it to 0600 before a first run",
-				err.Error())
-			assert.NotContains(t, err.Error(), "/home/operator/.config/t0.yaml")
-			files.AssertNotCalled(t, "MkdirAll", mock.Anything)
-			files.AssertNotCalled(t, "WriteFile", mock.Anything, mock.Anything)
-			files.AssertNotCalled(t, "Chmod", mock.Anything, mock.Anything)
-			talos.AssertNotCalled(t, "SaveTalosconfig", mock.Anything, mock.Anything)
-			talos.AssertNotCalled(t, "ApplyMachineConfig", mock.Anything, mock.Anything, mock.Anything)
-		})
+				_, err := r.Realize(machineConfig(controlplane), opts)
+				require.Error(t, err)
+				assert.Equal(t,
+					"reading the client configuration of t0-controlplane: the file "+
+						"the variable spec.talosconfigEnv names has mode "+shown+", wider than 0600, "+
+						"and a first run saves the admin credential into it. set it to 0600 before a first run",
+					err.Error())
+				assert.NotContains(t, err.Error(), "/home/operator/.config/t0.yaml")
+				files.AssertNotCalled(t, "MkdirAll", mock.Anything)
+				files.AssertNotCalled(t, "WriteFile", mock.Anything, mock.Anything)
+				files.AssertNotCalled(t, "Chmod", mock.Anything, mock.Anything)
+				talos.AssertNotCalled(t, "SaveTalosconfig", mock.Anything, mock.Anything)
+				talos.AssertNotCalled(t, "ApplyMachineConfig", mock.Anything, mock.Anything, mock.Anything)
+			})
+		}
 	}
 }
 
