@@ -144,6 +144,44 @@ func TestARenderedMachineConfigCarriesAVersionV1Alpha1DocumentThePatchAloneDoesN
 	assert.Contains(t, string(rendered), "version: v1alpha1")
 }
 
+func TestTheInstallerImageIsReadFromTheUnattendedInstallDocumentOfTheRenderedConfig(t *testing.T) {
+	t.Parallel()
+
+	const pinned = "factory.example.invalid/metal-installer:v1.14.0@sha256:" +
+		"bf6f5b110f6104a1504db697c7ce209aca38c871c015f9104e0b18a7234f1ad7"
+
+	patch := strings.Replace(patchDocument, "kind: UnattendedInstallConfig\n",
+		"kind: UnattendedInstallConfig\ninstaller:\n  image: "+pinned+"\n", 1)
+
+	rendered, err := New().MachineConfig(throwawayBundle(t), testCluster(), patch)
+	require.NoError(t, err)
+
+	image, err := New().InstallerImage(rendered)
+	require.NoError(t, err)
+	assert.Equal(t, pinned, image)
+}
+
+func TestARenderedConfigWithNoUnattendedInstallDocumentHasNoInstallerImage(t *testing.T) {
+	t.Parallel()
+
+	rendered, err := New().MachineConfig(throwawayBundle(t), testCluster(), "apiVersion: v1alpha1\nkind: KubeProxyConfig\nenabled: false\n")
+	require.NoError(t, err)
+
+	image, err := New().InstallerImage(rendered)
+	require.NoError(t, err)
+	assert.Empty(t, image)
+}
+
+func TestAConfigThatDoesNotLoadIsRefusedWithoutItsBytes(t *testing.T) {
+	t.Parallel()
+
+	_, err := New().InstallerImage("\tkey: the private key bytes")
+	require.Error(t, err)
+	assert.Equal(t,
+		"reading the installer image: the rendered machine config does not load as a talos config",
+		err.Error())
+}
+
 func TestAnUnreadableBundleIsRefusedByName(t *testing.T) {
 	t.Parallel()
 

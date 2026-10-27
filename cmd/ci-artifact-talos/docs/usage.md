@@ -98,6 +98,13 @@ compares by loading both configs and asking the vendor for the patches
 between them, so a second comparison here would be a second authority over
 the same question.
 
+The engine reads the installer image from the UnattendedInstallConfig
+document of the rendered config. When the image pins both a tag and a
+digest, the engine resolves the tag against its registry anonymously and
+refuses by name a tag that resolves to another digest. The refusal names the
+image, the tag, the resolved digest and the pinned digest. A registry that
+cannot be reached is an error naming the image.
+
 Every spec key is required and an absent one is refused by name before
 anything is read. A variable holding nothing is refused naming the
 variable. A file that cannot be read is an error naming the cluster and the

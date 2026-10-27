@@ -6,6 +6,7 @@ import (
 	"net/url"
 
 	"github.com/siderolabs/talos/pkg/machinery/config"
+	"github.com/siderolabs/talos/pkg/machinery/config/configloader"
 	"github.com/siderolabs/talos/pkg/machinery/config/configpatcher"
 	"github.com/siderolabs/talos/pkg/machinery/config/generate"
 	"github.com/siderolabs/talos/pkg/machinery/config/generate/secrets"
@@ -124,6 +125,21 @@ func applyPatch(
 	}
 
 	return patched, nil
+}
+
+func (Secrets) InstallerImage(rendered citypes.Secret) (string, error) {
+	loaded, err := configloader.NewFromBytes([]byte(rendered))
+	if err != nil {
+		return "", errors.New(
+			"reading the installer image: the rendered machine config does not load as a talos config")
+	}
+
+	unattended := loaded.UnattendedInstallConfig()
+	if unattended == nil {
+		return "", nil
+	}
+
+	return unattended.InstallerImage(), nil
 }
 
 func unmarshalBundle(bundle citypes.Secret) (*secrets.Bundle, error) {

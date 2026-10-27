@@ -7,6 +7,7 @@
 package containeradapter
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -90,6 +91,20 @@ func (r *Remote) Push(path string, refs []string, labels map[string]string) erro
 	}
 
 	return nil
+}
+
+func (r *Remote) Digest(ctx context.Context, tag string) (string, error) {
+	parsed, err := name.NewTag(tag)
+	if err != nil {
+		return "", fmt.Errorf("reading the tag %q: %w", tag, err)
+	}
+
+	descriptor, err := remote.Get(parsed, append(r.options(), remote.WithContext(ctx))...)
+	if err != nil {
+		return "", fmt.Errorf("resolving %s: %w", tag, err)
+	}
+
+	return descriptor.Digest.String(), nil
 }
 
 // label writes the release's own labels into every architecture's config, so

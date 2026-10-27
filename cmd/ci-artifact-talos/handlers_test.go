@@ -67,12 +67,13 @@ func declaredSpec() Spec {
 
 type theNode struct {
 	*machineconfigcontrollermock.MockTalosconfig
+	registry *machineconfigcontrollermock.MockRegistry
 }
 
 func aNode(t *testing.T) theNode {
 	t.Helper()
 
-	node := theNode{machineconfigcontrollermock.NewMockTalosconfig(t)}
+	node := theNode{machineconfigcontrollermock.NewMockTalosconfig(t), machineconfigcontrollermock.NewMockRegistry(t)}
 	node.EXPECT().Context(mock.Anything).RunAndReturn(talosadapter.NewTalosconfig().Context).Maybe()
 
 	return node
@@ -93,7 +94,7 @@ func (n theNode) holding(bundle citypes.Secret) theNode {
 }
 
 func handlersReaching(node theNode) Handlers {
-	return newHandlers(machineconfigcontroller.New(fsadapter.New(), talossecretsadapter.New(), node))
+	return newHandlers(machineconfigcontroller.New(fsadapter.New(), talossecretsadapter.New(), node, node.registry))
 }
 
 func TestTheDeclareToolOnANodeInMaintenanceAnswersARenderedControlPlaneConfigThenTheBootstrapThenTheBundle(t *testing.T) {

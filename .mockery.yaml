@@ -57,6 +57,7 @@ packages:
       dir: internal/mocks/machineconfigcontrollermock
       pkgname: machineconfigcontrollermock
     interfaces:
+      Registry:
       Renderer:
       Talosconfig:
 

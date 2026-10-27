@@ -148,6 +148,14 @@ func TestALayoutThatIsNotThereIsNamedInTheError(t *testing.T) {
 	require.Contains(t, err.Error(), "/nowhere/toolchain.oci")
 }
 
+func TestDigestRefusesATagItCannotReadNamingIt(t *testing.T) {
+	t.Parallel()
+
+	_, err := (&containeradapter.Remote{}).Digest(t.Context(), "NOT A TAG")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "NOT A TAG")
+}
+
 func TestAReferenceItCannotReadIsNamedInTheError(t *testing.T) {
 	t.Parallel()
 

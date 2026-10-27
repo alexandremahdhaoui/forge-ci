@@ -37,6 +37,66 @@ func (_m *MockRenderer) EXPECT() *MockRenderer_Expecter {
 	return &MockRenderer_Expecter{mock: &_m.Mock}
 }
 
+// InstallerImage provides a mock function for the type MockRenderer
+func (_mock *MockRenderer) InstallerImage(rendered citypes.Secret) (string, error) {
+	ret := _mock.Called(rendered)
+
+	if len(ret) == 0 {
+		panic("no return value specified for InstallerImage")
+	}
+
+	var r0 string
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(citypes.Secret) (string, error)); ok {
+		return returnFunc(rendered)
+	}
+	if returnFunc, ok := ret.Get(0).(func(citypes.Secret) string); ok {
+		r0 = returnFunc(rendered)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+	if returnFunc, ok := ret.Get(1).(func(citypes.Secret) error); ok {
+		r1 = returnFunc(rendered)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockRenderer_InstallerImage_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'InstallerImage'
+type MockRenderer_InstallerImage_Call struct {
+	*mock.Call
+}
+
+// InstallerImage is a helper method to define mock.On call
+//   - rendered citypes.Secret
+func (_e *MockRenderer_Expecter) InstallerImage(rendered any) *MockRenderer_InstallerImage_Call {
+	return &MockRenderer_InstallerImage_Call{Call: _e.mock.On("InstallerImage", rendered)}
+}
+
+func (_c *MockRenderer_InstallerImage_Call) Run(run func(rendered citypes.Secret)) *MockRenderer_InstallerImage_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 citypes.Secret
+		if args[0] != nil {
+			arg0 = args[0].(citypes.Secret)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockRenderer_InstallerImage_Call) Return(s string, err error) *MockRenderer_InstallerImage_Call {
+	_c.Call.Return(s, err)
+	return _c
+}
+
+func (_c *MockRenderer_InstallerImage_Call) RunAndReturn(run func(rendered citypes.Secret) (string, error)) *MockRenderer_InstallerImage_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Load provides a mock function for the type MockRenderer
 func (_mock *MockRenderer) Load(bundle citypes.Secret) (citypes.Secret, error) {
 	ret := _mock.Called(bundle)

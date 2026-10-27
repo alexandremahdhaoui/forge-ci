@@ -3,14 +3,22 @@ package machineconfigcontroller_test
 import (
 	"errors"
 	"fmt"
+	"io"
+	"log"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/google/go-containerregistry/pkg/name"
+	"github.com/google/go-containerregistry/pkg/registry"
+	"github.com/google/go-containerregistry/pkg/v1/random"
+	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/containeradapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/talossecretsadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/machineconfigcontroller"
 	"github.com/alexandremahdhaoui/forge-ci/internal/mocks/fsadaptermock"
@@ -57,7 +65,7 @@ func declare(
 ) (citypes.DeclareOutput, error) {
 	t.Helper()
 
-	return machineconfigcontroller.New(fs, renderer, talosconfig).
+	return machineconfigcontroller.New(fs, renderer, talosconfig, machineconfigcontrollermock.NewMockRegistry(t)).
 		Declare(t.Context(), citypes.DeclareInput{Root: "/w", Spec: spec})
 }
 
@@ -80,6 +88,7 @@ func aRendererFor(t *testing.T, bundle string) *machineconfigcontrollermock.Mock
 	renderer.EXPECT().
 		MachineConfig(citypes.Secret(loadedBundle), theCluster(), patchText).
 		Return(citypes.Secret(renderedConfig), nil).Maybe()
+	renderer.EXPECT().InstallerImage(citypes.Secret(renderedConfig)).Return("", nil).Maybe()
 
 	return renderer
 }
@@ -228,6 +237,7 @@ func TestTheRendererReceivesTheLoadedBundleTheClusterEndpointBuiltFromTheFirstCo
 	renderer.EXPECT().
 		MachineConfig(citypes.Secret(loadedBundle), theCluster(), patchText).
 		Return(citypes.Secret(renderedConfig), nil).Once()
+	renderer.EXPECT().InstallerImage(citypes.Secret(renderedConfig)).Return("", nil).Once()
 
 	_, err := declare(t, filesOnDisk(t), renderer, aNodeInMaintenance(t), fullSpec())
 
@@ -510,6 +520,110 @@ func TestNoRefusalEverCarriesBundlePatchConfigOrTalosconfigBytes(t *testing.T) {
 	}
 }
 
+const aDigestNoRegistryServes = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+
+func aRegistryServingAnInstaller(t *testing.T) (string, string) {
+	t.Helper()
+
+	server := httptest.NewServer(registry.New(registry.Logger(log.New(io.Discard, "", 0))))
+	t.Cleanup(server.Close)
+
+	tagged := strings.TrimPrefix(server.URL, "http://") + "/metal-installer:v1.14.0"
+
+	ref, err := name.NewTag(tagged)
+	require.NoError(t, err)
+
+	img, err := random.Image(64, 1)
+	require.NoError(t, err)
+	require.NoError(t, remote.Write(ref, img))
+
+	served, err := img.Digest()
+	require.NoError(t, err)
+
+	return tagged, served.String()
+}
+
+func anUnreachableRegistryTag(t *testing.T) string {
+	t.Helper()
+
+	server := httptest.NewServer(registry.New())
+	tagged := strings.TrimPrefix(server.URL, "http://") + "/metal-installer:v1.14.0"
+	server.Close()
+
+	return tagged
+}
+
+func aMintingRendererReadingTheInstaller(
+	t *testing.T, reference string, err error,
+) *machineconfigcontrollermock.MockRenderer {
+	t.Helper()
+
+	renderer := machineconfigcontrollermock.NewMockRenderer(t)
+	renderer.EXPECT().Mint().Return(citypes.Secret(mintedBundle), nil)
+	renderer.EXPECT().Load(citypes.Secret(mintedBundle)).Return(citypes.Secret(loadedBundle), nil)
+	renderer.EXPECT().
+		MachineConfig(citypes.Secret(loadedBundle), theCluster(), patchText).
+		Return(citypes.Secret(renderedConfig), nil)
+	renderer.EXPECT().InstallerImage(citypes.Secret(renderedConfig)).Return(reference, err)
+
+	return renderer
+}
+
+func aMintingRendererPinning(t *testing.T, reference string) *machineconfigcontrollermock.MockRenderer {
+	t.Helper()
+
+	return aMintingRendererReadingTheInstaller(t, reference, nil)
+}
+
+func declareAgainstTheRegistry(t *testing.T, renderer *machineconfigcontrollermock.MockRenderer) (citypes.DeclareOutput, error) {
+	t.Helper()
+
+	return machineconfigcontroller.New(filesOnDisk(t), renderer, aNodeInMaintenance(t), &containeradapter.Remote{}).
+		Declare(t.Context(), citypes.DeclareInput{Root: "/w", Spec: fullSpec()})
+}
+
+func TestAnInstallerTagThatStillResolvesToItsPinnedDigestIsDeclared(t *testing.T) {
+	exported(t)
+
+	tagged, served := aRegistryServingAnInstaller(t)
+
+	out, err := declareAgainstTheRegistry(t, aMintingRendererPinning(t, tagged+"@"+served))
+	require.NoError(t, err)
+	require.Len(t, out.Resources, 3)
+}
+
+func TestAnInstallerTagThatMovedOffItsPinnedDigestIsRefusedNamingTheReferenceTheTagAndBothDigests(t *testing.T) {
+	exported(t)
+
+	tagged, served := aRegistryServingAnInstaller(t)
+	reference := tagged + "@" + aDigestNoRegistryServes
+
+	_, err := declareAgainstTheRegistry(t, aMintingRendererPinning(t, reference))
+	require.Error(t, err)
+	assert.Equal(t,
+		"checking the installer image "+reference+" of cluster t0: the tag v1.14.0 resolves to "+served+
+			", and the reference pins "+aDigestNoRegistryServes,
+		err.Error())
+}
+
+func TestAnInstallerRegistryThatCannotBeReachedIsRefusedNamingTheReference(t *testing.T) {
+	exported(t)
+
+	reference := anUnreachableRegistryTag(t) + "@" + aDigestNoRegistryServes
+
+	_, err := declareAgainstTheRegistry(t, aMintingRendererPinning(t, reference))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "resolving the installer image "+reference+" of cluster t0: ")
+}
+
+func TestAnInstallerImageTheRendererCannotReadIsAnErrorNamingTheCluster(t *testing.T) {
+	exported(t)
+
+	_, err := declareAgainstTheRegistry(t, aMintingRendererReadingTheInstaller(t, "", errors.New("it does not load")))
+	require.Error(t, err)
+	assert.Equal(t, "reading the installer image of cluster t0: it does not load", err.Error())
+}
+
 func TestPublishRefusesByNameBecauseThisEngineOnlyDeclares(t *testing.T) {
 	t.Parallel()
 
@@ -517,6 +631,7 @@ func TestPublishRefusesByNameBecauseThisEngineOnlyDeclares(t *testing.T) {
 		fsadaptermock.NewMockFS(t),
 		machineconfigcontrollermock.NewMockRenderer(t),
 		machineconfigcontrollermock.NewMockTalosconfig(t),
+		machineconfigcontrollermock.NewMockRegistry(t),
 	).Publish()
 
 	require.ErrorIs(t, err, machineconfigcontroller.ErrNeverPublishes)

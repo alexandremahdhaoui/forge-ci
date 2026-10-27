@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"path/filepath"
+	"strings"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/fsadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/talossecretsadapter"
@@ -41,6 +42,11 @@ type Renderer interface {
 	MachineConfig(
 		bundle citypes.Secret, cluster talossecretsadapter.Cluster, patch string,
 	) (citypes.Secret, error)
+	InstallerImage(rendered citypes.Secret) (string, error)
+}
+
+type Registry interface {
+	Digest(ctx context.Context, tag string) (string, error)
 }
 
 type Talosconfig interface {
@@ -54,10 +60,11 @@ type Controller struct {
 	fs          fsadapter.FS
 	renderer    Renderer
 	talosconfig Talosconfig
+	registry    Registry
 }
 
-func New(fs fsadapter.FS, renderer Renderer, talosconfig Talosconfig) *Controller {
-	return &Controller{fs: fs, renderer: renderer, talosconfig: talosconfig}
+func New(fs fsadapter.FS, renderer Renderer, talosconfig Talosconfig, registry Registry) *Controller {
+	return &Controller{fs: fs, renderer: renderer, talosconfig: talosconfig, registry: registry}
 }
 
 type declaration struct {
@@ -98,6 +105,10 @@ func (c *Controller) Declare(ctx context.Context, in citypes.DeclareInput) (city
 
 	config, err := c.render(bundle, cluster, string(patch))
 	if err != nil {
+		return citypes.DeclareOutput{}, err
+	}
+
+	if err := c.refuseAnInstallerTagThatMovedOffItsDigest(ctx, cluster.Name, config); err != nil {
 		return citypes.DeclareOutput{}, err
 	}
 
@@ -258,6 +269,47 @@ func (c *Controller) render(
 	}
 
 	return config, nil
+}
+
+func (c *Controller) refuseAnInstallerTagThatMovedOffItsDigest(
+	ctx context.Context, clusterName string, config citypes.Secret,
+) error {
+	reference, err := c.renderer.InstallerImage(config)
+	if err != nil {
+		return fmt.Errorf("reading the installer image of cluster %s: %w", clusterName, err)
+	}
+
+	tagged, tag, pinned, both := tagAndDigestOf(reference)
+	if !both {
+		return nil
+	}
+
+	resolved, err := c.registry.Digest(ctx, tagged)
+	if err != nil {
+		return fmt.Errorf("resolving the installer image %s of cluster %s: %w", reference, clusterName, err)
+	}
+
+	if resolved != pinned {
+		return fmt.Errorf(
+			"checking the installer image %s of cluster %s: the tag %s resolves to %s, and the reference pins %s",
+			reference, clusterName, tag, resolved, pinned)
+	}
+
+	return nil
+}
+
+func tagAndDigestOf(reference string) (tagged, tag, digest string, both bool) {
+	tagged, digest, pinned := strings.Cut(reference, "@")
+	if !pinned {
+		return "", "", "", false
+	}
+
+	colon := strings.LastIndex(tagged, ":")
+	if colon <= strings.LastIndex(tagged, "/") {
+		return "", "", "", false
+	}
+
+	return tagged, tagged[colon+1:], digest, true
 }
 
 func requiredString(spec map[string]any, key string) (string, error) {
