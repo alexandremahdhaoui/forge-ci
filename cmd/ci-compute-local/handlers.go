@@ -7,6 +7,7 @@ import (
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/execadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/forgeadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/fsadapter"
+	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/gitadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/computecontroller"
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 	"github.com/alexandremahdhaoui/forge/pkg/forge"
@@ -20,7 +21,8 @@ import (
 // drift from what forge emits. That section travels as the JSON it already is.
 func NewHandlers() Handlers {
 	files := fsadapter.New()
-	ctrl := computecontroller.New(execadapter.New(), forgeadapter.New(files), files, nil)
+	runner := execadapter.New()
+	ctrl := computecontroller.New(runner, forgeadapter.New(files), files, gitadapter.New(runner), nil)
 
 	return Handlers{
 		Declare: func(_ context.Context, in DeclareInput) (*DeclareOutput, error) {

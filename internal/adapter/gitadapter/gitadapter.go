@@ -19,6 +19,7 @@ type Git interface {
 	Init(ctx context.Context, dir string) error
 	Clone(ctx context.Context, url, dir string) error
 	IsRepo(ctx context.Context, dir string) (bool, error)
+	IgnoresPath(ctx context.Context, dir, path string) (bool, error)
 	Add(ctx context.Context, dir, path string) error
 	// Commit records what paths hold. Callers pass the paths they staged:
 	// a pathspec-less commit takes the whole index, including a human's.
@@ -120,6 +121,23 @@ func (g *CLI) IsRepo(ctx context.Context, dir string) (bool, error) {
 	}
 
 	return res.ExitCode == 0, nil
+}
+
+func (g *CLI) IgnoresPath(ctx context.Context, dir, path string) (bool, error) {
+	res, err := g.runner.Run(ctx, dir, "git", "check-ignore", "-q", path)
+	if err != nil {
+		return false, fmt.Errorf("asking git in %s whether it ignores %s: %w", dir, path, err)
+	}
+
+	switch res.ExitCode {
+	case 0:
+		return true, nil
+	case 1:
+		return false, nil
+	}
+
+	return false, fmt.Errorf("asking git in %s whether it ignores %s: git exited %d: %s",
+		dir, path, res.ExitCode, strings.TrimSpace(res.Stderr))
 }
 
 func (g *CLI) Add(ctx context.Context, dir, path string) error {

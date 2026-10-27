@@ -26,7 +26,7 @@ func TestPutThenGetRoundTripsAFileByRevision(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(root, rel), []byte("bytes"), 0o600))
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "member", "generated"), 0o750))
 
-	ctrl := computecontroller.New(nil, nil, fsadapter.New(), nil)
+	ctrl := computecontroller.New(nil, nil, fsadapter.New(), nil, nil)
 
 	put, err := ctrl.Put(citypes.ArtifactPutInput{
 		Revision: "rev1", Root: root,
@@ -71,7 +71,7 @@ func TestAnImageLayoutTravelsAsATree(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(root, layout, "index.json"), []byte("{}"), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(root, layout, "blobs", "sha256", "abc"), []byte("layer"), 0o600))
 
-	ctrl := computecontroller.New(nil, nil, fsadapter.New(), nil)
+	ctrl := computecontroller.New(nil, nil, fsadapter.New(), nil, nil)
 
 	put, err := ctrl.Put(citypes.ArtifactPutInput{
 		Revision: "rev1", Root: root,
@@ -97,7 +97,7 @@ func TestAnImageLayoutTravelsAsATree(t *testing.T) {
 func TestGetRefusesALocationNoPutAnswered(t *testing.T) {
 	t.Parallel()
 
-	ctrl := computecontroller.New(nil, nil, fsadapter.New(), nil)
+	ctrl := computecontroller.New(nil, nil, fsadapter.New(), nil, nil)
 
 	_, err := ctrl.Get(citypes.ArtifactGetInput{
 		Revision: "rev1", Root: t.TempDir(),
@@ -116,7 +116,7 @@ func TestGetRefusesALocationNoPutAnswered(t *testing.T) {
 func TestPutNeedsARevision(t *testing.T) {
 	t.Parallel()
 
-	_, err := computecontroller.New(nil, nil, fsadapter.New(), nil).Put(citypes.ArtifactPutInput{Root: t.TempDir()})
+	_, err := computecontroller.New(nil, nil, fsadapter.New(), nil, nil).Put(citypes.ArtifactPutInput{Root: t.TempDir()})
 	require.Error(t, err)
 }
 
@@ -136,7 +136,7 @@ func TestGetSkipsWhatThisRunNeverPut(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	ctrl := computecontroller.New(nil, nil, fsadapter.New(), nil)
+	ctrl := computecontroller.New(nil, nil, fsadapter.New(), nil, nil)
 
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "member", "build", "bin"), 0o750))
 	require.NoError(t, os.WriteFile(
@@ -177,7 +177,7 @@ func TestPutThenGetKeepsTheExecutableBit(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	ctrl := computecontroller.New(nil, nil, fsadapter.New(), nil)
+	ctrl := computecontroller.New(nil, nil, fsadapter.New(), nil, nil)
 	rel := filepath.Join("member", "build", "bin", "server")
 
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "member", "build", "bin"), 0o750))

@@ -14,6 +14,7 @@ import (
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/execadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/forgeadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/fsadapter"
+	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/gitadapter"
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 )
 
@@ -26,17 +27,19 @@ type Controller struct {
 	runner    execadapter.Runner
 	harvester forgeadapter.Harvester
 	fs        fsadapter.FS
+	git       gitadapter.Git
 	now       func() time.Time
 }
 
 func New(
-	runner execadapter.Runner, harvester forgeadapter.Harvester, fs fsadapter.FS, now func() time.Time,
+	runner execadapter.Runner, harvester forgeadapter.Harvester, fs fsadapter.FS, git gitadapter.Git,
+	now func() time.Time,
 ) *Controller {
 	if now == nil {
 		now = time.Now
 	}
 
-	return &Controller{runner: runner, harvester: harvester, fs: fs, now: now}
+	return &Controller{runner: runner, harvester: harvester, fs: fs, git: git, now: now}
 }
 
 func (c *Controller) Declare(spec map[string]any) (citypes.DeclareOutput, error) {
@@ -198,14 +201,14 @@ func (c *Controller) Run(ctx context.Context, in citypes.RunInput) (citypes.RunO
 func (c *Controller) runIn(
 	ctx context.Context, dir string, env map[string]string, binary string, args []string,
 ) (execadapter.Result, error) {
-	if err := c.giveACloneItsEnvrc(dir); err != nil {
+	if err := c.giveACloneItsEnvrc(ctx, dir); err != nil {
 		return execadapter.Result{}, err
 	}
 
 	return c.runner.RunEnv(ctx, dir, env, binary, args...)
 }
 
-func (c *Controller) giveACloneItsEnvrc(dir string) error {
+func (c *Controller) giveACloneItsEnvrc(ctx context.Context, dir string) error {
 	isDir, err := c.fs.IsDir(dir)
 	if err != nil {
 		return fmt.Errorf("inspecting %s before its target runs: %w", dir, err)
@@ -224,6 +227,26 @@ func (c *Controller) giveACloneItsEnvrc(dir string) error {
 
 	if exists {
 		return nil
+	}
+
+	repo, err := c.git.IsRepo(ctx, dir)
+	if err != nil {
+		return fmt.Errorf("asking whether %s is a git repository before its target runs: %w", dir, err)
+	}
+
+	if !repo {
+		return nil
+	}
+
+	ignored, err := c.git.IgnoresPath(ctx, dir, ".envrc")
+	if err != nil {
+		return err
+	}
+
+	if !ignored {
+		return errors.New(
+			"it holds no .envrc and its git does not ignore .envrc, " +
+				"so the engine will not write one git could carry. add /.envrc to its .gitignore")
 	}
 
 	if err := c.fs.WriteFile(envrc, nil); err != nil {

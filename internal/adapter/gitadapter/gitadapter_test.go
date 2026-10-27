@@ -50,6 +50,36 @@ func TestIsRepoReadsTheExitCode(t *testing.T) {
 	require.False(t, no)
 }
 
+func TestIgnoresPathReadsTheCheckIgnoreExitCode(t *testing.T) {
+	for code, ignored := range map[int]bool{0: true, 1: false} {
+		r := execadaptermock.NewMockRunner(t)
+		r.EXPECT().Run(mock.Anything, "/repo", "git", "check-ignore", "-q", ".envrc").
+			Return(execadapter.Result{ExitCode: code}, nil).Once()
+
+		got, err := gitadapter.New(r).IgnoresPath(context.Background(), "/repo", ".envrc")
+		require.NoError(t, err)
+		require.Equal(t, ignored, got)
+	}
+}
+
+func TestIgnoresPathNamesTheDirOnAnyOtherExitAndOnABrokenRunner(t *testing.T) {
+	failing := execadaptermock.NewMockRunner(t)
+	failing.EXPECT().Run(mock.Anything, "/repo", "git", "check-ignore", "-q", ".envrc").
+		Return(execadapter.Result{ExitCode: 128, Stderr: "fatal: not a git repository\n"}, nil).Once()
+
+	_, err := gitadapter.New(failing).IgnoresPath(context.Background(), "/repo", ".envrc")
+	require.EqualError(t, err,
+		"asking git in /repo whether it ignores .envrc: git exited 128: fatal: not a git repository")
+
+	broken := execadaptermock.NewMockRunner(t)
+	broken.EXPECT().Run(mock.Anything, "/repo", "git", "check-ignore", "-q", ".envrc").
+		Return(execadapter.Result{}, errBoom).Once()
+
+	_, err = gitadapter.New(broken).IgnoresPath(context.Background(), "/repo", ".envrc")
+	require.ErrorIs(t, err, errBoom)
+	require.Contains(t, err.Error(), "/repo")
+}
+
 func TestIsRepoReportsABrokenRunner(t *testing.T) {
 	r := execadaptermock.NewMockRunner(t)
 	r.EXPECT().Run(mock.Anything, mock.Anything, "git", "rev-parse", "--git-dir").

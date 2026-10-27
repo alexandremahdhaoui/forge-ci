@@ -17,7 +17,7 @@ func NewHandlers() Handlers {
 		return githubadapter.New(nil, spec.APIBaseURL, citypes.SecretFromEnv(spec.TokenEnv))
 	}, nil, nil)
 
-	files := computecontroller.New(nil, nil, fsadapter.New(), nil)
+	files := computecontroller.New(nil, nil, fsadapter.New(), nil, nil)
 
 	return Handlers{
 		Declare: func(_ context.Context, in DeclareInput) (*DeclareOutput, error) {
