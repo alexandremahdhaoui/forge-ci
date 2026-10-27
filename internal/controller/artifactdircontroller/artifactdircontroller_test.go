@@ -1,16 +1,208 @@
 package artifactdircontroller_test
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/fsadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/artifactdircontroller"
+	"github.com/alexandremahdhaoui/forge-ci/internal/mocks/fsadaptermock"
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 	"github.com/alexandremahdhaoui/forge/pkg/forge"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
+
+var errBoom = errors.New("boom")
+
+func theDiskFailingAt(t *testing.T, failing string) *fsadaptermock.MockFS {
+	t.Helper()
+
+	disk := fsadapter.New()
+	fs := fsadaptermock.NewMockFS(t)
+
+	broken := func(method string) error {
+		if method == failing {
+			return errBoom
+		}
+
+		return nil
+	}
+
+	fs.EXPECT().IsDir(mock.Anything).RunAndReturn(func(path string) (bool, error) {
+		if err := broken("IsDir"); err != nil {
+			return false, err
+		}
+
+		return disk.IsDir(path)
+	}).Maybe()
+	fs.EXPECT().Exists(mock.Anything).RunAndReturn(func(path string) (bool, error) {
+		if err := broken("Exists"); err != nil {
+			return false, err
+		}
+
+		return disk.Exists(path)
+	}).Maybe()
+	fs.EXPECT().Walk(mock.Anything).RunAndReturn(func(dir string) ([]string, error) {
+		if err := broken("Walk"); err != nil {
+			return nil, err
+		}
+
+		return disk.Walk(dir)
+	}).Maybe()
+	fs.EXPECT().ReadFile(mock.Anything).RunAndReturn(func(path string) ([]byte, error) {
+		if err := broken("ReadFile"); err != nil {
+			return nil, err
+		}
+
+		return disk.ReadFile(path)
+	}).Maybe()
+	fs.EXPECT().MkdirAll(mock.Anything).RunAndReturn(func(path string) error {
+		if err := broken("MkdirAll"); err != nil {
+			return err
+		}
+
+		return disk.MkdirAll(path)
+	}).Maybe()
+	fs.EXPECT().WriteFile(mock.Anything, mock.Anything).RunAndReturn(func(path string, data []byte) error {
+		if err := broken("WriteFile"); err != nil {
+			return err
+		}
+
+		return disk.WriteFile(path, data)
+	}).Maybe()
+	fs.EXPECT().Mode(mock.Anything).RunAndReturn(func(path string) (os.FileMode, error) {
+		if err := broken("Mode"); err != nil {
+			return 0, err
+		}
+
+		return disk.Mode(path)
+	}).Maybe()
+	fs.EXPECT().Chmod(mock.Anything, mock.Anything).RunAndReturn(func(path string, mode os.FileMode) error {
+		if err := broken("Chmod"); err != nil {
+			return err
+		}
+
+		return disk.Chmod(path, mode)
+	}).Maybe()
+
+	return fs
+}
+
+func aRootHoldingAFileAndAnImageLayout(t *testing.T) (string, forge.Artifact, forge.Artifact) {
+	t.Helper()
+
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "member", "bin"), 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "member", "bin", "tool"), []byte("bytes"), 0o600))
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "member", "img.oci"), 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "member", "img.oci", "index.json"), []byte("{}"), 0o600))
+
+	return root,
+		forge.Artifact{Name: "tool", Type: "binary", Location: "member/bin/tool"},
+		forge.Artifact{Name: "img", Type: forge.TypeContainer, Location: "member/img.oci"}
+}
+
+func TestAFailureMovingAnArtifactNamesItsPathAndKeepsTheCause(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name    string
+		get     bool
+		tree    bool
+		failing string
+		want    string
+	}{
+		{name: "putting a file that cannot be inspected", failing: "IsDir", want: "putting member/bin/tool: boom"},
+		{name: "putting a file that cannot be read", failing: "ReadFile", want: "putting member/bin/tool: boom"},
+		{name: "putting a file whose directory cannot be made", failing: "MkdirAll", want: "putting member/bin/tool: boom"},
+		{name: "putting a file that cannot be written", failing: "WriteFile", want: "putting member/bin/tool: boom"},
+		{name: "putting a file whose mode cannot be read", failing: "Mode", want: "putting member/bin/tool: boom"},
+		{name: "putting a file whose mode cannot be set", failing: "Chmod", want: "putting member/bin/tool: boom"},
+		{name: "putting a tree that cannot be walked", tree: true, failing: "Walk", want: "putting member/img.oci: boom"},
+		{name: "putting a tree whose file cannot be read", tree: true, failing: "ReadFile", want: "putting member/img.oci: boom"},
+		{name: "getting a file whose copy cannot be found", get: true, failing: "Exists", want: "getting member/bin/tool: boom"},
+		{name: "getting a file whose copy cannot be inspected", get: true, failing: "IsDir", want: "getting member/bin/tool: boom"},
+		{name: "getting a file whose copy cannot be read", get: true, failing: "ReadFile", want: "getting member/bin/tool: boom"},
+		{name: "getting a tree that cannot be walked", get: true, tree: true, failing: "Walk", want: "getting member/img.oci: boom"},
+		{
+			name: "getting a tree whose file cannot be read", get: true, tree: true, failing: "ReadFile",
+			want: "getting member/img.oci/index.json: boom",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			root, file, tree := aRootHoldingAFileAndAnImageLayout(t)
+
+			artifact := file
+			if tc.tree {
+				artifact = tree
+			}
+
+			put := citypes.ArtifactPutInput{Revision: "rev1", Root: root, Artifacts: []forge.Artifact{artifact}}
+
+			if !tc.get {
+				_, err := artifactdircontroller.New(theDiskFailingAt(t, tc.failing)).Put(put)
+				require.ErrorIs(t, err, errBoom)
+				require.EqualError(t, err, tc.want)
+
+				return
+			}
+
+			kept, err := artifactdircontroller.New(fsadapter.New()).Put(put)
+			require.NoError(t, err)
+
+			_, err = artifactdircontroller.New(theDiskFailingAt(t, tc.failing)).Get(citypes.ArtifactGetInput{
+				Revision: "rev1", Root: root, Artifacts: kept.Artifacts,
+			})
+			require.ErrorIs(t, err, errBoom)
+			require.EqualError(t, err, tc.want)
+		})
+	}
+}
+
+func TestAGetWhoseCopyLandsWithDifferentBytesIsRefused(t *testing.T) {
+	t.Parallel()
+
+	root, file, _ := aRootHoldingAFileAndAnImageLayout(t)
+
+	kept, err := artifactdircontroller.New(fsadapter.New()).Put(citypes.ArtifactPutInput{
+		Revision: "rev1", Root: root, Artifacts: []forge.Artifact{file},
+	})
+	require.NoError(t, err)
+
+	disk := fsadapter.New()
+	corrupting := theDiskFailingAt(t, "")
+	corrupting.EXPECT().WriteFile(mock.Anything, mock.Anything).Unset()
+	corrupting.EXPECT().WriteFile(mock.Anything, mock.Anything).RunAndReturn(func(path string, data []byte) error {
+		return disk.WriteFile(path, append(data, '!'))
+	}).Once()
+
+	_, err = artifactdircontroller.New(corrupting).Get(citypes.ArtifactGetInput{
+		Revision: "rev1", Root: root, Artifacts: kept.Artifacts,
+	})
+	require.ErrorIs(t, err, artifactdircontroller.ErrArtifactSum)
+	require.EqualError(t, err, "getting member/bin/tool: an artifact came back with different bytes")
+}
+
+func TestAnAbsolutePathOutsideTheRootPassesThroughUncopied(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "tool")
+	require.NoError(t, os.WriteFile(outside, []byte("bytes"), 0o600))
+
+	put, err := artifactdircontroller.New(fsadapter.New()).Put(citypes.ArtifactPutInput{
+		Revision: "rev1", Root: root,
+		Artifacts: []forge.Artifact{{Name: "tool", Type: "binary", Location: outside}},
+	})
+	require.NoError(t, err)
+	require.Equal(t, outside, put.Artifacts[0].Location, "a path outside the root is somebody else's to serve")
+	require.NoDirExists(t, filepath.Join(root, artifactdircontroller.ArtifactDir))
+}
 
 func TestPutThenGetRoundTripsAFileByRevision(t *testing.T) {
 	t.Parallel()
