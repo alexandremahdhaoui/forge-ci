@@ -1,4 +1,4 @@
-package computecontroller
+package artifactdircontroller
 
 import (
 	"errors"
@@ -21,6 +21,14 @@ var (
 	ErrArtifactURL  = errors.New("an artifact to get must carry a location a put answered")
 	ErrArtifactSum  = errors.New("an artifact came back with different bytes")
 )
+
+type Controller struct {
+	fs fsadapter.FS
+}
+
+func New(fs fsadapter.FS) *Controller {
+	return &Controller{fs: fs}
+}
 
 func (c *Controller) Put(in citypes.ArtifactPutInput) (citypes.ArtifactPutOutput, error) {
 	if strings.TrimSpace(in.Revision) == "" {

@@ -4,12 +4,9 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/execadapter"
-	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/forgeadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/fsadapter"
-	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/gitadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/githubadapter"
-	"github.com/alexandremahdhaoui/forge-ci/internal/controller/computecontroller"
+	"github.com/alexandremahdhaoui/forge-ci/internal/controller/artifactdircontroller"
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/workflowcontroller"
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 	"github.com/alexandremahdhaoui/forge/pkg/forge"
@@ -20,9 +17,7 @@ func NewHandlers() Handlers {
 		return githubadapter.New(nil, spec.APIBaseURL, citypes.SecretFromEnv(spec.TokenEnv))
 	}, nil, nil)
 
-	disk := fsadapter.New()
-	runner := execadapter.New()
-	files := computecontroller.New(runner, forgeadapter.New(disk), disk, gitadapter.New(runner), nil)
+	artifactDir := artifactdircontroller.New(fsadapter.New())
 
 	return Handlers{
 		Declare: func(_ context.Context, in DeclareInput) (*DeclareOutput, error) {
@@ -51,7 +46,7 @@ func NewHandlers() Handlers {
 				return nil, err
 			}
 
-			out, err := files.Put(citypes.ArtifactPutInput{
+			out, err := artifactDir.Put(citypes.ArtifactPutInput{
 				Revision: in.Revision, Artifacts: artifacts, Root: in.Root, Spec: in.Spec,
 			})
 			if err != nil {
@@ -71,7 +66,7 @@ func NewHandlers() Handlers {
 				return nil, err
 			}
 
-			out, err := files.Get(citypes.ArtifactGetInput{
+			out, err := artifactDir.Get(citypes.ArtifactGetInput{
 				Revision: in.Revision, Artifacts: artifacts, Root: in.Root, Spec: in.Spec,
 			})
 			if err != nil {
