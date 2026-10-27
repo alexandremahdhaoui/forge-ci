@@ -31,7 +31,7 @@ check internal/adapter "internal/controller internal/driver" \
 check internal/controller "internal/driver" \
     "A controller holds business logic. Drivers call controllers, never the reverse."
 
-check pkg/citypes "internal/adapter internal/controller internal/driver" \
+check pkg/citypes "internal/adapter internal/controller internal/driver pkg/talos" \
     "Types are plain data. They depend on nothing."
 
 check pkg/talos "internal" \
@@ -39,18 +39,18 @@ check pkg/talos "internal" \
 
 for dir in $(find internal/adapter -mindepth 1 -maxdepth 1 -type d); do
     name=$(basename "$dir")
-    siblings=$(find internal/adapter -mindepth 1 -maxdepth 1 -type d ! -name "$name" -exec basename {} \;)
+    siblings="$(find internal/adapter -mindepth 1 -maxdepth 1 -type d ! -name "$name") pkg/talos"
     files=$(find "$dir" -maxdepth 1 -name '*.go' ! -name '*_test.go')
 
     for sibling in $siblings; do
         case "$sibling" in
-            execadapter|fsadapter) continue ;;
+            internal/adapter/execadapter|internal/adapter/fsadapter) continue ;;
         esac
 
-        hits=$(grep -l "$MODULE/internal/adapter/$sibling" $files 2>/dev/null || true)
+        hits=$(grep -l "$MODULE/$sibling" $files 2>/dev/null || true)
 
         if [ -n "$hits" ]; then
-            echo "$hits imports the $sibling adapter. Adapters do not call each other." >&2
+            echo "$hits imports the $(basename "$sibling") adapter. Adapters do not call each other." >&2
             fail=1
         fi
     done
