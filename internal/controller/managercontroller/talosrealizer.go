@@ -24,8 +24,8 @@ const (
 	talosconfigSource = "the variable spec.talosconfigEnv names"
 	recoverySource    = "the variable spec.recoveryDirEnv names"
 
-	recoveryDirMode  os.FileMode = 0o700
-	recoveryFileMode os.FileMode = 0o600
+	recoveryDirMode   os.FileMode = 0o700
+	ownerOnlyFileMode os.FileMode = 0o600
 )
 
 var retiredResourceKeys = []struct{ key, because string }{
@@ -237,6 +237,12 @@ func (r TalosRealizer) prepareFirstRun(name string, talosconfig, bundle citypes.
 			name, talosconfigSource, err)
 	}
 
+	if err := r.fs.Chmod(string(talosconfig), ownerOnlyFileMode); err != nil {
+		return fmt.Errorf(
+			"restricting the client configuration of %s from %s to its owner: %w",
+			name, talosconfigSource, withoutThePath(err))
+	}
+
 	if err := r.writeRecovery(dir, citypes.TalosRecoveryTalosconfigFile, saved); err != nil {
 		return fmt.Errorf("writing the talosconfig of %s into the recovery directory: %w", name, err)
 	}
@@ -259,7 +265,7 @@ func (r TalosRealizer) writeRecovery(dir, file string, content citypes.Secret) e
 		return withoutThePath(err)
 	}
 
-	if err := r.fs.Chmod(path, recoveryFileMode); err != nil {
+	if err := r.fs.Chmod(path, ownerOnlyFileMode); err != nil {
 		return withoutThePath(err)
 	}
 
