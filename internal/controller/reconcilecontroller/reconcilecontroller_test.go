@@ -978,3 +978,65 @@ func TestABootstrapThatChangesNothingWritesNoRevisionRecord(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, f.countedPut("revision"))
 }
+
+var evaluateOnly = reconcilecontroller.Options{Phase: reconcilecontroller.PhaseEvaluate}
+
+func TestAnEvaluatePhaseThatChangesNothingWritesNoEvaluationRecord(t *testing.T) {
+	f := newFakeEngines(t)
+	c := reconcilecontroller.New(f.caller(), gitAt(t, "abc123", "v0.1.9"), clock())
+	p := releasingPipeline()
+
+	first, err := c.Apply(context.Background(), p, "/work", evaluateOnly)
+	require.NoError(t, err)
+
+	key := "owned/evaluate-" + first.Revision.ID
+	recorded := f.store[key]
+	owned := f.countedPut("owned")
+
+	second, err := c.Apply(context.Background(), p, "/work", evaluateOnly)
+	require.NoError(t, err)
+	require.Equal(t, first.Revision.ID, second.Revision.ID)
+	require.NotEqual(t, first.Revision.CreatedAt, second.Revision.CreatedAt,
+		"the second run resolved the revision at a later time")
+	require.Equal(t, owned, f.countedPut("owned"), "a timestamp alone is no reason to write the evaluation")
+	require.Equal(t, recorded, f.store[key])
+}
+
+func TestAnEvaluationRecordThatDiffersBeyondItsTimestampIsRewritten(t *testing.T) {
+	f := newFakeEngines(t)
+	c := reconcilecontroller.New(f.caller(), gitAt(t, "abc123", "v0.1.9"), clock())
+	p := releasingPipeline()
+
+	first, err := c.Apply(context.Background(), p, "/work", evaluateOnly)
+	require.NoError(t, err)
+
+	key := "owned/evaluate-" + first.Revision.ID
+
+	var record map[string]any
+	require.NoError(t, json.Unmarshal([]byte(f.store[key]), &record))
+	record["version"] = "v9.9.9"
+	stale, err := json.Marshal(record)
+	require.NoError(t, err)
+	f.store[key] = string(stale)
+
+	owned := f.countedPut("owned")
+
+	_, err = c.Apply(context.Background(), p, "/work", evaluateOnly)
+	require.NoError(t, err)
+	require.Equal(t, owned+1, f.countedPut("owned"))
+	require.Contains(t, f.store[key], `"version": "v0.1.10"`)
+}
+
+func TestACorruptEvaluationRecordIsReportedByTheEvaluatePhase(t *testing.T) {
+	f := newFakeEngines(t)
+	c := reconcilecontroller.New(f.caller(), gitAt(t, "abc123", "v0.1.9"), clock())
+	p := releasingPipeline()
+
+	first, err := c.Apply(context.Background(), p, "/work", evaluateOnly)
+	require.NoError(t, err)
+
+	f.store["owned/evaluate-"+first.Revision.ID] = "not json"
+
+	_, err = c.Apply(context.Background(), p, "/work", evaluateOnly)
+	require.ErrorContains(t, err, "reading the evaluation for "+first.Revision.ID)
+}

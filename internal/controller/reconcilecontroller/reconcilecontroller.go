@@ -225,7 +225,7 @@ func (c *Controller) applyPhases(
 		if phase == PhaseEvaluate {
 			decision.Revision = revision
 
-			if err := c.writeEvaluation(ctx, index, revision.ID, decision); err != nil {
+			if err := c.recordEvaluation(ctx, index, revision.ID, decision); err != nil {
 				return Report{}, err
 			}
 		}
@@ -436,6 +436,46 @@ func (c *Controller) mint(ctx context.Context, index engineIndex, revision cityp
 	}
 
 	return c.putJSON(ctx, index, KindRevision, revision.ID, toWire(revision))
+}
+
+func (c *Controller) recordEvaluation(
+	ctx context.Context, index engineIndex, revision string, decision releaseDecision,
+) error {
+	recorded, err := c.readEvaluation(ctx, index, revision)
+	if errors.Is(err, ErrNoEvaluation) {
+		return c.writeEvaluation(ctx, index, revision, decision)
+	}
+
+	if err != nil {
+		return err
+	}
+
+	same, err := sameEvaluationBeyondItsTimestamp(recorded, decision)
+	if err != nil {
+		return fmt.Errorf("comparing the evaluation for %s: %w", revision, err)
+	}
+
+	if same {
+		return nil
+	}
+
+	return c.writeEvaluation(ctx, index, revision, decision)
+}
+
+func sameEvaluationBeyondItsTimestamp(recorded, decided releaseDecision) (bool, error) {
+	recorded.Revision.CreatedAt = decided.Revision.CreatedAt
+
+	was, err := json.Marshal(recorded)
+	if err != nil {
+		return false, err
+	}
+
+	is, err := json.Marshal(decided)
+	if err != nil {
+		return false, err
+	}
+
+	return string(was) == string(is), nil
 }
 
 const KindDependencyLock = "dependency-lock"
