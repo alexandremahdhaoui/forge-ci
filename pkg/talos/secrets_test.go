@@ -179,7 +179,7 @@ func TestAnUnreadableBundleIsRefusedByName(t *testing.T) {
 
 	_, err := NewSecrets().Load("\tthis is not yaml")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "reading the stored talos secret bundle")
+	assert.Contains(t, err.Error(), "reading the talos secret bundle: it is not a secret bundle document")
 }
 
 func TestABundleMissingItsCertificatesIsRefusedByName(t *testing.T) {
@@ -187,7 +187,7 @@ func TestABundleMissingItsCertificatesIsRefusedByName(t *testing.T) {
 
 	_, err := NewSecrets().Load("Cluster:\n  Id: a\n  Secret: b\n")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "validating the stored talos secret bundle")
+	assert.Contains(t, err.Error(), "validating the talos secret bundle")
 	assert.Contains(t, err.Error(), "certs is required")
 }
 

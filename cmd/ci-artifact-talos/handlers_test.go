@@ -214,7 +214,7 @@ func TestALaterRunOverABundleStoredInTheUpperCaseFormIsRefusedByNameAndDeclaresN
 		Declare(context.Background(), DeclareInput{Root: root, Spec: declaredSpec()})
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "loading the secret bundle of cluster t0: validating the stored talos secret bundle")
+	assert.Contains(t, err.Error(), "loading the secret bundle of cluster t0: validating the talos secret bundle")
 	assert.Contains(t, err.Error(), "certs is required")
 	assert.Nil(t, out)
 }

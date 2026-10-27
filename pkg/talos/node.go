@@ -16,13 +16,10 @@ import (
 	machineapi "github.com/siderolabs/talos/pkg/machinery/api/machine"
 	"github.com/siderolabs/talos/pkg/machinery/client"
 	clientconfig "github.com/siderolabs/talos/pkg/machinery/client/config"
-	"github.com/siderolabs/talos/pkg/machinery/config"
-	"github.com/siderolabs/talos/pkg/machinery/config/generate/secrets"
 	configresource "github.com/siderolabs/talos/pkg/machinery/resources/config"
 	"github.com/siderolabs/talos/pkg/machinery/resources/runtime"
 	"github.com/siderolabs/talos/pkg/machinery/resources/v1alpha1"
 	"github.com/siderolabs/talos/pkg/machinery/role"
-	stockyaml "go.yaml.in/yaml/v4"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -169,16 +166,9 @@ type credential struct {
 }
 
 func adminCredential(bundle citypes.Secret) (credential, error) {
-	held := &secrets.Bundle{Clock: secrets.NewClock()}
-
-	if err := stockyaml.Unmarshal([]byte(bundle), held); err != nil {
-		return credential{}, errors.New(
-			"minting the admin credential: the talos secret bundle is not a secret bundle document")
-	}
-
-	if err := held.Validate(config.TalosVersionCurrent); err != nil {
-		return credential{}, fmt.Errorf(
-			"minting the admin credential: validating the talos secret bundle: %w", err)
+	held, err := unmarshalBundle(bundle)
+	if err != nil {
+		return credential{}, fmt.Errorf("minting the admin credential: %w", err)
 	}
 
 	minted, err := held.GenerateTalosAPIClientCertificate(role.MakeSet(role.Admin))

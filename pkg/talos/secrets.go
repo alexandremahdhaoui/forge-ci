@@ -141,11 +141,11 @@ func unmarshalBundle(bundle citypes.Secret) (*secrets.Bundle, error) {
 
 	if err := stockyaml.Unmarshal([]byte(bundle), held); err != nil {
 		return nil, errors.New(
-			"reading the stored talos secret bundle: it is not a secret bundle document")
+			"reading the talos secret bundle: it is not a secret bundle document")
 	}
 
 	if err := held.Validate(config.TalosVersionCurrent); err != nil {
-		return nil, fmt.Errorf("validating the stored talos secret bundle: %w", err)
+		return nil, fmt.Errorf("validating the talos secret bundle: %w", err)
 	}
 
 	return held, nil
