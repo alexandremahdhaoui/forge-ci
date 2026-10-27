@@ -899,3 +899,82 @@ func TestAnApplyThatReusedEveryRunReportsNothingNew(t *testing.T) {
 	require.True(t, second.NothingNew, "every run was answered from the recorded state")
 	require.Equal(t, 1, second.Stages[0].Reused)
 }
+
+func TestARunThatChangesNothingWritesNoRevisionRecord(t *testing.T) {
+	f := newFakeEngines(t)
+	c := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock())
+	p := pipeline(stage("build", substage("default", []string{"build"})))
+
+	first, err := c.Apply(context.Background(), p, "/work", plain)
+	require.NoError(t, err)
+
+	recorded := f.store["revision/"+first.Revision.ID]
+
+	second, err := c.Apply(context.Background(), p, "/work", plain)
+	require.NoError(t, err)
+	require.Equal(t, first.Revision.ID, second.Revision.ID)
+	require.NotEqual(t, first.Revision.CreatedAt, second.Revision.CreatedAt,
+		"the second run resolved the revision at a later time")
+	require.Equal(t, 1, f.countedPut("revision"), "a timestamp alone is no reason to write the record")
+	require.Equal(t, recorded, f.store["revision/"+first.Revision.ID])
+}
+
+func TestARevisionRecordThatDiffersBeyondItsTimestampIsRewritten(t *testing.T) {
+	f := newFakeEngines(t)
+	c := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock())
+	p := pipeline(stage("build", substage("default", []string{"build"})))
+
+	first, err := c.Apply(context.Background(), p, "/work", plain)
+	require.NoError(t, err)
+
+	key := "revision/" + first.Revision.ID
+
+	var record map[string]any
+	require.NoError(t, json.Unmarshal([]byte(f.store[key]), &record))
+	record["repos"] = map[string]any{"golden-rust": "stale"}
+	stale, err := json.Marshal(record)
+	require.NoError(t, err)
+	f.store[key] = string(stale)
+
+	_, err = c.Apply(context.Background(), p, "/work", plain)
+	require.NoError(t, err)
+	require.Equal(t, 2, f.countedPut("revision"))
+	require.Contains(t, f.store[key], `"golden-rust": "abc"`)
+}
+
+func TestACorruptRevisionRecordIsReported(t *testing.T) {
+	f := newFakeEngines(t)
+	c := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock())
+	p := pipeline(stage("build", substage("default", []string{"build"})))
+
+	first, err := c.Apply(context.Background(), p, "/work", plain)
+	require.NoError(t, err)
+
+	f.store["revision/"+first.Revision.ID] = "not json"
+
+	_, err = c.Apply(context.Background(), p, "/work", plain)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "reading revision")
+}
+
+func TestAFailureReadingTheRevisionRecordIsReported(t *testing.T) {
+	f := newFakeEngines(t)
+	f.failOn[call{uriState, "get"}] = errBoom
+
+	_, err := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock()).
+		Bootstrap(context.Background(), pipeline(stage("build", substage("default", []string{"build"}))), "/work", plain)
+	require.ErrorIs(t, err, errBoom)
+}
+
+func TestABootstrapThatChangesNothingWritesNoRevisionRecord(t *testing.T) {
+	f := newFakeEngines(t)
+	c := reconcilecontroller.New(f.caller(), gitAt(t, "abc"), clock())
+	p := pipeline(stage("build", substage("default", []string{"build"})))
+
+	_, err := c.Bootstrap(context.Background(), p, "/work", plain)
+	require.NoError(t, err)
+
+	_, err = c.Bootstrap(context.Background(), p, "/work", plain)
+	require.NoError(t, err)
+	require.Equal(t, 1, f.countedPut("revision"))
+}

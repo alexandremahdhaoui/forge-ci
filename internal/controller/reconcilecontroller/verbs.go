@@ -32,7 +32,7 @@ func (c *Controller) Bootstrap(
 		return Report{}, err
 	}
 
-	if err := c.putJSON(ctx, index, KindRevision, revision.ID, toWire(revision)); err != nil {
+	if err := c.mint(ctx, index, revision); err != nil {
 		return Report{}, err
 	}
 

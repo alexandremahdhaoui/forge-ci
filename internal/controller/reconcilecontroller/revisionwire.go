@@ -1,6 +1,9 @@
 package reconcilecontroller
 
 import (
+	"encoding/json"
+	"reflect"
+
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 	"github.com/alexandremahdhaoui/forge-revision-spec/pkg/revisiontypes"
 )
@@ -30,4 +33,16 @@ func toWire(revision citypes.Revision) revisiontypes.Revision {
 	}
 
 	return wire
+}
+
+func sameBeyondItsTimestamp(payload string, revision citypes.Revision) (bool, error) {
+	var recorded revisiontypes.Revision
+	if err := json.Unmarshal([]byte(payload), &recorded); err != nil {
+		return false, err
+	}
+
+	minted := toWire(revision)
+	recorded.CreatedAt = minted.CreatedAt
+
+	return reflect.DeepEqual(recorded, minted), nil
 }

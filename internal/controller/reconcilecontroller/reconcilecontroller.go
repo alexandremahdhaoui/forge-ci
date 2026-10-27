@@ -612,6 +612,25 @@ func knownKinds(vocab config.Semantic, prefix string) []string {
 // mint records the revision as proven. Writing it twice is harmless, because
 // the id is derived from the tuple and the record is the same.
 func (c *Controller) mint(ctx context.Context, index engineIndex, revision citypes.Revision) error {
+	var out citypes.StateGetOutput
+
+	if err := c.callState(ctx, index, ToolGet, citypes.StateGetInput{
+		Kind: KindRevision, Key: revision.ID, Spec: index.stateSpec,
+	}, &out); err != nil {
+		return err
+	}
+
+	if out.Found {
+		same, err := sameBeyondItsTimestamp(out.Payload, revision)
+		if err != nil {
+			return fmt.Errorf("reading revision %q: %w", revision.ID, err)
+		}
+
+		if same {
+			return nil
+		}
+	}
+
 	return c.putJSON(ctx, index, KindRevision, revision.ID, toWire(revision))
 }
 
