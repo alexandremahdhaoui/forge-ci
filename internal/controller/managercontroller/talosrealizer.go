@@ -131,12 +131,22 @@ func (r TalosRealizer) realizeMachineConfig(res citypes.Resource, opts Options) 
 		return Kept("kept machine config " + res.Name), nil
 	}
 
+	firstRun := running == ""
+
+	var recoveryDir string
+
+	if firstRun {
+		if recoveryDir, err = r.recoveryDirHoldingNoBundle(res.Name, recoveryDirEnv); err != nil {
+			return Action{}, err
+		}
+	}
+
 	if opts.DryRun {
 		return Kept(opts.would("apply machine config " + res.Name)), nil
 	}
 
-	if running == "" {
-		if err := r.prepareFirstRun(res.Name, talosconfig, bundle, recoveryDirEnv); err != nil {
+	if firstRun {
+		if err := r.prepareFirstRun(res.Name, talosconfig, bundle, recoveryDir); err != nil {
 			return Action{}, err
 		}
 	}
@@ -192,16 +202,30 @@ func (r TalosRealizer) realizeClusterBootstrap(res citypes.Resource, opts Option
 	return Did("bootstrapped cluster " + res.Name), nil
 }
 
-func (r TalosRealizer) prepareFirstRun(
-	name string, talosconfig, bundle citypes.Secret, recoveryDirEnv string,
-) error {
+func (r TalosRealizer) recoveryDirHoldingNoBundle(name, recoveryDirEnv string) (string, error) {
 	dir := string(citypes.SecretFromEnv(recoveryDirEnv))
 	if dir == "" {
-		return fmt.Errorf(
+		return "", fmt.Errorf(
 			"writing the recovery directory of %s: nothing is set in %s. export it before a first run",
 			name, recoverySource)
 	}
 
+	held, err := r.fs.Exists(filepath.Join(dir, citypes.TalosRecoveryBundleFile))
+	if err != nil {
+		return "", fmt.Errorf("reading the recovery directory of %s: %w", name, withoutThePath(err))
+	}
+
+	if held {
+		return "", fmt.Errorf(
+			"writing the recovery directory of %s: the directory %s already holds %s, "+
+				"and a first run never overwrites a bundle",
+			name, recoverySource, citypes.TalosRecoveryBundleFile)
+	}
+
+	return dir, nil
+}
+
+func (r TalosRealizer) prepareFirstRun(name string, talosconfig, bundle citypes.Secret, dir string) error {
 	if err := r.writeRecovery(dir, citypes.TalosRecoveryBundleFile, bundle); err != nil {
 		return fmt.Errorf("writing the secret bundle of %s into the recovery directory: %w", name, err)
 	}

@@ -77,7 +77,10 @@ writes a copy of that talosconfig as `talosconfig` beside the bundle. The
 directory is 0700 and each file 0600, and stock talosctl loads both. A
 machine-config resource that names no bundle or no recovery variable is
 refused by name, and an empty recovery variable is refused on a first run.
-A refusal names the variable slot and never the directory.
+A first run over a recovery directory that already holds `secrets.yaml` is
+refused by name before any write, any credential save and any apply, and a
+first run never overwrites a bundle. A dry run reaches both refusals the
+same way. A refusal names the variable slot and never the directory.
 
 After such an apply the node installs and
 reboots, so every later dial in the same run retries until a ceiling of ten

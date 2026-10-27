@@ -312,6 +312,10 @@ func recoveryPath(file string) string {
 	return filepath.Join(theRecoveryDirectory, file)
 }
 
+func aRecoveryDirectoryHoldingNoBundle(files *fsadaptermock.MockFS) *mock.Call {
+	return files.EXPECT().Exists(recoveryPath("secrets.yaml")).Return(false, nil).Call
+}
+
 func expectTheRecoveryDirectory(files *fsadaptermock.MockFS, file string, content string) []*mock.Call {
 	return []*mock.Call{
 		files.EXPECT().MkdirAll(theRecoveryDirectory).Return(nil).Call,
@@ -325,6 +329,7 @@ func TestAFirstRunWritesTheBundleTheTalosconfigAndItsRecoveryCopyBeforeTheApplyO
 	r, talos, files := talosRealizerWithFiles(t)
 
 	read := talos.EXPECT().MachineConfig(mock.Anything, mock.Anything).Return("", nil).Call
+	free := aRecoveryDirectoryHoldingNoBundle(files)
 	bundle := expectTheRecoveryDirectory(files, "secrets.yaml", theBundle)
 	save := talos.EXPECT().
 		SaveTalosconfig(citypes.Secret("/home/operator/.config/t0.yaml"), citypes.Secret(theBundle)).
@@ -334,7 +339,7 @@ func TestAFirstRunWritesTheBundleTheTalosconfigAndItsRecoveryCopyBeforeTheApplyO
 		ApplyMachineConfig(mock.Anything, citypes.Secret("/home/operator/.config/t0.yaml"), controlplane).
 		Return(nil).Call
 
-	order := append([]*mock.Call{read}, bundle...)
+	order := append([]*mock.Call{read, free}, bundle...)
 	order = append(order, save)
 	order = append(order, copied...)
 	mock.InOrder(append(order, apply)...)
@@ -357,8 +362,9 @@ func TestANodeThatHoldsAConfigNeverTouchesTheRecoveryDirectoryOrTheTalosconfig(t
 }
 
 func TestADryRunOnANodeInMaintenanceWritesNoRecoveryFileNoTalosconfigAndAppliesNothing(t *testing.T) {
-	r, talos := talosRealizer(t)
+	r, talos, files := talosRealizerWithFiles(t)
 	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything).Return("", nil)
+	aRecoveryDirectoryHoldingNoBundle(files)
 
 	action, err := r.Realize(machineConfig(controlplane), managercontroller.Options{DryRun: true})
 	require.NoError(t, err)
@@ -368,24 +374,75 @@ func TestADryRunOnANodeInMaintenanceWritesNoRecoveryFileNoTalosconfigAndAppliesN
 	talos.AssertNotCalled(t, "ApplyMachineConfig", mock.Anything, mock.Anything, mock.Anything)
 }
 
-func TestAFirstRunWithAnEmptyRecoveryVariableIsRefusedBeforeAnyWriteAndAnyApply(t *testing.T) {
-	r, talos := talosRealizer(t)
-	t.Setenv(recoveryVariable, "")
-	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything).Return("", nil)
+var aRealRunAndADryRun = map[string]managercontroller.Options{
+	"a real run": plain,
+	"a dry run":  {DryRun: true},
+}
 
-	_, err := r.Realize(machineConfig(controlplane), plain)
-	require.Error(t, err)
-	assert.Equal(t,
-		"writing the recovery directory of t0-controlplane: nothing is set in "+
-			"the variable spec.recoveryDirEnv names. export it before a first run",
-		err.Error())
-	talos.AssertNotCalled(t, "SaveTalosconfig", mock.Anything, mock.Anything)
-	talos.AssertNotCalled(t, "ApplyMachineConfig", mock.Anything, mock.Anything, mock.Anything)
+func TestAFirstRunWithAnEmptyRecoveryVariableIsRefusedBeforeAnyWriteAndAnyApply(t *testing.T) {
+	for name, opts := range aRealRunAndADryRun {
+		t.Run(name, func(t *testing.T) {
+			r, talos := talosRealizer(t)
+			t.Setenv(recoveryVariable, "")
+			talos.EXPECT().MachineConfig(mock.Anything, mock.Anything).Return("", nil)
+
+			_, err := r.Realize(machineConfig(controlplane), opts)
+			require.Error(t, err)
+			assert.Equal(t,
+				"writing the recovery directory of t0-controlplane: nothing is set in "+
+					"the variable spec.recoveryDirEnv names. export it before a first run",
+				err.Error())
+			talos.AssertNotCalled(t, "SaveTalosconfig", mock.Anything, mock.Anything)
+			talos.AssertNotCalled(t, "ApplyMachineConfig", mock.Anything, mock.Anything, mock.Anything)
+		})
+	}
+}
+
+func TestAFirstRunOverARecoveryDirectoryHoldingABundleIsRefusedNamingTheFileAndTheVariableBeforeAnyWriteAnySaveAndAnyApply(t *testing.T) {
+	for name, opts := range aRealRunAndADryRun {
+		t.Run(name, func(t *testing.T) {
+			r, talos, files := talosRealizerWithFiles(t)
+			talos.EXPECT().MachineConfig(mock.Anything, mock.Anything).Return("", nil)
+			files.EXPECT().Exists(recoveryPath("secrets.yaml")).Return(true, nil)
+
+			_, err := r.Realize(machineConfig(controlplane), opts)
+			require.Error(t, err)
+			assert.Equal(t,
+				"writing the recovery directory of t0-controlplane: the directory "+
+					"the variable spec.recoveryDirEnv names already holds secrets.yaml, "+
+					"and a first run never overwrites a bundle",
+				err.Error())
+			assert.NotContains(t, err.Error(), theRecoveryDirectory)
+			files.AssertNotCalled(t, "MkdirAll", mock.Anything)
+			files.AssertNotCalled(t, "WriteFile", mock.Anything, mock.Anything)
+			talos.AssertNotCalled(t, "SaveTalosconfig", mock.Anything, mock.Anything)
+			talos.AssertNotCalled(t, "ApplyMachineConfig", mock.Anything, mock.Anything, mock.Anything)
+		})
+	}
+}
+
+func TestARecoveryDirectoryThatCannotBeReadIsRefusedWithoutThePathBeforeAnyWrite(t *testing.T) {
+	for name, opts := range aRealRunAndADryRun {
+		t.Run(name, func(t *testing.T) {
+			r, talos, files := talosRealizerWithFiles(t)
+			talos.EXPECT().MachineConfig(mock.Anything, mock.Anything).Return("", nil)
+			files.EXPECT().Exists(recoveryPath("secrets.yaml")).
+				Return(false, fmt.Errorf("inspecting %s: %w", recoveryPath("secrets.yaml"),
+					&fs.PathError{Op: "stat", Path: recoveryPath("secrets.yaml"), Err: fs.ErrPermission}))
+
+			_, err := r.Realize(machineConfig(controlplane), opts)
+			require.Error(t, err)
+			assert.Equal(t, "reading the recovery directory of t0-controlplane: permission denied", err.Error())
+			files.AssertNotCalled(t, "WriteFile", mock.Anything, mock.Anything)
+			talos.AssertNotCalled(t, "ApplyMachineConfig", mock.Anything, mock.Anything, mock.Anything)
+		})
+	}
 }
 
 func TestAFirstRunThatCannotSaveTheAdminCredentialAppliesNothing(t *testing.T) {
 	r, talos, files := talosRealizerWithFiles(t)
 	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything).Return("", nil)
+	aRecoveryDirectoryHoldingNoBundle(files)
 	expectTheRecoveryDirectory(files, "secrets.yaml", theBundle)
 	talos.EXPECT().SaveTalosconfig(mock.Anything, mock.Anything).
 		Return("", errors.New("minting the admin credential: validating the talos secret bundle"))
@@ -427,6 +484,7 @@ func TestARecoveryWriteThatFailsAppliesNothingAndNamesTheFileButNeverTheDirector
 		t.Run(name, func(t *testing.T) {
 			r, talos, files := talosRealizerWithFiles(t)
 			talos.EXPECT().MachineConfig(mock.Anything, mock.Anything).Return("", nil)
+			aRecoveryDirectoryHoldingNoBundle(files)
 			fail(files)
 
 			_, err := r.Realize(machineConfig(controlplane), plain)
@@ -444,6 +502,7 @@ func TestARecoveryWriteThatFailsAppliesNothingAndNamesTheFileButNeverTheDirector
 func TestAFirstRunThatCannotCopyTheTalosconfigIntoTheRecoveryDirectoryAppliesNothing(t *testing.T) {
 	r, talos, files := talosRealizerWithFiles(t)
 	talos.EXPECT().MachineConfig(mock.Anything, mock.Anything).Return("", nil)
+	aRecoveryDirectoryHoldingNoBundle(files)
 	expectTheRecoveryDirectory(files, "secrets.yaml", theBundle)
 	talos.EXPECT().SaveTalosconfig(mock.Anything, mock.Anything).
 		Return(citypes.Secret(theSavedTalosconfig), nil)
