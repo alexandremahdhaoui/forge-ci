@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/fsadapter"
-	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/talossecretsadapter"
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 )
 
@@ -43,7 +42,7 @@ type Renderer interface {
 	Mint() (citypes.Secret, error)
 	Load(bundle citypes.Secret) (citypes.Secret, error)
 	MachineConfig(
-		bundle citypes.Secret, cluster talossecretsadapter.Cluster, patch string,
+		bundle citypes.Secret, cluster citypes.TalosCluster, patch string,
 	) (citypes.Secret, error)
 	InstallerImage(rendered citypes.Secret) (string, error)
 }
@@ -89,7 +88,7 @@ func (c *Controller) Declare(ctx context.Context, in citypes.DeclareInput) (city
 		return citypes.DeclareOutput{}, err
 	}
 
-	cluster := talossecretsadapter.Cluster{
+	cluster := citypes.TalosCluster{
 		Name:              declared.clusterName,
 		Endpoint:          "https://" + net.JoinHostPort(hostOf(target.Endpoints[0]), apiServerPort),
 		KubernetesVersion: declared.kubernetesVersion,
@@ -259,7 +258,7 @@ func hostOf(endpoint string) string {
 }
 
 func (c *Controller) render(
-	bundle citypes.Secret, cluster talossecretsadapter.Cluster, patch string,
+	bundle citypes.Secret, cluster citypes.TalosCluster, patch string,
 ) (citypes.Secret, error) {
 	loaded, err := c.renderer.Load(bundle)
 	if err != nil {

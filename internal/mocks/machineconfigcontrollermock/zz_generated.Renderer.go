@@ -5,7 +5,6 @@
 package machineconfigcontrollermock
 
 import (
-	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/talossecretsadapter"
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 	mock "github.com/stretchr/testify/mock"
 )
@@ -158,7 +157,7 @@ func (_c *MockRenderer_Load_Call) RunAndReturn(run func(bundle citypes.Secret) (
 }
 
 // MachineConfig provides a mock function for the type MockRenderer
-func (_mock *MockRenderer) MachineConfig(bundle citypes.Secret, cluster talossecretsadapter.Cluster, patch string) (citypes.Secret, error) {
+func (_mock *MockRenderer) MachineConfig(bundle citypes.Secret, cluster citypes.TalosCluster, patch string) (citypes.Secret, error) {
 	ret := _mock.Called(bundle, cluster, patch)
 
 	if len(ret) == 0 {
@@ -167,15 +166,15 @@ func (_mock *MockRenderer) MachineConfig(bundle citypes.Secret, cluster talossec
 
 	var r0 citypes.Secret
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(citypes.Secret, talossecretsadapter.Cluster, string) (citypes.Secret, error)); ok {
+	if returnFunc, ok := ret.Get(0).(func(citypes.Secret, citypes.TalosCluster, string) (citypes.Secret, error)); ok {
 		return returnFunc(bundle, cluster, patch)
 	}
-	if returnFunc, ok := ret.Get(0).(func(citypes.Secret, talossecretsadapter.Cluster, string) citypes.Secret); ok {
+	if returnFunc, ok := ret.Get(0).(func(citypes.Secret, citypes.TalosCluster, string) citypes.Secret); ok {
 		r0 = returnFunc(bundle, cluster, patch)
 	} else {
 		r0 = ret.Get(0).(citypes.Secret)
 	}
-	if returnFunc, ok := ret.Get(1).(func(citypes.Secret, talossecretsadapter.Cluster, string) error); ok {
+	if returnFunc, ok := ret.Get(1).(func(citypes.Secret, citypes.TalosCluster, string) error); ok {
 		r1 = returnFunc(bundle, cluster, patch)
 	} else {
 		r1 = ret.Error(1)
@@ -190,21 +189,21 @@ type MockRenderer_MachineConfig_Call struct {
 
 // MachineConfig is a helper method to define mock.On call
 //   - bundle citypes.Secret
-//   - cluster talossecretsadapter.Cluster
+//   - cluster citypes.TalosCluster
 //   - patch string
 func (_e *MockRenderer_Expecter) MachineConfig(bundle any, cluster any, patch any) *MockRenderer_MachineConfig_Call {
 	return &MockRenderer_MachineConfig_Call{Call: _e.mock.On("MachineConfig", bundle, cluster, patch)}
 }
 
-func (_c *MockRenderer_MachineConfig_Call) Run(run func(bundle citypes.Secret, cluster talossecretsadapter.Cluster, patch string)) *MockRenderer_MachineConfig_Call {
+func (_c *MockRenderer_MachineConfig_Call) Run(run func(bundle citypes.Secret, cluster citypes.TalosCluster, patch string)) *MockRenderer_MachineConfig_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 citypes.Secret
 		if args[0] != nil {
 			arg0 = args[0].(citypes.Secret)
 		}
-		var arg1 talossecretsadapter.Cluster
+		var arg1 citypes.TalosCluster
 		if args[1] != nil {
-			arg1 = args[1].(talossecretsadapter.Cluster)
+			arg1 = args[1].(citypes.TalosCluster)
 		}
 		var arg2 string
 		if args[2] != nil {
@@ -224,7 +223,7 @@ func (_c *MockRenderer_MachineConfig_Call) Return(secret citypes.Secret, err err
 	return _c
 }
 
-func (_c *MockRenderer_MachineConfig_Call) RunAndReturn(run func(bundle citypes.Secret, cluster talossecretsadapter.Cluster, patch string) (citypes.Secret, error)) *MockRenderer_MachineConfig_Call {
+func (_c *MockRenderer_MachineConfig_Call) RunAndReturn(run func(bundle citypes.Secret, cluster citypes.TalosCluster, patch string) (citypes.Secret, error)) *MockRenderer_MachineConfig_Call {
 	_c.Call.Return(run)
 	return _c
 }

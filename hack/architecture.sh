@@ -34,6 +34,9 @@ check internal/controller "internal/driver" \
 check pkg/citypes "internal/adapter internal/controller internal/driver" \
     "Types are plain data. They depend on nothing."
 
+check pkg/talos "internal" \
+    "pkg/talos is imported from outside this module, and nothing outside it can reach internal."
+
 for dir in $(find internal/adapter -mindepth 1 -maxdepth 1 -type d); do
     name=$(basename "$dir")
     siblings=$(find internal/adapter -mindepth 1 -maxdepth 1 -type d ! -name "$name" -exec basename {} \;)
@@ -53,10 +56,6 @@ for dir in $(find internal/adapter -mindepth 1 -maxdepth 1 -type d); do
     done
 done
 
-# Types are plain data. A types package that reaches the filesystem, a socket,
-# a process or the clock stops being data and becomes an adapter nobody can
-# test without the world. Promoted from opends-core/hack/purity.sh, which
-# enforces the same rule one layer lower.
 BANNED='"os"|"net"|"net/http"|"os/exec"|"io/ioutil"|time\.Now|os\.Getenv'
 
 for dir in $(find internal/types -mindepth 1 -maxdepth 1 -type d 2>/dev/null); do

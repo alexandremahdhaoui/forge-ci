@@ -1,4 +1,4 @@
-package talossecretsadapter
+package talos
 
 import (
 	"errors"
@@ -16,15 +16,9 @@ import (
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 )
 
-type Cluster struct {
-	Name              string
-	Endpoint          string
-	KubernetesVersion string
-}
-
 type Secrets struct{}
 
-func New() Secrets { return Secrets{} }
+func NewSecrets() Secrets { return Secrets{} }
 
 func (Secrets) Mint() (citypes.Secret, error) {
 	minted, err := secrets.NewBundle(secrets.NewClock(), config.TalosVersionCurrent)
@@ -44,7 +38,7 @@ func (Secrets) Load(bundle citypes.Secret) (citypes.Secret, error) {
 	return marshalBundle(held)
 }
 
-func (Secrets) MachineConfig(bundle citypes.Secret, cluster Cluster, patch string) (citypes.Secret, error) {
+func (Secrets) MachineConfig(bundle citypes.Secret, cluster citypes.TalosCluster, patch string) (citypes.Secret, error) {
 	in, err := newInput(bundle, cluster)
 	if err != nil {
 		return "", err
@@ -69,7 +63,7 @@ func (Secrets) MachineConfig(bundle citypes.Secret, cluster Cluster, patch strin
 	return citypes.Secret(raw), nil
 }
 
-func newInput(bundle citypes.Secret, cluster Cluster) (*generate.Input, error) {
+func newInput(bundle citypes.Secret, cluster citypes.TalosCluster) (*generate.Input, error) {
 	held, err := unmarshalBundle(bundle)
 	if err != nil {
 		return nil, err
@@ -93,7 +87,7 @@ func newInput(bundle citypes.Secret, cluster Cluster) (*generate.Input, error) {
 	return in, nil
 }
 
-func endpointHost(cluster Cluster) (string, error) {
+func endpointHost(cluster citypes.TalosCluster) (string, error) {
 	parsed, err := url.Parse(cluster.Endpoint)
 	if err != nil || parsed.Hostname() == "" {
 		return "", fmt.Errorf(

@@ -22,7 +22,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/containeradapter"
-	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/talossecretsadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/machineconfigcontroller"
 	"github.com/alexandremahdhaoui/forge-ci/internal/mocks/fsadaptermock"
 	"github.com/alexandremahdhaoui/forge-ci/internal/mocks/machineconfigcontrollermock"
@@ -46,8 +45,8 @@ func theContext() citypes.TalosContext {
 	return citypes.TalosContext{Endpoints: []string{"node-a.example.invalid:50000", "node-b.example.invalid"}, Node: theNode}
 }
 
-func theCluster() talossecretsadapter.Cluster {
-	return talossecretsadapter.Cluster{
+func theCluster() citypes.TalosCluster {
+	return citypes.TalosCluster{
 		Name: "t0", Endpoint: "https://node-a.example.invalid:6443", KubernetesVersion: "1.37.0",
 	}
 }

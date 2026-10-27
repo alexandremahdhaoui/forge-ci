@@ -13,3 +13,9 @@ type TalosContext struct {
 	Endpoints []string
 	Node      string
 }
+
+type TalosCluster struct {
+	Name              string
+	Endpoint          string
+	KubernetesVersion string
+}

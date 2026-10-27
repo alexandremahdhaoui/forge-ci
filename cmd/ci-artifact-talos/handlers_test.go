@@ -19,11 +19,10 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/fsadapter"
-	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/talosadapter"
-	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/talossecretsadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/machineconfigcontroller"
 	"github.com/alexandremahdhaoui/forge-ci/internal/mocks/machineconfigcontrollermock"
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
+	"github.com/alexandremahdhaoui/forge-ci/pkg/talos"
 )
 
 const (
@@ -83,7 +82,7 @@ func aNode(t *testing.T) theNode {
 	t.Helper()
 
 	node := theNode{machineconfigcontrollermock.NewMockTalosconfig(t), machineconfigcontrollermock.NewMockRegistry(t)}
-	node.EXPECT().Context(mock.Anything).RunAndReturn(talosadapter.NewTalosconfig().Context).Maybe()
+	node.EXPECT().Context(mock.Anything).RunAndReturn(talos.NewTalosconfig().Context).Maybe()
 
 	return node
 }
@@ -103,7 +102,7 @@ func (n theNode) holding(bundle citypes.Secret) theNode {
 }
 
 func handlersReaching(node theNode) Handlers {
-	return newHandlers(machineconfigcontroller.New(fsadapter.New(), talossecretsadapter.New(), node, node.registry))
+	return newHandlers(machineconfigcontroller.New(fsadapter.New(), talos.NewSecrets(), node, node.registry))
 }
 
 func TestALegacyInstallImageIsNeverReadAndTheDeclareIsRefusedNamingTheUnattendedInstallDocument(t *testing.T) {

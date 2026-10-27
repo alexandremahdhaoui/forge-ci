@@ -27,11 +27,11 @@ import (
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/helmadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/kubeconfigadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/kubernetesadapter"
-	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/talosadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/clusterresourcecontroller"
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/managercontroller"
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 	"github.com/alexandremahdhaoui/forge-ci/pkg/config"
+	"github.com/alexandremahdhaoui/forge-ci/pkg/talos"
 )
 
 const (
@@ -252,7 +252,7 @@ func theCredential(t *testing.T, declared declaration) string {
 	t.Helper()
 
 	source, err := managercontroller.NewKubeconfigSource(
-		declared.kubeconfig, talosadapter.NewKubeconfig(), execadapter.New())
+		declared.kubeconfig, talos.NewKubeconfig(), execadapter.New())
 	require.NoError(t, err)
 
 	raw, err := source.Kubeconfig(t.Context())

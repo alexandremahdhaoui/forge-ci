@@ -10,9 +10,9 @@ import (
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/helmadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/kubeconfigadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/kubernetesadapter"
-	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/talosadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/managercontroller"
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
+	"github.com/alexandremahdhaoui/forge-ci/pkg/talos"
 )
 
 func NewHandlers() Handlers {
@@ -97,7 +97,7 @@ func credentialAt(
 	ctx context.Context, dir string, declared managercontroller.DeclaredKubeconfig,
 ) (string, error) {
 	source, err := managercontroller.NewKubeconfigSource(
-		declared, talosadapter.NewKubeconfig(), execadapter.New())
+		declared, talos.NewKubeconfig(), execadapter.New())
 	if err != nil {
 		return "", err
 	}

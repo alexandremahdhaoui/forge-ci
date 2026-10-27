@@ -4,7 +4,7 @@ set -eu
 FLOOR="${1:-90}"
 OUT="${2:-tmp/coverage.out}"
 PACKAGE_FLOOR="${3:-77}"
-PACKAGE_FLOOR_EXCLUDED='internal/adapter/talosadapter'
+PACKAGE_FLOOR_EXCLUDED='pkg/talos'
 
 mkdir -p "$(dirname "$OUT")"
 
@@ -55,4 +55,4 @@ if [ -n "$BELOW" ]; then
 fi
 
 echo "every package clears ${PACKAGE_FLOOR}%, and that floor ratchets up and never down"
-echo "${PACKAGE_FLOOR_EXCLUDED} is out of it because a unit test never reaches a node, the adapter is proved against a VM, and the exclusion stands until its testenv-vm case lands"
+echo "${PACKAGE_FLOOR_EXCLUDED} is out of it because a unit test never reaches a node, the node client is proved against a VM, and the exclusion stands until its testenv-vm case lands"

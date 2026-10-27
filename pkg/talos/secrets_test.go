@@ -1,20 +1,16 @@
-package talossecretsadapter
+package talos
 
 import (
 	"fmt"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/siderolabs/talos/pkg/machinery/config"
 	"github.com/siderolabs/talos/pkg/machinery/config/configloader"
-	"github.com/siderolabs/talos/pkg/machinery/config/generate/secrets"
 	"github.com/siderolabs/talos/pkg/machinery/config/machine"
 	"github.com/siderolabs/talos/pkg/machinery/constants"
-	stockyaml "go.yaml.in/yaml/v4"
 
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 )
@@ -42,32 +38,28 @@ kind: KubeProxyConfig
 enabled: false
 `
 
-func testCluster() Cluster {
-	return Cluster{
+func testCluster() citypes.TalosCluster {
+	return citypes.TalosCluster{
 		Name:              "t0",
 		Endpoint:          "https://cluster.example.com:6443",
 		KubernetesVersion: constants.DefaultKubernetesVersion,
 	}
 }
 
-func throwawayBundle(t *testing.T) citypes.Secret {
+func throwawayBundleBytes(t *testing.T) citypes.Secret {
 	t.Helper()
 
-	minted, err := secrets.NewBundle(secrets.NewFixedClock(time.Now()), config.TalosVersionCurrent)
-	require.NoError(t, err)
+	bundle, _ := throwawayBundle(t)
 
-	raw, err := stockyaml.Marshal(minted)
-	require.NoError(t, err)
-
-	return citypes.Secret(raw)
+	return bundle
 }
 
 func TestAStoredBundleRoundTripsThroughLoadUnchanged(t *testing.T) {
 	t.Parallel()
 
-	stored := throwawayBundle(t)
+	stored := throwawayBundleBytes(t)
 
-	reread, err := New().Load(stored)
+	reread, err := NewSecrets().Load(stored)
 	require.NoError(t, err)
 	assert.Equal(t, stored, reread)
 }
@@ -75,10 +67,10 @@ func TestAStoredBundleRoundTripsThroughLoadUnchanged(t *testing.T) {
 func TestAMintedBundleIsAValidBundleThatLoadsBackToTheSameBytes(t *testing.T) {
 	t.Parallel()
 
-	minted, err := New().Mint()
+	minted, err := NewSecrets().Mint()
 	require.NoError(t, err)
 
-	reread, err := New().Load(minted)
+	reread, err := NewSecrets().Load(minted)
 	require.NoError(t, err)
 	assert.Equal(t, minted, reread)
 }
@@ -86,10 +78,10 @@ func TestAMintedBundleIsAValidBundleThatLoadsBackToTheSameBytes(t *testing.T) {
 func TestTwoMintsNeverShareABundle(t *testing.T) {
 	t.Parallel()
 
-	first, err := New().Mint()
+	first, err := NewSecrets().Mint()
 	require.NoError(t, err)
 
-	second, err := New().Mint()
+	second, err := NewSecrets().Mint()
 	require.NoError(t, err)
 
 	assert.NotEqual(t, first, second)
@@ -98,12 +90,12 @@ func TestTwoMintsNeverShareABundle(t *testing.T) {
 func TestTheSameBundleAndInputsRenderIdenticalMachineConfigBytesTwice(t *testing.T) {
 	t.Parallel()
 
-	bundle := throwawayBundle(t)
+	bundle := throwawayBundleBytes(t)
 
-	first, err := New().MachineConfig(bundle, testCluster(), patchDocument)
+	first, err := NewSecrets().MachineConfig(bundle, testCluster(), patchDocument)
 	require.NoError(t, err)
 
-	second, err := New().MachineConfig(bundle, testCluster(), patchDocument)
+	second, err := NewSecrets().MachineConfig(bundle, testCluster(), patchDocument)
 	require.NoError(t, err)
 
 	assert.Equal(t, first, second)
@@ -112,7 +104,7 @@ func TestTheSameBundleAndInputsRenderIdenticalMachineConfigBytesTwice(t *testing
 func TestARenderedMachineConfigLoadsThroughTheTalosConfigLoader(t *testing.T) {
 	t.Parallel()
 
-	rendered, err := New().MachineConfig(throwawayBundle(t), testCluster(), patchDocument)
+	rendered, err := NewSecrets().MachineConfig(throwawayBundleBytes(t), testCluster(), patchDocument)
 	require.NoError(t, err)
 
 	loaded, err := configloader.NewFromBytes([]byte(rendered))
@@ -125,7 +117,7 @@ func TestARenderedMachineConfigLoadsThroughTheTalosConfigLoader(t *testing.T) {
 func TestARenderedMachineConfigCarriesThePatchDocumentContent(t *testing.T) {
 	t.Parallel()
 
-	rendered, err := New().MachineConfig(throwawayBundle(t), testCluster(), patchDocument)
+	rendered, err := NewSecrets().MachineConfig(throwawayBundleBytes(t), testCluster(), patchDocument)
 	require.NoError(t, err)
 
 	assert.Contains(t, string(rendered), "naa.5002538d009d9e70")
@@ -138,7 +130,7 @@ func TestARenderedMachineConfigCarriesAVersionV1Alpha1DocumentThePatchAloneDoesN
 
 	require.NotContains(t, patchDocument, "version: v1alpha1")
 
-	rendered, err := New().MachineConfig(throwawayBundle(t), testCluster(), patchDocument)
+	rendered, err := NewSecrets().MachineConfig(throwawayBundleBytes(t), testCluster(), patchDocument)
 	require.NoError(t, err)
 
 	assert.Contains(t, string(rendered), "version: v1alpha1")
@@ -153,10 +145,10 @@ func TestTheInstallerImageIsReadFromTheUnattendedInstallDocumentOfTheRenderedCon
 	patch := strings.Replace(patchDocument, "kind: UnattendedInstallConfig\n",
 		"kind: UnattendedInstallConfig\ninstaller:\n  image: "+pinned+"\n", 1)
 
-	rendered, err := New().MachineConfig(throwawayBundle(t), testCluster(), patch)
+	rendered, err := NewSecrets().MachineConfig(throwawayBundleBytes(t), testCluster(), patch)
 	require.NoError(t, err)
 
-	image, err := New().InstallerImage(rendered)
+	image, err := NewSecrets().InstallerImage(rendered)
 	require.NoError(t, err)
 	assert.Equal(t, pinned, image)
 }
@@ -164,10 +156,10 @@ func TestTheInstallerImageIsReadFromTheUnattendedInstallDocumentOfTheRenderedCon
 func TestARenderedConfigWithNoUnattendedInstallDocumentHasNoInstallerImage(t *testing.T) {
 	t.Parallel()
 
-	rendered, err := New().MachineConfig(throwawayBundle(t), testCluster(), "apiVersion: v1alpha1\nkind: KubeProxyConfig\nenabled: false\n")
+	rendered, err := NewSecrets().MachineConfig(throwawayBundleBytes(t), testCluster(), "apiVersion: v1alpha1\nkind: KubeProxyConfig\nenabled: false\n")
 	require.NoError(t, err)
 
-	image, err := New().InstallerImage(rendered)
+	image, err := NewSecrets().InstallerImage(rendered)
 	require.NoError(t, err)
 	assert.Empty(t, image)
 }
@@ -175,7 +167,7 @@ func TestARenderedConfigWithNoUnattendedInstallDocumentHasNoInstallerImage(t *te
 func TestAConfigThatDoesNotLoadIsRefusedWithoutItsBytes(t *testing.T) {
 	t.Parallel()
 
-	_, err := New().InstallerImage("\tkey: the private key bytes")
+	_, err := NewSecrets().InstallerImage("\tkey: the private key bytes")
 	require.Error(t, err)
 	assert.Equal(t,
 		"reading the installer image: the rendered machine config does not load as a talos config",
@@ -185,7 +177,7 @@ func TestAConfigThatDoesNotLoadIsRefusedWithoutItsBytes(t *testing.T) {
 func TestAnUnreadableBundleIsRefusedByName(t *testing.T) {
 	t.Parallel()
 
-	_, err := New().Load("\tthis is not yaml")
+	_, err := NewSecrets().Load("\tthis is not yaml")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "reading the stored talos secret bundle")
 }
@@ -193,7 +185,7 @@ func TestAnUnreadableBundleIsRefusedByName(t *testing.T) {
 func TestABundleMissingItsCertificatesIsRefusedByName(t *testing.T) {
 	t.Parallel()
 
-	_, err := New().Load("Cluster:\n  Id: a\n  Secret: b\n")
+	_, err := NewSecrets().Load("Cluster:\n  Id: a\n  Secret: b\n")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "validating the stored talos secret bundle")
 	assert.Contains(t, err.Error(), "certs is required")
@@ -202,7 +194,7 @@ func TestABundleMissingItsCertificatesIsRefusedByName(t *testing.T) {
 func TestAMachineConfigWithNoPatchDocumentIsRefusedByName(t *testing.T) {
 	t.Parallel()
 
-	_, err := New().MachineConfig(throwawayBundle(t), testCluster(), "")
+	_, err := NewSecrets().MachineConfig(throwawayBundleBytes(t), testCluster(), "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "needs a patch document and got none")
 }
@@ -213,7 +205,7 @@ func TestAnEndpointThatNamesNoHostIsRefusedByName(t *testing.T) {
 	cluster := testCluster()
 	cluster.Endpoint = "6443"
 
-	_, err := New().MachineConfig(throwawayBundle(t), cluster, patchDocument)
+	_, err := NewSecrets().MachineConfig(throwawayBundleBytes(t), cluster, patchDocument)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "it must be a url naming a host")
 }
@@ -221,7 +213,7 @@ func TestAnEndpointThatNamesNoHostIsRefusedByName(t *testing.T) {
 func TestNoRefusalEverCarriesBundleBytes(t *testing.T) {
 	t.Parallel()
 
-	bundle := throwawayBundle(t)
+	bundle := throwawayBundleBytes(t)
 
 	secretLine := longestLine(string(bundle))
 	require.NotEmpty(t, secretLine)
@@ -229,11 +221,11 @@ func TestNoRefusalEverCarriesBundleBytes(t *testing.T) {
 	cluster := testCluster()
 	cluster.KubernetesVersion = ""
 
-	_, err := New().MachineConfig(bundle, cluster, patchDocument)
+	_, err := NewSecrets().MachineConfig(bundle, cluster, patchDocument)
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), secretLine)
 
-	_, err = New().Load(bundle[:len(bundle)/2])
+	_, err = NewSecrets().Load(bundle[:len(bundle)/2])
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), secretLine)
 }
@@ -241,7 +233,7 @@ func TestNoRefusalEverCarriesBundleBytes(t *testing.T) {
 func TestABundleNeverPrintsItselfThroughTheSecretType(t *testing.T) {
 	t.Parallel()
 
-	bundle, err := New().Load(throwawayBundle(t))
+	bundle, err := NewSecrets().Load(throwawayBundleBytes(t))
 	require.NoError(t, err)
 
 	assert.Equal(t, citypes.Redacted, bundle.String())
@@ -252,7 +244,7 @@ func TestABundleNeverPrintsItselfThroughTheSecretType(t *testing.T) {
 func TestARenderedMachineConfigNeverPrintsItselfThroughTheSecretType(t *testing.T) {
 	t.Parallel()
 
-	rendered, err := New().MachineConfig(throwawayBundle(t), testCluster(), patchDocument)
+	rendered, err := NewSecrets().MachineConfig(throwawayBundleBytes(t), testCluster(), patchDocument)
 	require.NoError(t, err)
 
 	assert.Equal(t, citypes.Redacted, rendered.String())

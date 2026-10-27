@@ -1,4 +1,4 @@
-package talosadapter
+package talos
 
 import (
 	"context"
