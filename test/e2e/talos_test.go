@@ -125,18 +125,20 @@ func talosWorkspace(t *testing.T) (root, recovery string) {
 	return root, recovery
 }
 
-func TestADeclaredClusterWhoseNodeIsNotInMaintenanceReadsItsBundleThroughTheNodeTheTalosconfigNamesBeforeAnyManagerRuns(t *testing.T) {
+func TestADeclaredClusterWhoseNodeAnswersNoProbeIsRefusedNamingTheProbeAndNeverTheCrashWindowBeforeAnyManagerRuns(t *testing.T) {
 	root, recovery := talosWorkspace(t)
 
 	out, err := run(t, root, "forge-ci", "bootstrap", "--config", "forge-ci.yaml", "--root", root)
 
 	require.Error(t, err, out)
-	require.Contains(t, out, "reading the bootstrap state of cluster "+theTalosCluster,
-		"a node that does not read maintenance sends the engine to the cluster for its bundle")
-	require.Contains(t, out, "etcd service of node "+theTalosNode,
+	require.Contains(t, out, "probing the node of cluster "+theTalosCluster,
+		"a probe that fails is an error and never reads as a later run")
+	require.Contains(t, out, "probing node "+theTalosNode+" for maintenance",
 		"the engine read the node from the talosconfig context, not from the declaration")
-	require.Contains(t, out, "dial tcp "+theTalosEndpoint,
-		"every dial went through the endpoint the talosconfig context names")
+	require.NotContains(t, out, "runs no cluster yet",
+		"a failed probe never reads as a first run that stopped between the apply and the bootstrap")
+	require.NotContains(t, out, "reading the bootstrap state of cluster "+theTalosCluster,
+		"a failed probe never sends the engine to the cluster for its bundle")
 	require.NotContains(t, out, "realizing machine-config/"+theTalosCluster,
 		"no manager runs on a declaration the engine could not finish")
 	require.NoDirExists(t, recovery, "nothing but a first run on a node in maintenance writes the recovery directory")

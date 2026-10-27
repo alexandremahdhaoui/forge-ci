@@ -2,12 +2,18 @@ package talosadapter
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
 	stdx509 "crypto/x509"
 	"encoding/base64"
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
+	"math/big"
 	"os"
 	"path/filepath"
 	"slices"
@@ -339,14 +345,124 @@ func TestANodeThatRefusesTheConnectionIsReportedWithTheSecureErrorAndNeverThePro
 	assert.False(t, node.rebooting)
 }
 
-func TestACertificateErrorAgainstANodeThatAnswersNoProbeStaysTheSecureError(t *testing.T) {
+func TestACertificateErrorAgainstANodeThatAnswersNoProbeReturnsTheSecureErrorAndTheProbeFailureNamingTheNode(t *testing.T) {
 	t.Parallel()
 
-	node, err := New(ApplyModeAuto)
+	secureErr := errors.New("tls: handshake failure")
+
+	err := unlessInMaintenance(t.Context(), theClosedPort, secureErr)
+	require.ErrorIs(t, err, secureErr)
+	assert.Contains(t, err.Error(), "probing node "+theClosedPort+" for maintenance")
+	assert.Contains(t, err.Error(), "connection refused")
+}
+
+func TestAnyOtherSecureErrorIsReturnedAsItIsWithoutAProbe(t *testing.T) {
+	t.Parallel()
+
+	secureErr := errors.New("connection refused")
+
+	assert.Same(t, secureErr, unlessInMaintenance(t.Context(), theClosedPort, secureErr))
+}
+
+func aTLSListenerRefusingEveryClientWithoutACertificate(t *testing.T) string {
+	t.Helper()
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 
-	assert.False(t, node.inMaintenance(t.Context(), theClosedPort, errors.New("tls: handshake failure")))
-	assert.False(t, node.inMaintenance(t.Context(), theClosedPort, errors.New("connection refused")))
+	template := &stdx509.Certificate{SerialNumber: big.NewInt(1), NotAfter: time.Now().Add(time.Hour)}
+	der, err := stdx509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	require.NoError(t, err)
+
+	listener, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{
+		Certificates: []tls.Certificate{{Certificate: [][]byte{der}, PrivateKey: key}},
+		ClientAuth:   tls.RequireAnyClientCert,
+		NextProtos:   []string{"h2"},
+		MinVersion:   tls.VersionTLS13,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = listener.Close() })
+
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+
+			refused := conn.(*tls.Conn)
+			_ = refused.Handshake()
+			_, _ = io.Copy(io.Discard, refused.NetConn())
+			_ = refused.Close()
+		}
+	}()
+
+	return listener.Addr().String()
+}
+
+func TestANodeThatRefusesTheProbeAtTLSReadsAsAConfiguredNodeAndNeverAsAnError(t *testing.T) {
+	t.Parallel()
+
+	configured := aTLSListenerRefusingEveryClientWithoutACertificate(t)
+
+	maintenance, err := NewTalosconfig().InMaintenance(t.Context(), writeTalosconfig(t, talosconfigFor(theClosedPort, configured)))
+	require.NoError(t, err)
+	assert.False(t, maintenance)
+
+	secureErr := errors.New("x509: certificate signed by unknown authority")
+	assert.Same(t, secureErr, unlessInMaintenance(t.Context(), configured, secureErr))
+}
+
+func talosconfigFor(endpoint, node string) string {
+	return `context: t0
+contexts:
+  t0:
+    endpoints:
+      - ` + endpoint + `
+    nodes:
+      - ` + node + `
+`
+}
+
+func TestEverySecureCallFailingOnACertificateAgainstANodeThatAnswersNoProbeReturnsBothFailuresNamingTheNode(t *testing.T) {
+	t.Parallel()
+
+	talosconfig := writeTalosconfig(t, talosconfigFor(aTLSListenerRefusingEveryClientWithoutACertificate(t), theClosedPort))
+
+	for name, call := range map[string]func(*Node) error{
+		"reading the machine config": func(node *Node) error {
+			_, err := node.MachineConfig(t.Context(), talosconfig)
+
+			return err
+		},
+		"applying the machine config": func(node *Node) error {
+			return node.ApplyMachineConfig(t.Context(), talosconfig, "version: v1alpha1\n")
+		},
+		"reading the bootstrap state": func(node *Node) error {
+			_, err := node.Bootstrapped(t.Context(), talosconfig)
+
+			return err
+		},
+		"reading the stored bundle": func(node *Node) error {
+			_, _, err := node.StoredBundle(t.Context(), talosconfig)
+
+			return err
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			node, err := New(ApplyModeAuto)
+			require.NoError(t, err)
+
+			err = call(node)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "x509:")
+			assert.Contains(t, err.Error(), "probing node "+theClosedPort+" for maintenance")
+			assert.Contains(t, err.Error(), "connection refused")
+			assert.False(t, node.rebooting)
+		})
+	}
 }
 
 func TestAnUnreachableNodeIsAnErrorAndNeverReadsAsNotBootstrapped(t *testing.T) {
@@ -720,12 +836,14 @@ func TestEveryBundleCallRefusesAMissingTalosconfigNamingTheReasonAndNotThePath(t
 	assert.NotContains(t, err.Error(), string(path))
 }
 
-func TestAnUnreachableNodeNeverReadsAsMaintenance(t *testing.T) {
+func TestAnUnreachableNodeIsAProbeErrorNamingTheNodeAndNeverReadsAsMaintenance(t *testing.T) {
 	t.Parallel()
 
 	maintenance, err := NewTalosconfig().InMaintenance(t.Context(), writeTalosconfig(t, talosconfigReachingNothing))
-	require.NoError(t, err)
+	require.Error(t, err)
 	assert.False(t, maintenance)
+	assert.Contains(t, err.Error(), "probing node 127.0.0.1 for maintenance")
+	assert.Contains(t, err.Error(), "connection refused")
 }
 
 func TestTheEngineReadsTheBootstrapStateThroughTheSameSecureDialAsTheManager(t *testing.T) {

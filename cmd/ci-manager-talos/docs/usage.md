@@ -63,8 +63,10 @@ A fresh node boots in maintenance with no PKI and refuses a secure dial. The
 manager dials secure first. When that fails on a certificate error it probes
 the node's machine status over an insecure connection, and only when the
 stage reads maintenance does it treat the node as holding no config and
-apply over that insecure connection. Any other stage and any other failure
-is the secure error, by name.
+apply over that insecure connection. Any other stage, and a probe the node
+refuses at TLS because it holds a config, is the secure error, by name. Any
+other probe failure is the secure error joined to the probe failure naming
+the node.
 
 Before that first apply the manager writes the recovery directory the
 variable `spec.recoveryDirEnv` names. It writes `secrets.yaml`, the bundle

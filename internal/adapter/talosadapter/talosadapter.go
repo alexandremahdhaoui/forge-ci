@@ -122,12 +122,7 @@ func (Talosconfig) InMaintenance(ctx context.Context, talosconfig citypes.Secret
 		return false, fmt.Errorf("probing the node the client configuration names: %w", err)
 	}
 
-	stage, err := probeStage(ctx, target.Node)
-	if err != nil {
-		return false, nil
-	}
-
-	return stage == runtime.MachineStageMaintenance, nil
+	return probeMaintenance(ctx, target.Node)
 }
 
 func (Talosconfig) Bootstrapped(ctx context.Context, talosconfig citypes.Secret) (bool, error) {
@@ -205,11 +200,7 @@ func (n *Node) StoredBundle(ctx context.Context, talosconfig citypes.Secret) (ci
 		return storedBundle(ctx, cluster)
 	}
 
-	if !n.inMaintenance(ctx, target.Node, err) {
-		return "", false, err
-	}
-
-	return "", false, nil
+	return "", false, unlessInMaintenance(ctx, target.Node, err)
 }
 
 func (n *Node) StoreBundle(ctx context.Context, talosconfig, bundle citypes.Secret) error {
@@ -299,11 +290,7 @@ func (n *Node) MachineConfig(ctx context.Context, talosconfig citypes.Secret) (s
 		return raw, nil
 	}
 
-	if !n.inMaintenance(ctx, node, err) {
-		return "", err
-	}
-
-	return "", nil
+	return "", unlessInMaintenance(ctx, node, err)
 }
 
 func (n *Node) ApplyMachineConfig(ctx context.Context, talosconfig citypes.Secret, machineConfig string) error {
@@ -333,7 +320,7 @@ func (n *Node) ApplyMachineConfig(ctx context.Context, talosconfig citypes.Secre
 		return nil
 	}
 
-	if !n.inMaintenance(ctx, node, err) {
+	if err := unlessInMaintenance(ctx, node, err); err != nil {
 		return err
 	}
 
@@ -403,11 +390,7 @@ func (n *Node) Bootstrapped(ctx context.Context, talosconfig citypes.Secret) (bo
 		return running, nil
 	}
 
-	if !n.inMaintenance(ctx, node, err) {
-		return false, err
-	}
-
-	return false, nil
+	return false, unlessInMaintenance(ctx, node, err)
 }
 
 func (n *Node) WaitNodeRegistered(ctx context.Context, talosconfig citypes.Secret) error {
@@ -496,17 +479,34 @@ func (n *Node) secure(
 	return untilCeiling(ctx, what, attempt)
 }
 
-func (n *Node) inMaintenance(ctx context.Context, node string, secureErr error) bool {
+func unlessInMaintenance(ctx context.Context, node string, secureErr error) error {
 	if !isCertificateError(secureErr) {
-		return false
+		return secureErr
 	}
 
-	stage, err := probeStage(ctx, node)
+	maintenance, err := probeMaintenance(ctx, node)
 	if err != nil {
-		return false
+		return fmt.Errorf("%w, and %w", secureErr, err)
 	}
 
-	return stage == runtime.MachineStageMaintenance
+	if !maintenance {
+		return secureErr
+	}
+
+	return nil
+}
+
+func probeMaintenance(ctx context.Context, node string) (bool, error) {
+	stage, err := probeStage(ctx, node)
+	if isCertificateError(err) {
+		return false, nil
+	}
+
+	if err != nil {
+		return false, fmt.Errorf("probing node %s for maintenance: %w", node, err)
+	}
+
+	return stage == runtime.MachineStageMaintenance, nil
 }
 
 func probeStage(ctx context.Context, node string) (runtime.MachineStage, error) {

@@ -66,8 +66,11 @@ once the cluster runs.
 
 The engine reaches the node. It probes the node's machine status over an
 insecure connection. A node that reads maintenance has no cluster yet, so
-the engine mints a fresh secret bundle. Any other answer means the cluster
-exists, and the engine reads the bundle from secret
+the engine mints a fresh secret bundle. A node that reads another stage, or
+refuses the insecure connection at TLS because it holds a config, means the
+cluster exists. Any other probe failure is an error naming the node, and
+never reads as either run. When the cluster exists the engine reads the
+bundle from secret
 `kube-system/talos-secret-bundle`, key `bundle.yaml`, through a kubeconfig
 fetched from the node with the talosconfig's credential. Both runs render
 from the marshaled bundle bytes through the same load, so a later run
