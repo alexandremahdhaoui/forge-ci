@@ -420,16 +420,20 @@ type Controller struct {
 
 func New(
 	api func(spec Spec) githubadapter.API, fs fsadapter.FS, now func() time.Time, sleep func(time.Duration),
-) *Controller {
+) (*Controller, error) {
 	if now == nil {
-		now = time.Now
+		return nil, errors.New(
+			"building the workflow controller: it was handed no clock, " +
+				"and every dispatch measures its wait through one")
 	}
 
 	if sleep == nil {
-		sleep = time.Sleep
+		return nil, errors.New(
+			"building the workflow controller: it was handed no sleep, " +
+				"and every dispatch waits between polls through one")
 	}
 
-	return &Controller{api: api, fs: fs, now: now, sleep: sleep}
+	return &Controller{api: api, fs: fs, now: now, sleep: sleep}, nil
 }
 
 func (c *Controller) Declare(

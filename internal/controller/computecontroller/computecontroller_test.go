@@ -45,7 +45,7 @@ func compute(
 ) *computecontroller.Controller {
 	t.Helper()
 
-	ctrl, err := computecontroller.New(runner, harvester, fs, git, nil)
+	ctrl, err := computecontroller.New(runner, harvester, fs, git, time.Now)
 	require.NoError(t, err)
 
 	return ctrl
@@ -506,9 +506,17 @@ func TestComputeDeclaresNoResources(t *testing.T) {
 
 func TestANilHarvesterIsRefusedByNameAtConstruction(t *testing.T) {
 	ctrl, err := computecontroller.New(
-		execadaptermock.NewMockRunner(t), nil, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t), nil)
+		execadaptermock.NewMockRunner(t), nil, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t), time.Now)
 	require.EqualError(t, err, "building the compute controller: it was handed no harvester, "+
 		"and every run reads what forge built through one")
+	require.Nil(t, ctrl)
+}
+
+func TestANilClockIsRefusedByNameAtConstruction(t *testing.T) {
+	ctrl, err := computecontroller.New(
+		execadaptermock.NewMockRunner(t), &stubHarvester{}, everyCheckoutHasAnEnvrc(t), gitadaptermock.NewMockGit(t), nil)
+	require.EqualError(t, err, "building the compute controller: it was handed no clock, "+
+		"and every run tells the harvester when it started through one")
 	require.Nil(t, ctrl)
 }
 

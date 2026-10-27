@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/execadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/forgeadapter"
@@ -17,7 +18,7 @@ import (
 func NewHandlers() Handlers {
 	files := fsadapter.New()
 	runner := execadapter.New()
-	ctrl, built := computecontroller.New(runner, forgeadapter.New(files), files, gitadapter.New(runner), nil)
+	ctrl, built := computecontroller.New(runner, forgeadapter.New(files), files, gitadapter.New(runner), time.Now)
 	artifactDir := artifactdircontroller.New(files)
 
 	return Handlers{

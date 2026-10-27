@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/fsadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/githubadapter"
@@ -14,14 +15,18 @@ import (
 
 func NewHandlers() Handlers {
 	disk := fsadapter.New()
-	ctrl := workflowcontroller.New(func(spec workflowcontroller.Spec) githubadapter.API {
+	ctrl, built := workflowcontroller.New(func(spec workflowcontroller.Spec) githubadapter.API {
 		return githubadapter.New(nil, spec.APIBaseURL, citypes.SecretFromEnv(spec.TokenEnv))
-	}, disk, nil, nil)
+	}, disk, time.Now, time.Sleep)
 
 	artifactDir := artifactdircontroller.New(disk)
 
 	return Handlers{
 		Declare: func(_ context.Context, in DeclareInput) (*DeclareOutput, error) {
+			if built != nil {
+				return nil, built
+			}
+
 			out, err := ctrl.Declare(in.Spec, in.Root, toStages(in.Stages), toRepos(in.Repos))
 			if err != nil {
 				return nil, err
@@ -30,6 +35,10 @@ func NewHandlers() Handlers {
 			return &DeclareOutput{Resources: fromResources(out.Resources)}, nil
 		},
 		Run: func(ctx context.Context, in RunInput) (*RunOutput, error) {
+			if built != nil {
+				return nil, built
+			}
+
 			out, err := ctrl.Run(ctx, toRunInput(in))
 			if err != nil {
 				return nil, err

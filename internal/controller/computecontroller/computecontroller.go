@@ -39,7 +39,9 @@ func New(
 	}
 
 	if now == nil {
-		now = time.Now
+		return nil, errors.New(
+			"building the compute controller: it was handed no clock, " +
+				"and every run tells the harvester when it started through one")
 	}
 
 	return &Controller{runner: runner, harvester: harvester, fs: fs, git: git, now: now}, nil

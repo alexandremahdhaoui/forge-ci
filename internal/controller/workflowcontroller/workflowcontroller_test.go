@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"sigs.k8s.io/yaml"
 
+	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/fsadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/githubadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/workflowcontroller"
 	"github.com/alexandremahdhaoui/forge-ci/internal/mocks/fsadaptermock"
@@ -177,7 +178,7 @@ func TestAContainerFileResolvesThePinThroughTheFSTheConstructorReceived(t *testi
 	fs.EXPECT().ReadFile(filepath.Join(root, ".forge", "toolchain-image")).
 		Return([]byte("ghcr.io/an-owner/a-toolchain:v9.9.9\n"), nil)
 
-	c := workflowcontroller.New(nil, fs, nil, nil)
+	c := workflow(t, nil, fs, time.Now, time.Sleep)
 
 	spec := specMap(t)
 	spec["container"] = map[string]any{"file": ".forge/toolchain-image"}
@@ -205,7 +206,7 @@ func TestAMissingContainerFileNamesTheSyncThatWritesIt(t *testing.T) {
 	fs := fsadaptermock.NewMockFS(t)
 	fs.EXPECT().ReadFile(filepath.Join(root, ".forge", "toolchain-image")).Return(nil, os.ErrNotExist)
 
-	c := workflowcontroller.New(nil, fs, nil, nil)
+	c := workflow(t, nil, fs, time.Now, time.Sleep)
 
 	spec := specMap(t)
 	spec["container"] = map[string]any{"file": ".forge/toolchain-image"}
@@ -221,7 +222,7 @@ func TestAnEmptyContainerFileIsRefused(t *testing.T) {
 	fs := fsadaptermock.NewMockFS(t)
 	fs.EXPECT().ReadFile(filepath.Join(root, ".forge", "toolchain-image")).Return([]byte("\n"), nil)
 
-	c := workflowcontroller.New(nil, fs, nil, nil)
+	c := workflow(t, nil, fs, time.Now, time.Sleep)
 
 	spec := specMap(t)
 	spec["container"] = map[string]any{"file": ".forge/toolchain-image"}
@@ -330,7 +331,7 @@ func specMap(t *testing.T) map[string]any {
 func TestDeclareEmitsEveryGitHubResource(t *testing.T) {
 	t.Parallel()
 
-	c := workflowcontroller.New(nil, fsadaptermock.NewMockFS(t), nil, nil)
+	c := workflow(t, nil, fsadaptermock.NewMockFS(t), time.Now, time.Sleep)
 
 	spec := specMap(t)
 	spec["secrets"] = []any{map[string]any{"name": "FORGE_CI_GITHUB_TOKEN"}}
@@ -378,6 +379,44 @@ type fakeClock struct {
 func (f *fakeClock) Now() time.Time        { return f.now }
 func (f *fakeClock) Sleep(d time.Duration) { f.now = f.now.Add(d) }
 
+func workflow(
+	t *testing.T, api func(workflowcontroller.Spec) githubadapter.API, fs fsadapter.FS,
+	now func() time.Time, sleep func(time.Duration),
+) *workflowcontroller.Controller {
+	t.Helper()
+
+	c, err := workflowcontroller.New(api, fs, now, sleep)
+	require.NoError(t, err)
+
+	return c
+}
+
+func TestANilClockOrSleepIsRefusedByNameAtConstruction(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		now   func() time.Time
+		sleep func(time.Duration)
+		want  string
+	}{
+		{
+			name: "clock", now: nil, sleep: time.Sleep,
+			want: "building the workflow controller: it was handed no clock, " +
+				"and every dispatch measures its wait through one",
+		},
+		{
+			name: "sleep", now: time.Now, sleep: nil,
+			want: "building the workflow controller: it was handed no sleep, " +
+				"and every dispatch waits between polls through one",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := workflowcontroller.New(nil, fsadaptermock.NewMockFS(t), tc.now, tc.sleep)
+			require.EqualError(t, err, tc.want)
+			require.Nil(t, c)
+		})
+	}
+}
+
 func runInput(spec map[string]any) citypes.RunInput {
 	return citypes.RunInput{
 		Revision: "0123456789abcdef",
@@ -393,7 +432,7 @@ func TestRunPassesOnASuccessConclusion(t *testing.T) {
 
 	api := githubadaptermock.NewMockAPI(t)
 	clock := &fakeClock{now: time.Unix(1000, 0)}
-	c := workflowcontroller.New(
+	c := workflow(t,
 		func(workflowcontroller.Spec) githubadapter.API { return api }, fsadaptermock.NewMockFS(t), clock.Now, clock.Sleep)
 
 	var marker string
@@ -430,7 +469,7 @@ func TestRunAFailedConclusionIsAFailedRunNotAnError(t *testing.T) {
 
 	api := githubadaptermock.NewMockAPI(t)
 	clock := &fakeClock{now: time.Unix(1000, 0)}
-	c := workflowcontroller.New(
+	c := workflow(t,
 		func(workflowcontroller.Spec) githubadapter.API { return api }, fsadaptermock.NewMockFS(t), clock.Now, clock.Sleep)
 
 	var marker string
@@ -460,7 +499,7 @@ func TestRunTimesOutWhenTheRunNeverAppears(t *testing.T) {
 
 	api := githubadaptermock.NewMockAPI(t)
 	clock := &fakeClock{now: time.Unix(1000, 0)}
-	c := workflowcontroller.New(
+	c := workflow(t,
 		func(workflowcontroller.Spec) githubadapter.API { return api }, fsadaptermock.NewMockFS(t), clock.Now, clock.Sleep)
 
 	api.EXPECT().Dispatch(mock.Anything, "o/r", "ci-runner.yaml", "main", mock.Anything).Return(nil)
@@ -476,7 +515,7 @@ func TestRunErrorsWhenTheMachineryBreaks(t *testing.T) {
 
 	api := githubadaptermock.NewMockAPI(t)
 	clock := &fakeClock{now: time.Unix(1000, 0)}
-	c := workflowcontroller.New(
+	c := workflow(t,
 		func(workflowcontroller.Spec) githubadapter.API { return api }, fsadaptermock.NewMockFS(t), clock.Now, clock.Sleep)
 
 	api.EXPECT().Dispatch(mock.Anything, "o/r", "ci-runner.yaml", "main", mock.Anything).
@@ -489,7 +528,7 @@ func TestRunErrorsWhenTheMachineryBreaks(t *testing.T) {
 func TestRunRefusesMissingRunnerOrTargets(t *testing.T) {
 	t.Parallel()
 
-	c := workflowcontroller.New(nil, fsadaptermock.NewMockFS(t), nil, nil)
+	c := workflow(t, nil, fsadaptermock.NewMockFS(t), time.Now, time.Sleep)
 
 	in := runInput(map[string]any{"repo": "o/r"})
 	_, err := c.Run(t.Context(), in)
@@ -540,7 +579,7 @@ func TestRenderFanOutDefaultsTheTagPattern(t *testing.T) {
 func TestDeclareRefusesANamelessSecret(t *testing.T) {
 	t.Parallel()
 
-	c := workflowcontroller.New(nil, fsadaptermock.NewMockFS(t), nil, nil)
+	c := workflow(t, nil, fsadaptermock.NewMockFS(t), time.Now, time.Sleep)
 
 	spec := specMap(t)
 	spec["secrets"] = []any{map[string]any{"fromEnv": "X"}}
@@ -552,7 +591,7 @@ func TestDeclareRefusesANamelessSecret(t *testing.T) {
 func TestRunRefusesABrokenTarget(t *testing.T) {
 	t.Parallel()
 
-	c := workflowcontroller.New(nil, fsadaptermock.NewMockFS(t), nil, nil)
+	c := workflow(t, nil, fsadaptermock.NewMockFS(t), time.Now, time.Sleep)
 
 	in := runInput(specMap(t))
 	in.Targets = []citypes.Target{{Alias: "none", Args: []string{"x"}}}
@@ -565,7 +604,7 @@ func TestRunSurfacesAPollError(t *testing.T) {
 
 	api := githubadaptermock.NewMockAPI(t)
 	clock := &fakeClock{now: time.Unix(1000, 0)}
-	c := workflowcontroller.New(
+	c := workflow(t,
 		func(workflowcontroller.Spec) githubadapter.API { return api }, fsadaptermock.NewMockFS(t), clock.Now, clock.Sleep)
 
 	api.EXPECT().Dispatch(mock.Anything, "o/r", "ci-runner.yaml", "main", mock.Anything).Return(nil)
@@ -581,7 +620,7 @@ func TestRunSurfacesARunFetchError(t *testing.T) {
 
 	api := githubadaptermock.NewMockAPI(t)
 	clock := &fakeClock{now: time.Unix(1000, 0)}
-	c := workflowcontroller.New(
+	c := workflow(t,
 		func(workflowcontroller.Spec) githubadapter.API { return api }, fsadaptermock.NewMockFS(t), clock.Now, clock.Sleep)
 
 	var marker string
@@ -607,7 +646,7 @@ func TestRunPinsTheRevisionShasInTheScript(t *testing.T) {
 
 	api := githubadaptermock.NewMockAPI(t)
 	clock := &fakeClock{now: time.Unix(1000, 0)}
-	c := workflowcontroller.New(
+	c := workflow(t,
 		func(workflowcontroller.Spec) githubadapter.API { return api }, fsadaptermock.NewMockFS(t), clock.Now, clock.Sleep)
 
 	var marker string
@@ -637,7 +676,7 @@ func TestRunPinsTheRevisionShasInTheScript(t *testing.T) {
 func TestRunRefusesADirtyRevision(t *testing.T) {
 	t.Parallel()
 
-	c := workflowcontroller.New(nil, fsadaptermock.NewMockFS(t), nil, nil)
+	c := workflow(t, nil, fsadaptermock.NewMockFS(t), time.Now, time.Sleep)
 
 	in := runInput(specMap(t))
 	in.Revision = "abc123-dirty"
