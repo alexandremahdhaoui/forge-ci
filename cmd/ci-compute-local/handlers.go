@@ -19,7 +19,7 @@ import (
 // TestReport and Artifact, their schema lives in forge, and a copy here would
 // drift from what forge emits. That section travels as the JSON it already is.
 func NewHandlers() Handlers {
-	ctrl := computecontroller.New(execadapter.New(), forgeadapter.New(fsadapter.New()), nil)
+	ctrl := computecontroller.New(execadapter.New(), forgeadapter.New(fsadapter.New()), fsadapter.New(), nil)
 
 	return Handlers{
 		Declare: func(_ context.Context, in DeclareInput) (*DeclareOutput, error) {

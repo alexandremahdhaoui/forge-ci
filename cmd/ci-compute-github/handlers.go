@@ -25,7 +25,7 @@ func NewHandlers() Handlers {
 	// put and get are the same controller the local engine runs: the files
 	// live under the root either way, and the rendered workflow is what
 	// carries that directory between jobs.
-	files := computecontroller.New(nil, nil, nil)
+	files := computecontroller.New(nil, nil, nil, nil)
 
 	return Handlers{
 		Declare: func(_ context.Context, in DeclareInput) (*DeclareOutput, error) {

@@ -13,6 +13,7 @@ import (
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/execadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/forgeadapter"
+	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/fsadapter"
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 )
 
@@ -24,15 +25,18 @@ var ErrTarget = errors.New("a target needs a binary")
 type Controller struct {
 	runner    execadapter.Runner
 	harvester forgeadapter.Harvester
+	fs        fsadapter.FS
 	now       func() time.Time
 }
 
-func New(runner execadapter.Runner, harvester forgeadapter.Harvester, now func() time.Time) *Controller {
+func New(
+	runner execadapter.Runner, harvester forgeadapter.Harvester, fs fsadapter.FS, now func() time.Time,
+) *Controller {
 	if now == nil {
 		now = time.Now
 	}
 
-	return &Controller{runner: runner, harvester: harvester, now: now}
+	return &Controller{runner: runner, harvester: harvester, fs: fs, now: now}
 }
 
 func (c *Controller) Declare(spec map[string]any) (citypes.DeclareOutput, error) {
@@ -127,7 +131,7 @@ func (c *Controller) Run(ctx context.Context, in citypes.RunInput) (citypes.RunO
 				go func(dir string) {
 					defer wg.Done()
 
-					res, err := c.runner.RunEnv(ctx, dir, env, binary, args...)
+					res, err := c.runIn(ctx, dir, env, binary, args)
 
 					mu.Lock()
 					defer mu.Unlock()
@@ -189,6 +193,44 @@ func (c *Controller) Run(ctx context.Context, in citypes.RunInput) (citypes.RunO
 	out.Output = tail(log.String(), limit)
 
 	return out, nil
+}
+
+func (c *Controller) runIn(
+	ctx context.Context, dir string, env map[string]string, binary string, args []string,
+) (execadapter.Result, error) {
+	if err := c.giveACloneItsEnvrc(dir); err != nil {
+		return execadapter.Result{}, err
+	}
+
+	return c.runner.RunEnv(ctx, dir, env, binary, args...)
+}
+
+func (c *Controller) giveACloneItsEnvrc(dir string) error {
+	isDir, err := c.fs.IsDir(dir)
+	if err != nil {
+		return fmt.Errorf("inspecting %s before its target runs: %w", dir, err)
+	}
+
+	if !isDir {
+		return nil
+	}
+
+	envrc := filepath.Join(dir, ".envrc")
+
+	exists, err := c.fs.Exists(envrc)
+	if err != nil {
+		return fmt.Errorf("looking for the .envrc in %s: %w", dir, err)
+	}
+
+	if exists {
+		return nil
+	}
+
+	if err := c.fs.WriteFile(envrc, nil); err != nil {
+		return fmt.Errorf("writing an empty .envrc in %s: %w", dir, err)
+	}
+
+	return nil
 }
 
 // CommandFor answers the binary and the expanded arguments one target

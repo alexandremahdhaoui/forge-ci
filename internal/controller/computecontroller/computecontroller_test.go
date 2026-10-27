@@ -3,14 +3,17 @@ package computecontroller_test
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/execadapter"
+	"github.com/alexandremahdhaoui/forge-ci/internal/adapter/fsadapter"
 	"github.com/alexandremahdhaoui/forge-ci/internal/controller/computecontroller"
 	"github.com/alexandremahdhaoui/forge-ci/internal/mocks/execadaptermock"
+	"github.com/alexandremahdhaoui/forge-ci/internal/mocks/fsadaptermock"
 	"github.com/alexandremahdhaoui/forge-ci/pkg/citypes"
 	"github.com/alexandremahdhaoui/forge/pkg/forge"
 	"github.com/stretchr/testify/mock"
@@ -35,13 +38,108 @@ func (s *stubHarvester) Harvest(dir string, since time.Time) (*citypes.ForgeResu
 
 func passing() execadapter.Result { return execadapter.Result{Stdout: "ok\n"} }
 
+func everyCheckoutHasAnEnvrc(t *testing.T) *fsadaptermock.MockFS {
+	fs := fsadaptermock.NewMockFS(t)
+	fs.EXPECT().IsDir(mock.Anything).Return(true, nil).Maybe()
+	fs.EXPECT().Exists(mock.Anything).Return(true, nil).Maybe()
+
+	return fs
+}
+
+func TestACloneWithNoEnvrcGetsAnEmptyOneBeforeItsTargetRuns(t *testing.T) {
+	root := t.TempDir()
+	clone := filepath.Join(root, "member")
+	require.NoError(t, os.Mkdir(clone, 0o750))
+
+	runner := execadaptermock.NewMockRunner(t)
+	runner.EXPECT().RunEnv(mock.Anything, clone, mock.Anything, "forge", "config", "validate").
+		Run(func(context.Context, string, map[string]string, string, ...string) {
+			content, err := os.ReadFile(filepath.Join(clone, ".envrc"))
+			require.NoError(t, err, "the .envrc exists when the target starts")
+			require.Empty(t, content)
+		}).
+		Return(passing(), nil).Once()
+
+	out, err := computecontroller.New(runner, nil, fsadapter.New(), nil).Run(context.Background(), citypes.RunInput{
+		Root:    root,
+		Targets: []citypes.Target{{Alias: "validate", Binary: "forge", Args: []string{"config", "validate"}, In: []string{"member"}}},
+	})
+	require.NoError(t, err)
+	require.Equal(t, citypes.StatusPassed, out.Status)
+}
+
+func TestAnExistingEnvrcIsNeverOverwritten(t *testing.T) {
+	root := t.TempDir()
+	envrc := filepath.Join(root, ".envrc")
+	require.NoError(t, os.WriteFile(envrc, []byte("export FORGE_CI_EXAMPLE=1\n"), 0o600))
+
+	runner := execadaptermock.NewMockRunner(t)
+	runner.EXPECT().RunEnv(mock.Anything, root, mock.Anything, "forge", "test-all").Return(passing(), nil).Once()
+
+	_, err := computecontroller.New(runner, nil, fsadapter.New(), nil).Run(context.Background(), citypes.RunInput{
+		Root:    root,
+		Targets: []citypes.Target{{Alias: "build", Binary: "forge", Args: []string{"test-all"}}},
+	})
+	require.NoError(t, err)
+
+	content, err := os.ReadFile(envrc)
+	require.NoError(t, err)
+	require.Equal(t, "export FORGE_CI_EXAMPLE=1\n", string(content))
+}
+
+func TestAMissingCheckoutGetsNoEnvrcAndTheRunnerReportsIt(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "absent")
+
+	runner := execadaptermock.NewMockRunner(t)
+	runner.EXPECT().RunEnv(mock.Anything, missing, mock.Anything, "forge", "test-all").
+		Return(execadapter.Result{}, errBoom).Once()
+
+	_, err := computecontroller.New(runner, nil, fsadapter.New(), nil).Run(context.Background(), citypes.RunInput{
+		Root:    missing,
+		Targets: []citypes.Target{{Alias: "build", Binary: "forge", Args: []string{"test-all"}}},
+	})
+	require.ErrorIs(t, err, errBoom)
+	require.NoDirExists(t, missing, "the engine never creates a checkout to hold an .envrc")
+}
+
+func TestAFailureGivingACloneItsEnvrcIsAnErrorNamingTheDir(t *testing.T) {
+	cases := map[string]func(fs *fsadaptermock.MockFS){
+		"inspecting the dir": func(fs *fsadaptermock.MockFS) {
+			fs.EXPECT().IsDir("/work").Return(false, errBoom).Once()
+		},
+		"looking for the envrc": func(fs *fsadaptermock.MockFS) {
+			fs.EXPECT().IsDir("/work").Return(true, nil).Once()
+			fs.EXPECT().Exists("/work/.envrc").Return(false, errBoom).Once()
+		},
+		"writing the envrc": func(fs *fsadaptermock.MockFS) {
+			fs.EXPECT().IsDir("/work").Return(true, nil).Once()
+			fs.EXPECT().Exists("/work/.envrc").Return(false, nil).Once()
+			fs.EXPECT().WriteFile("/work/.envrc", []byte(nil)).Return(errBoom).Once()
+		},
+	}
+
+	for name, arrange := range cases {
+		t.Run(name, func(t *testing.T) {
+			fs := fsadaptermock.NewMockFS(t)
+			arrange(fs)
+
+			_, err := computecontroller.New(execadaptermock.NewMockRunner(t), nil, fs, nil).Run(context.Background(), citypes.RunInput{
+				Root:    "/work",
+				Targets: []citypes.Target{{Alias: "build", Binary: "forge", Args: []string{"test-all"}}},
+			})
+			require.ErrorIs(t, err, errBoom)
+			require.Contains(t, err.Error(), "/work")
+		})
+	}
+}
+
 func TestForgeTargetRunsInTheNamedRepo(t *testing.T) {
 	runner := execadaptermock.NewMockRunner(t)
 	runner.EXPECT().
 		RunEnv(mock.Anything, "/work/golden-rust", mock.Anything, "forge", "test-all").
 		Return(passing(), nil).Once()
 
-	out, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
+	out, err := computecontroller.New(runner, nil, everyCheckoutHasAnEnvrc(t), nil).Run(context.Background(), citypes.RunInput{
 		Root:    "/work",
 		Targets: []citypes.Target{{Alias: "build", Binary: "forge", Args: []string{"test-all"}, In: []string{"golden-rust"}}},
 	})
@@ -73,7 +171,7 @@ func TestSyncConvergesTheWorkspaceBeforeAnyTarget(t *testing.T) {
 	runner.EXPECT().RunEnv(mock.Anything, "/work/golden-rust", mock.Anything, "forge", "test-all").
 		RunAndReturn(record("target")).Once()
 
-	out, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
+	out, err := computecontroller.New(runner, nil, everyCheckoutHasAnEnvrc(t), nil).Run(context.Background(), citypes.RunInput{
 		Root:    "/work",
 		Sync:    true,
 		Targets: []citypes.Target{{Alias: "build", Binary: "forge", Args: []string{"test-all"}, In: []string{"golden-rust"}}},
@@ -91,7 +189,7 @@ func TestAFailingConvergenceFailsTheRunAndStopsIt(t *testing.T) {
 	runner.EXPECT().RunEnv(mock.Anything, "/work", mock.Anything, "forge-factory", "sync").
 		Return(execadapter.Result{ExitCode: 1, Stderr: "no engine is registered\n"}, nil).Once()
 
-	out, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
+	out, err := computecontroller.New(runner, nil, everyCheckoutHasAnEnvrc(t), nil).Run(context.Background(), citypes.RunInput{
 		Root:    "/work",
 		Sync:    true,
 		Targets: []citypes.Target{{Alias: "build", Binary: "forge", Args: []string{"test-all"}, In: []string{"golden-rust"}}},
@@ -108,7 +206,7 @@ func TestNoSyncMeansNoConvergence(t *testing.T) {
 	runner.EXPECT().RunEnv(mock.Anything, "/work/golden-rust", mock.Anything, "forge", "test-all").
 		Return(passing(), nil).Once()
 
-	out, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
+	out, err := computecontroller.New(runner, nil, everyCheckoutHasAnEnvrc(t), nil).Run(context.Background(), citypes.RunInput{
 		Root:    "/work",
 		Targets: []citypes.Target{{Alias: "build", Binary: "forge", Args: []string{"test-all"}, In: []string{"golden-rust"}}},
 	})
@@ -121,7 +219,7 @@ func TestNoRepoMeansTheRoot(t *testing.T) {
 	runner := execadaptermock.NewMockRunner(t)
 	runner.EXPECT().RunEnv(mock.Anything, "/work", mock.Anything, "forge-ci", "apply").Return(passing(), nil).Once()
 
-	out, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
+	out, err := computecontroller.New(runner, nil, everyCheckoutHasAnEnvrc(t), nil).Run(context.Background(), citypes.RunInput{
 		Root:    "/work",
 		Targets: []citypes.Target{{Alias: "self", Binary: "forge-ci", Args: []string{"apply"}}},
 	})
@@ -134,7 +232,7 @@ func TestACheckoutPathWins(t *testing.T) {
 	runner.EXPECT().RunEnv(mock.Anything, "/checkouts/abc/golden-rust", mock.Anything, "forge", "test-all").
 		Return(passing(), nil).Once()
 
-	_, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
+	_, err := computecontroller.New(runner, nil, everyCheckoutHasAnEnvrc(t), nil).Run(context.Background(), citypes.RunInput{
 		Root:    "/work",
 		Repos:   []citypes.RepoCheckout{{Name: "golden-rust", Path: "/checkouts/abc/golden-rust"}},
 		Targets: []citypes.Target{{Alias: "build", Binary: "forge", Args: []string{"test-all"}, In: []string{"golden-rust"}}},
@@ -147,7 +245,7 @@ func TestAFailingTestIsNotAnError(t *testing.T) {
 	runner.EXPECT().RunEnv(mock.Anything, mock.Anything, mock.Anything, "forge", "test-all").
 		Return(execadapter.Result{ExitCode: 1, Stderr: "two tests failed\n"}, nil).Once()
 
-	out, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
+	out, err := computecontroller.New(runner, nil, everyCheckoutHasAnEnvrc(t), nil).Run(context.Background(), citypes.RunInput{
 		Root:    "/work",
 		Targets: []citypes.Target{{Alias: "build", Binary: "forge", Args: []string{"test-all"}}},
 	})
@@ -162,7 +260,7 @@ func TestABrokenRunnerIsAnError(t *testing.T) {
 	runner.EXPECT().RunEnv(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 		Return(execadapter.Result{}, errBoom).Once()
 
-	_, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
+	_, err := computecontroller.New(runner, nil, everyCheckoutHasAnEnvrc(t), nil).Run(context.Background(), citypes.RunInput{
 		Root:    "/work",
 		Targets: []citypes.Target{{Alias: "build", Binary: "forge", Args: []string{"test-all"}}},
 	})
@@ -175,7 +273,7 @@ func TestAFailedTargetStopsTheRest(t *testing.T) {
 	runner.EXPECT().RunEnv(mock.Anything, mock.Anything, mock.Anything, "forge", "one").
 		Return(execadapter.Result{ExitCode: 2}, nil).Once()
 
-	out, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
+	out, err := computecontroller.New(runner, nil, everyCheckoutHasAnEnvrc(t), nil).Run(context.Background(), citypes.RunInput{
 		Root: "/work",
 		Targets: []citypes.Target{
 			{Alias: "first", Binary: "forge", Args: []string{"one"}},
@@ -192,7 +290,7 @@ func TestParamsAreTemplatedIntoTheTarget(t *testing.T) {
 		RunEnv(mock.Anything, "/work", mock.Anything, "forge", "run", "deploy", "--region", "eu-west-1", "--cell", "a").
 		Return(passing(), nil).Once()
 
-	_, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
+	_, err := computecontroller.New(runner, nil, everyCheckoutHasAnEnvrc(t), nil).Run(context.Background(), citypes.RunInput{
 		Root:    "/work",
 		Params:  map[string]string{"region": "eu-west-1", "cell": "a"},
 		Targets: []citypes.Target{{Alias: "deploy", Binary: "forge", Args: []string{"run", "deploy", "--region", "{{.Params.region}}", "--cell", "{{.Params.cell}}"}}},
@@ -203,7 +301,7 @@ func TestParamsAreTemplatedIntoTheTarget(t *testing.T) {
 func TestAMissingParamIsAnError(t *testing.T) {
 	runner := execadaptermock.NewMockRunner(t)
 
-	_, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
+	_, err := computecontroller.New(runner, nil, everyCheckoutHasAnEnvrc(t), nil).Run(context.Background(), citypes.RunInput{
 		Root:    "/work",
 		Targets: []citypes.Target{{Alias: "deploy", Binary: "forge", Args: []string{"run", "deploy", "--cell", "{{.Params.cell}}"}}},
 	})
@@ -214,7 +312,7 @@ func TestAMissingParamIsAnError(t *testing.T) {
 func TestABrokenTemplateIsAnError(t *testing.T) {
 	runner := execadaptermock.NewMockRunner(t)
 
-	_, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
+	_, err := computecontroller.New(runner, nil, everyCheckoutHasAnEnvrc(t), nil).Run(context.Background(), citypes.RunInput{
 		Root:    "/work",
 		Targets: []citypes.Target{{Alias: "deploy", Binary: "forge", Args: []string{"run", "{{.Params."}}},
 	})
@@ -229,7 +327,7 @@ func TestATargetNeedsABinary(t *testing.T) {
 		{Alias: "neither"},
 		{Alias: "blank", Binary: "  ", Args: []string{"a"}},
 	} {
-		_, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
+		_, err := computecontroller.New(runner, nil, everyCheckoutHasAnEnvrc(t), nil).Run(context.Background(), citypes.RunInput{
 			Root: "/work", Targets: []citypes.Target{target},
 		})
 		require.ErrorIs(t, err, computecontroller.ErrTarget)
@@ -237,7 +335,7 @@ func TestATargetNeedsABinary(t *testing.T) {
 }
 
 func TestNoTargetsIsAnError(t *testing.T) {
-	_, err := computecontroller.New(execadaptermock.NewMockRunner(t), nil, nil).
+	_, err := computecontroller.New(execadaptermock.NewMockRunner(t), nil, everyCheckoutHasAnEnvrc(t), nil).
 		Run(context.Background(), citypes.RunInput{Root: "/work"})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "no targets given")
@@ -253,7 +351,7 @@ func TestForgeResultsAreHarvestedAndMerged(t *testing.T) {
 		TestReports: []forge.TestReport{{Stage: "unit", Status: "passed"}},
 	}}
 
-	out, err := computecontroller.New(runner, h, nil).Run(context.Background(), citypes.RunInput{
+	out, err := computecontroller.New(runner, h, everyCheckoutHasAnEnvrc(t), nil).Run(context.Background(), citypes.RunInput{
 		Root:    "/work",
 		Targets: []citypes.Target{{Alias: "build", Binary: "forge", Args: []string{"test-all"}, In: []string{"a", "b"}}},
 	})
@@ -273,7 +371,7 @@ func TestTheRevisionReachesTheTargetEnvironment(t *testing.T) {
 			map[string]string{"FORGE_CI_REVISION": "abc123def456"}, "forge", "test-all").
 		Return(passing(), nil).Once()
 
-	_, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
+	_, err := computecontroller.New(runner, nil, everyCheckoutHasAnEnvrc(t), nil).Run(context.Background(), citypes.RunInput{
 		Root:     "/work",
 		Revision: "abc123def456",
 		Targets:  []citypes.Target{{Alias: "build", Binary: "forge", Args: []string{"test-all"}}},
@@ -296,7 +394,7 @@ func TestHarvestedArtifactLocationsAreRebasedOntoTheRoot(t *testing.T) {
 		},
 	}}
 
-	out, err := computecontroller.New(runner, h, nil).Run(context.Background(), citypes.RunInput{
+	out, err := computecontroller.New(runner, h, everyCheckoutHasAnEnvrc(t), nil).Run(context.Background(), citypes.RunInput{
 		Root:    "/work",
 		Targets: []citypes.Target{{Alias: "build", Binary: "forge", Args: []string{"test-all"}, In: []string{"member"}}},
 	})
@@ -310,7 +408,7 @@ func TestNothingToHarvestIsFine(t *testing.T) {
 	runner := execadaptermock.NewMockRunner(t)
 	runner.EXPECT().RunEnv(mock.Anything, mock.Anything, mock.Anything, "forge", "test-all").Return(passing(), nil).Once()
 
-	out, err := computecontroller.New(runner, &stubHarvester{}, nil).Run(context.Background(), citypes.RunInput{
+	out, err := computecontroller.New(runner, &stubHarvester{}, everyCheckoutHasAnEnvrc(t), nil).Run(context.Background(), citypes.RunInput{
 		Root: "/work", Targets: []citypes.Target{{Alias: "build", Binary: "forge", Args: []string{"test-all"}}},
 	})
 	require.NoError(t, err)
@@ -321,7 +419,7 @@ func TestAHarvestFailureIsAnError(t *testing.T) {
 	runner := execadaptermock.NewMockRunner(t)
 	runner.EXPECT().RunEnv(mock.Anything, mock.Anything, mock.Anything, "forge", "test-all").Return(passing(), nil).Once()
 
-	_, err := computecontroller.New(runner, &stubHarvester{err: errBoom}, nil).
+	_, err := computecontroller.New(runner, &stubHarvester{err: errBoom}, everyCheckoutHasAnEnvrc(t), nil).
 		Run(context.Background(), citypes.RunInput{
 			Root: "/work", Targets: []citypes.Target{{Alias: "build", Binary: "forge", Args: []string{"test-all"}}},
 		})
@@ -337,7 +435,7 @@ func TestEveryTargetIsHarvested(t *testing.T) {
 
 	h := &stubHarvester{result: &citypes.ForgeResult{Artifacts: []forge.Artifact{{Name: "x"}}}}
 
-	out, err := computecontroller.New(runner, h, nil).Run(context.Background(), citypes.RunInput{
+	out, err := computecontroller.New(runner, h, everyCheckoutHasAnEnvrc(t), nil).Run(context.Background(), citypes.RunInput{
 		Root: "/work", Targets: []citypes.Target{{Alias: "self", Binary: "forge-ci", Args: []string{"apply"}}},
 	})
 	require.NoError(t, err)
@@ -346,7 +444,7 @@ func TestEveryTargetIsHarvested(t *testing.T) {
 }
 
 func TestComputeDeclaresNoResources(t *testing.T) {
-	out, err := computecontroller.New(nil, nil, nil).Declare(nil)
+	out, err := computecontroller.New(nil, nil, nil, nil).Declare(nil)
 	require.NoError(t, err)
 	require.Empty(t, out.Resources)
 }
@@ -359,7 +457,7 @@ func TestTheHarvesterIsToldWhenTheRunStarted(t *testing.T) {
 
 	h := &stubHarvester{result: &citypes.ForgeResult{}}
 
-	_, err := computecontroller.New(runner, h, func() time.Time { return started }).
+	_, err := computecontroller.New(runner, h, everyCheckoutHasAnEnvrc(t), func() time.Time { return started }).
 		Run(context.Background(), citypes.RunInput{
 			Root: "/work", Targets: []citypes.Target{{Alias: "build", Binary: "forge", Args: []string{"test-all"}}},
 		})
@@ -382,7 +480,7 @@ func TestWithNoNeedsTheDirsRunOneAtATimeInOrder(t *testing.T) {
 			return passing(), nil
 		}).Times(3)
 
-	out, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
+	out, err := computecontroller.New(runner, nil, everyCheckoutHasAnEnvrc(t), nil).Run(context.Background(), citypes.RunInput{
 		Root: "/work",
 		Repos: []citypes.RepoCheckout{
 			{Name: "c"}, {Name: "a"}, {Name: "b"},
@@ -425,7 +523,7 @@ func TestAWaveRunsItsMembersAtOnce(t *testing.T) {
 	done := make(chan citypes.RunOutput, 1)
 
 	go func() {
-		out, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
+		out, err := computecontroller.New(runner, nil, everyCheckoutHasAnEnvrc(t), nil).Run(context.Background(), citypes.RunInput{
 			Root: "/work",
 			Repos: []citypes.RepoCheckout{
 				{Name: "one"},
@@ -475,7 +573,7 @@ func TestAFailedWaveFinishesAndStopsTheNext(t *testing.T) {
 	runner.EXPECT().RunEnv(mock.Anything, "/work/two", mock.Anything, "forge", "test-all").
 		Return(execadapter.Result{ExitCode: 1, Stdout: "two broke\n"}, nil).Once()
 
-	out, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
+	out, err := computecontroller.New(runner, nil, everyCheckoutHasAnEnvrc(t), nil).Run(context.Background(), citypes.RunInput{
 		Root: "/work",
 		Repos: []citypes.RepoCheckout{
 			{Name: "one"},
@@ -495,7 +593,7 @@ func TestAFailedWaveFinishesAndStopsTheNext(t *testing.T) {
 // A cycle among the repos a target names is machinery that cannot run, not a
 // build that failed.
 func TestACycleIsAnError(t *testing.T) {
-	out, err := computecontroller.New(execadaptermock.NewMockRunner(t), nil, nil).
+	out, err := computecontroller.New(execadaptermock.NewMockRunner(t), nil, everyCheckoutHasAnEnvrc(t), nil).
 		Run(context.Background(), citypes.RunInput{
 			Root: "/work",
 			Repos: []citypes.RepoCheckout{
@@ -517,7 +615,7 @@ func TestAnArgumentHoldingASpaceStaysOneArgument(t *testing.T) {
 		RunEnv(mock.Anything, "/work", mock.Anything, "sh", "-c", "echo one two").
 		Return(passing(), nil).Once()
 
-	_, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
+	_, err := computecontroller.New(runner, nil, everyCheckoutHasAnEnvrc(t), nil).Run(context.Background(), citypes.RunInput{
 		Root:    "/work",
 		Targets: []citypes.Target{{Alias: "say", Binary: "sh", Args: []string{"-c", "echo one two"}}},
 	})
@@ -544,7 +642,7 @@ func TestALongOutputIsTruncatedFromTheFrontByTheSpec(t *testing.T) {
 				RunEnv(mock.Anything, "/work/repo", mock.Anything, "forge", "test-all").
 				Return(execadapter.Result{Stdout: long, ExitCode: 1}, nil)
 
-			out, err := computecontroller.New(runner, nil, nil).Run(context.Background(), citypes.RunInput{
+			out, err := computecontroller.New(runner, nil, everyCheckoutHasAnEnvrc(t), nil).Run(context.Background(), citypes.RunInput{
 				Revision: "abc", Root: "/work", Spec: tc.spec,
 				Targets: []citypes.Target{{Alias: "t", Binary: "forge", Args: []string{"test-all"}, In: []string{"repo"}}},
 			})
