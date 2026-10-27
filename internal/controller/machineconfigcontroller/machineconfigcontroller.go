@@ -306,8 +306,15 @@ func (c *Controller) refuseAnInstallerImageNotPinnedByDigest(
 	defer cancel()
 
 	resolved, err := c.registry.Digest(bounded, tagged)
+	if errors.Is(err, context.DeadlineExceeded) && ctx.Err() != nil {
+		return fmt.Errorf(
+			"resolving the installer image %s of cluster %s: the caller's deadline expired before the registry answered: %w",
+			reference, clusterName, err)
+	}
+
 	if errors.Is(err, context.DeadlineExceeded) {
-		return fmt.Errorf("resolving the installer image %s of cluster %s: the registry did not answer within %s: %w",
+		return fmt.Errorf(
+			"resolving the installer image %s of cluster %s: the registry did not answer within the %s ceiling: %w",
 			reference, clusterName, installerResolveCeiling, err)
 	}
 

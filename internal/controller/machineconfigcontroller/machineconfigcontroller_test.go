@@ -667,7 +667,7 @@ func TestAnInstallerRegistryThatCannotBeReachedIsRefusedNamingTheReference(t *te
 	assert.Contains(t, err.Error(), "resolving the installer image "+reference+" of cluster t0: ")
 }
 
-func TestAnInstallerRegistryThatAcceptsAndNeverAnswersIsRefusedNamingTheReferenceAndTheCeiling(t *testing.T) {
+func TestAnInstallerRegistryThatOutlivesTheCallersDeadlineIsRefusedNamingThatDeadlineAndNeverTheCeiling(t *testing.T) {
 	exported(t)
 
 	silent := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
@@ -685,10 +685,11 @@ func TestAnInstallerRegistryThatAcceptsAndNeverAnswersIsRefusedNamingTheReferenc
 	).Declare(shortened, citypes.DeclareInput{Root: "/w", Spec: fullSpec()})
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.Contains(t, err.Error(),
-		"resolving the installer image "+reference+" of cluster t0: the registry did not answer within 30s: ")
+		"resolving the installer image "+reference+" of cluster t0: the caller's deadline expired before the registry answered: ")
+	assert.NotContains(t, err.Error(), "ceiling")
 }
 
-func TestTheRegistryIsAskedWithADeadlineThirtySecondsAway(t *testing.T) {
+func TestARegistryThatOutlivesTheThirtySecondCeilingIsRefusedNamingTheCeiling(t *testing.T) {
 	exported(t)
 
 	var deadline time.Time
@@ -698,17 +699,18 @@ func TestTheRegistryIsAskedWithADeadlineThirtySecondsAway(t *testing.T) {
 		RunAndReturn(func(ctx context.Context, _ string) (string, error) {
 			deadline, _ = ctx.Deadline()
 
-			return aDigestNoRegistryServes, nil
+			return "", fmt.Errorf("resolving registry.example.invalid/metal-installer:v1.14.0: %w", context.DeadlineExceeded)
 		}).Once()
 
 	asked := time.Now()
+	reference := "registry.example.invalid/metal-installer:v1.14.0@" + aDigestNoRegistryServes
 
 	_, err := machineconfigcontroller.New(
-		filesOnDisk(t),
-		aMintingRendererPinning(t, "registry.example.invalid/metal-installer:v1.14.0@"+aDigestNoRegistryServes),
-		aNodeInMaintenance(t), registry,
+		filesOnDisk(t), aMintingRendererPinning(t, reference), aNodeInMaintenance(t), registry,
 	).Declare(t.Context(), citypes.DeclareInput{Root: "/w", Spec: fullSpec()})
-	require.NoError(t, err)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Contains(t, err.Error(),
+		"resolving the installer image "+reference+" of cluster t0: the registry did not answer within the 30s ceiling: ")
 	require.False(t, deadline.IsZero(), "the registry call carries a deadline")
 	assert.WithinDuration(t, asked.Add(30*time.Second), deadline, 5*time.Second)
 }
